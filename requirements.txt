@@ -1,5 +1,5 @@
-flask==3.0.3
-requests==2.32.3
-pandas==2.2.2
-numpy==1.26.4
-gunicorn==22.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+requests>=2.31.0
