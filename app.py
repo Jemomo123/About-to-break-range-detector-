@@ -9,7 +9,51 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Compression Engine is active and scanning.", 200
+    # Large, bold, centered, mobile-responsive text
+    return """
+    <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {
+                    background-color: #0d1117;
+                    color: #58a6ff;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    margin: 0;
+                    text-align: center;
+                }
+                .status-box {
+                    border: 2px solid #30363d;
+                    padding: 30px;
+                    border-radius: 12px;
+                    background-color: #161b22;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                }
+                h1 {
+                    font-size: 28px;
+                    margin: 0 0 10px 0;
+                    color: #2ea44f;
+                }
+                p {
+                    font-size: 18px;
+                    margin: 0;
+                    color: #c9d1d9;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="status-box">
+                <h1>⚡ ENGINE ONLINE</h1>
+                <p>Compression Pressure Scanner is actively monitoring MEXC...</p>
+            </div>
+        </body>
+    </html>
+    """, 200
+
 
 def run_web_server():
     # Binds to the port Render expects
