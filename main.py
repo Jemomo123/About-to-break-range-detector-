@@ -1,128 +1,173 @@
 import time
 import requests
 import pandas as pd
+import numpy as np
 from flask import Flask
 from threading import Thread
 
-# Create a tiny web server so Render knows the service is alive and healthy
-app = app = Flask(__name__)
-
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    Return "Compression Engine is active and scanning.", 200
+    return "Compression Engine is active and scanning.", 200
 
-Def run_web_server():
-    App.run(host='0.0.0.0', port=10000)
+def run_web_server():
+    # Binds to the port Render expects
+    app.run(host='0.0.0.0', port=10000)
 
-# --- MEXC DATA FETCHING ---
-DEF fetch_mexc_data(symbol="BTCUSDT", interval="5m"):
-    """Fetches recent OHLCV data from MEXC public API."""
-    Try:
-        # MEXC API endpoint for Spot/Futures klines
-        Url = f"https://contract.mexc.com/api/v1/contract/kline/{symbol}"
-        Params = {"interval": interval, "limit": 60}
-        Response = requests.get(url, params=params, timeout=10).json()
+# --- PRODUCTION MEXC DATA FETCHER ---
+def fetch_mexc_data(symbol="BTC_USDT", interval="Min5"):
+    """
+    Fetches real-time OHLCV, Open Interest, and Funding data from MEXC Futures API.
+    Valid intervals for MEXC Futures include: Min3, Min5, Min15, Min60, Hour4
+    """
+    try:
+        # 1. Fetch Kline/Candlestick records
+        url = f"https://contract.mexc.com/api/v1/contract/kline/{symbol}"
+        params = {"interval": interval, "limit": 100}
+        response = requests.get(url, params=params, timeout=10).json()
         
-        If not response.get("success", False):
-            Return None
+        if not response.get("success", False) or not response.get("data"):
+            return None
             
-        Data = response["data"]
+        data = response["data"]
         
-        # Format into a clean DataFrame
-        Df = pd.DataFrame({
-            'high': data['high'],
-            'low': data['low'],
-            'close': data['close'],
-            'volume': data['vol'],
-            'open_interest': data['openInterest']
+        # Structure the individual timeline metrics arrays
+        df = pd.DataFrame({
+            'time': data.get('time', []),
+            'high': data.get('high', []),
+            'low': data.get('low', []),
+            'close': data.get('close', []),
+            'volume': data.get('vol', []),
+            'open_interest': data.get('openInterest', [])
         })
         
-        # Fetch funding rate separately
-        Fund_url = f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}"
-        Fund_res = requests.get(fund_url, timeout=10).json()
-        Funding_rate = fund_res["data"]["fundingRate"] if fund_res.get("success") else 0.0
+        if df.empty:
+            return None
+
+        # Convert object metrics explicitly to floating numbers
+        numeric_cols = ['high', 'low', 'close', 'volume', 'open_interest']
+        df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric)
+
+        # 2. Fetch Funding Rate separately
+        fund_url = f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}"
+        fund_res = requests.get(fund_url, timeout=10).json()
         
-        Df['funding_rate'] = funding_rate
-        Return df
-    Except Exception as e:
-        Print(f"Error fetching data: {e}")
-        Return None
+        funding_rate = 0.0
+        if fund_res.get("success") and "data" in fund_res:
+            # Convert decimal representation to a clean percent baseline (e.g., 0.0004 -> 0.04)
+            funding_rate = float(fund_res["data"].get("fundingRate", 0.0)) * 100
+        
+        df['funding_rate'] = funding_rate
+        return df
+    except Exception as e:
+        print(f"Error communicating with MEXC API: {e}")
+        return None
 
-# --- ENGINE LOGIC ---
-DEF calculate_pressure_score(df, compression_age=10):
-    If len(df) < 35:
-        Return None
+# --- PRESSURE SCORE LOGIC ENGINE ---
+def calculate_pressure_score(df: pd.DataFrame, compression_age: int) -> dict:
+    if len(df) < 40:
+        return None
 
-    # 1. ATR Contraction
-    High_low = df['high'] - df['low']
-    High_close_prev = (df['high'] - df['close'].shift(1)).abs()
-    Low_close_prev = (df['low'] - df['close'].shift(1)).abs()
-    Tr = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
-    Df['atr_14'] = tr.rolling(window=14).mean()
+    # 1. ATR Contraction Evaluation
+    high_low = df['high'] - df['low']
+    high_close_prev = (df['high'] - df['close'].shift(1)).abs()
+    low_close_prev = (df['low'] - df['close'].shift(1)).abs()
+    tr = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
     
-    Atr_baseline = df['atr_14'].shift(1).rolling(window=20).mean().iloc[-1]
-    Current_atr = df['atr_14'].iloc[-1]
-    Atr_contraction_pct = ((current_atr - atr_baseline) / atr_baseline) * 100
+    df['atr_14'] = tr.rolling(window=14).mean()
+    
+    # Calculate baseline using the 20 candles prior to the current candle
+    atr_baseline = df['atr_14'].shift(1).iloc[-20:].mean()
+    current_atr = df['atr_14'].iloc[-1]
+    atr_contraction_pct = ((current_atr - atr_baseline) / atr_baseline) * 100
 
-    # 2. Volume Contraction
-    Current_vol_avg = df['volume'].iloc[-5:].mean()
-    Vol_baseline = df['volume'].iloc[-25:-5].mean()
-    Vol_contraction_pct = ((current_vol_avg - vol_baseline) / vol_baseline) * 100
+    # 2. Volume Contraction Evaluation
+    current_vol_avg = df['volume'].iloc[-5:].mean()
+    # Exclude the last 5 candles to get the true baseline of the 20 preceding candles
+    vol_baseline = df['volume'].iloc[-25:-5].mean()
+    vol_contraction_pct = ((current_vol_avg - vol_baseline) / vol_baseline) * 100
 
-    # 3. Open Interest Change
-    Oi_window = min(compression_age, len(df))
-    Historical_oi = df['open_interest'].iloc[-oi_window]
-    Current_oi = df['open_interest'].iloc[-1]
-    Oi_change_pct = ((current_oi - historical_oi) / historical_oi) * 100 if historical_oi > 0 else 0
+    # 3. Open Interest Change inside the Range Structure
+    oi_window = min(compression_age, len(df))
+    historical_oi = df['open_interest'].iloc[-oi_window]
+    current_oi = df['open_interest'].iloc[-1]
+    oi_change_pct = ((current_oi - historical_oi) / historical_oi) * 100 if historical_oi > 0 else 0.0
 
-    # 4. Funding Condition
-    Current_funding = df['funding_rate'].iloc[-1]
+    # 4. Crowded Funding evaluation (+/- 0.03%)
+    current_funding = df['funding_rate'].iloc[-1]
 
-    # Scoring Matrix
-    Score = 0
-    If current_atr < atr_baseline: score += 1
-    If compression_age >= 8: score += 1
-    If current_vol_avg < vol_baseline: score += 1
-    If oi_change_pct >= 3.0: score += 1
-    If current_funding > 0.03 or current_funding < -0.03: score += 1
+    # --- SCORE CALCULATION MATRIX ---
+    score = 0
+    if current_atr < atr_baseline: 
+        score += 1
+    if compression_age >= 8: 
+        score += 1
+    if current_vol_avg < vol_baseline: 
+        score += 1
+    if oi_change_pct >= 3.0: 
+        score += 1
+    if current_funding > 0.03 or current_funding < -0.03: 
+        score += 1
 
-    Status = "NORMAL"
-    If score >= 5: status = "LOADED"
-    Elif score == 4: status = "HIGH ALERT"
-    Elif score == 3: status = "WATCH"
+    # --- STATE CLASSIFICATION ---
+    if score >= 5:
+        status = "LOADED"
+    elif score == 4:
+        status = "HIGH ALERT"
+    elif score == 3:
+        status = "WATCH"
+    else:
+        status = "NORMAL"
 
-    Return {
-        "age": compression_age, "atr": atr_contraction_pct, "vol": vol_contraction_pct,
-        "oi": oi_change_pct, "funding": current_funding, "score": score, "status": status
+    return {
+        "age": compression_age,
+        "atr_pct": atr_contraction_pct,
+        "vol_pct": vol_contraction_pct,
+        "oi_pct": oi_change_pct,
+        "funding": current_funding,
+        "score": score,
+        "status": status
     }
 
-# --- SCANNER ENGINE LOOP ---
-DEF scanner_loop():
-    Print("Starting Compression Pressure Loop...")
-    While True:
-        # Loop over your focus configurations
-        For symbol in ["BTC_USDT", "ETH_USDT"]: 
-            Df = fetch_mexc_data(symbol, interval="5m")
-            If df is not None:
-                Metrics = calculate_pressure_score(df, compression_age=12) # Example static age
-                
-                If metrics:
-                    Print(f"\n=== {symbol} === ")
-                    Print(f"Age: {metrics['age']} candles | ATR: {metrics['atr']:.1f}% | Vol: {metrics['vol']:.1f}%")
-                    Print(f"OI: {metrics['oi']:+.1f}% | Funding: {metrics['funding']:+.4f}%")
-                    Print(f"Score: {metrics['score']}/5 -> STATUS: {metrics['status']}")
-                    
-                    If metrics['score'] >= 4:
-                        Print("🚨 ALERT: COMPRESSION LOADED. Monitor for Elephant Candle / Expansion.")
-        
-        Time.sleep(60) # Scan every 60 seconds
+# --- ACTIVE SCHEDULER SCAN LOOP ---
+def scanner_loop():
+    print("Scanner Engine Activated. Watching structural configurations...")
+    # Map your execution preferences to native MEXC parameters
+    monitored_assets = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+    intervals = ["Min3", "Min5", "Min15", "Min60"]
 
-If __name__ == "__main__":
-    # Start the web server thread so Render stays happy
-    Web_thread = Thread(target=run_web_server)
-    Web_thread.daemon = True
-    Web_thread.start()
+    while True:
+        for symbol in monitored_assets:
+            for tf in intervals:
+                df = fetch_mexc_data(symbol=symbol, interval=tf)
+                if df is not None:
+                    # Dynamically passing a fallback compression window (e.g., 12)
+                    metrics = calculate_pressure_score(df, compression_age=12)
+                    
+                    if metrics and metrics['score'] >= 3:
+                        print("\n====================================================")
+                        print(f"COMPRESSION PRESSURE | {symbol} ({tf})")
+                        print(f"Age: {metrics['age']} candles")
+                        print(f"ATR: {metrics['atr_pct']:.1f}%")
+                        print(f"Volume: {metrics['vol_pct']:.1f}%")
+                        print(f"OI: {metrics['oi_pct']:+.1f}%")
+                        print(f"Funding: {metrics['funding']:+.4f}%")
+                        print("----------------------------------------------------")
+                        print(f"Pressure Score: {metrics['score']}/5")
+                        print(f"\nSTATUS:\n{metrics['status']}")
+                        print("====================================================")
+                        
+                        if metrics['score'] >= 4:
+                            print("\n🚨 COMPRESSION LOADED.")
+                            print("Monitor for Elephant Candle and Expansion Trigger. 🚨\n")
+                            
+        time.sleep(45)  # Scan interval buffer
+
+if __name__ == "__main__":
+    # Prevent Render from killing execution via a parallel listener thread
+    server_thread = Thread(target=run_web_server)
+    server_thread.daemon = True
+    server_thread.start()
     
-    # Run the continuous scanner loop
-    Scanner_loop()
+    scanner_loop()
