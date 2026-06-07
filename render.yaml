@@ -1,7 +1,0 @@
-services:
-  - type: web
-    Name: crypto-compression-scanner
-    Runtime: python
-    BuildCommand: pip install -r requirements.txt
-    StartCommand: python main.py
-    Plan: free
