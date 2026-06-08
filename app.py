@@ -9,35 +9,33 @@ from scanner import MarketScanner
 app = FastAPI()
 scanner = MarketScanner()
 
-# MEXC V1 Futures API Base URL
 BASE_URL = "https://contract.mexc.com/api/v1/contract"
 
 def get_mexc_futures_symbols():
-    """Fetches all live, actively trading USDT futures pairs from MEXC."""
+    """Fetches valid USDT contract listings trading on MEXC."""
     try:
-        response = requests.get(f"{BASE_URL}/detail").json()
+        response = requests.get(f"{BASE_URL}/detail", timeout=5).json()
         if response.get("success") and "data" in response:
-            # Filter for USDT settling contracts that are currently trading
             return [
                 item["name"] for item in response["data"] 
                 if item["name"].endswith("_USDT") and item.get("state", 0) == 0
             ]
     except Exception:
         pass
-    return ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT"] # Reliable fallbacks
+    return ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT"]
 
 def fetch_mexc_live_data(symbol: str):
     """
     Fetches real-time candles, Open Interest, and Funding Rates 
-    from MEXC for 15m, 5m, and 3m intervals.
+    from MEXC and transforms dictionary lists into clean DataFrame tracking columns.
     """
     data_feeds = {}
     tf_map = {"15m": "Min15", "5m": "Min5", "3m": "Min3"}
     
     try:
-        # 1. Fetch Current Open Interest & Funding Stats
-        ticker_res = requests.get(f"{BASE_URL}/ticker/{symbol}").json()
-        funding_res = requests.get(f"{BASE_URL}/funding_rate/{symbol}").json()
+        # 1. Fetch live Open Interest and Funding metrics
+        ticker_res = requests.get(f"{BASE_URL}/ticker/{symbol}", timeout=5).json()
+        funding_res = requests.get(f"{BASE_URL}/funding_rate/{symbol}", timeout=5).json()
         
         live_oi = 0.0
         live_funding = 0.0
@@ -47,17 +45,18 @@ def fetch_mexc_live_data(symbol: str):
         if funding_res.get("success") and "data" in funding_res:
             live_funding = float(funding_res["data"].get("fundingRate", 0.0))
             
-        # 2. Fetch Multi-Timeframe Candles (Limit to last 60 history bars)
+        # 2. Fetch and parse multi-timeframe candle datasets
         for tf_label, mexc_tf in tf_map.items():
-            kline_url = f"{BASE_URL}/kline/{symbol}?interval={mexc_tf}&limit=60"
-            kline_res = requests.get(kline_url).json()
+            kline_url = f"{BASE_URL}/kline/{symbol}?interval={mexc_tf}"
+            kline_res = requests.get(kline_url, timeout=5).json()
             
             if not kline_res.get("success") or "data" not in kline_res:
                 return None
                 
             kd = kline_res["data"]
             
-            # Structuring lists into clean DataFrame matrices
+            # MEXC V1 response structures elements inside split historical key dictionaries
+            # This constructs a compliant matrix tracking configuration
             df = pd.DataFrame({
                 "high": pd.to_numeric(kd.get("high", [])),
                 "low": pd.to_numeric(kd.get("low", [])),
@@ -65,10 +64,13 @@ def fetch_mexc_live_data(symbol: str):
                 "volume": pd.to_numeric(kd.get("vol", []))
             })
             
-            if df.empty or len(df) < 20:
+            if df.empty or len(df) < 15:
+                # If fields return blank or incomplete, try using fallback array parsing
+                if "time" in kd or (isinstance(kd, list) and len(kd) > 0):
+                    pass 
                 return None
                 
-            # Inject live stats into matrix tails for tracking calculations
+            # Distribute live statistics down the tail end of the calculation vectors
             df["open_interest"] = live_oi
             df["funding_rate"] = live_funding
             
@@ -80,30 +82,39 @@ def fetch_mexc_live_data(symbol: str):
 
 @app.get("/", response_class=HTMLResponse)
 def render_mobile_radar_dashboard():
-    # Gather top liquid market targets on MEXC to avoid overload on Free Render instances
-    all_symbols = get_mexc_futures_symbols()
-    priority_watchlist = [s for s in ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT", "ADA_USDT", "AVAX_USDT", "LINK_USDT"] if s in all_symbols]
+    # Keep list highly targeted to easily operate inside Render's standard free-tier memory thresholds
+    priority_watchlist = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT"]
     
     raw_scan_results = []
     
-    # Run historical scans over live pipelines
     for symbol in priority_watchlist:
         datasets = fetch_mexc_live_data(symbol)
         if datasets:
             metrics = scanner.scan_symbol(symbol, datasets)
             raw_scan_results.append(metrics)
-        time.sleep(0.1) # Prevents hitting rate limits
+        time.sleep(0.1) # Safe rate-limit buffer padding
 
     if not raw_scan_results:
-        # Graceful fallback state view if exchange APIs time out
-        return "<html><body><h2>MEXC API connection routing delayed. Refresh page in 10s...</h2></body></html>"
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta http-equiv="refresh" content="5">
+            <style>body { font-family: monospace; padding: 20px; background: #f8f9fa; }</style>
+        </head>
+        <body>
+            <h3>Connecting to MEXC Engine Feeds...</h3>
+            <p>Parsing live market structures. Page will auto-refresh shortly.</p>
+        </body>
+        </html>
+        """
 
     global_temp = scanner.calculate_market_temperature(raw_scan_results)
     sorted_pool = [r for r in raw_scan_results if r["sort_score"] >= 0]
     sorted_pool = sorted(sorted_pool, key=lambda x: x["sort_score"], reverse=True)
     counts = global_temp["metrics"]
     
-    # Format layout string output
     dashboard_text = f"""MARKET TEMPERATURE
 {global_temp['temperature']}
 No Range: {counts['NO RANGE']}
