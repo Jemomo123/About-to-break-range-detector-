@@ -11,44 +11,59 @@ scanner = MarketScanner()
 
 BASE_URL = "https://contract.mexc.com/api/v1/contract"
 
-# Global Server RAM Memory Cache
+# Global System Status Cache
 CACHE = {
     "results": [],
-    "global_temp": {"temperature": "COLD", "metrics": {"NO RANGE": 0, "STABLE RANGE": 0, "BUILDING": 0, "LOADING": 0, "ABOUT TO BREAK": 0, "CRITICAL": 0}},
-    "last_updated": "Never"
+    "global_temp": None,
+    "last_updated": "Never",
+    "worker_status": "Initializing Engine...",
+    "error_logs": []
 }
 
 def parse_mexc_kline_payload(kd) -> dict:
+    """
+    Directly extracts lists from MEXC V1 JSON dictionary layout.
+    """
     try:
-        if isinstance(kd, list) and len(kd) > 0:
-            if isinstance(kd[0], list):
+        if isinstance(kd, dict):
+            # Check if all mandatory analytical rows are present
+            if all(k in kd for k in ["high", "low", "close", "vol"]):
                 return {
-                    "high": [float(x[3]) for x in kd],
-                    "low": [float(x[4]) for x in kd],
-                    "close": [float(x[2]) for x in kd],
-                    "vol": [float(x[5]) for x in kd]
+                    "high": [float(x) for x in kd["high"]],
+                    "low": [float(x) for x in kd["low"]],
+                    "close": [float(x) for x in kd["close"]],
+                    "vol": [float(x) for x in kd["vol"]]
                 }
+        elif isinstance(kd, list) and len(kd) > 0 and isinstance(kd[0], list):
+            # Failover loop for nested candlestick matrices
+            return {
+                "high": [float(x[3]) for x in kd],
+                "low": [float(x[4]) for x in kd],
+                "close": [float(x[2]) for x in kd],
+                "vol": [float(x[5]) for x in kd]
+            }
     except Exception as e:
-        print(f"Error parsing klines: {e}")
+        CACHE["error_logs"].append(f"Payload extraction error: {str(e)}")
     return {}
 
 def fetch_single_symbol_safely(symbol: str):
-    """Fetches 1h, 15m, and 5m data for a single token with pacing gaps to dodge firewalls."""
     data_feeds = {}
     live_oi, live_funding = 0.0, 0.0
     
     try:
+        # Fetch Ticker Metrics
         ticker_res = requests.get(f"{BASE_URL}/ticker/{symbol}", timeout=4).json()
         if ticker_res.get("success") and "data" in ticker_res:
             live_oi = float(ticker_res["data"].get("openInterest", 0.0))
-        time.sleep(0.2) # Firewall protection delay
+        time.sleep(0.2)
 
+        # Fetch Funding Rates
         funding_res = requests.get(f"{BASE_URL}/funding_rate/{symbol}", timeout=4).json()
         if funding_res.get("success") and "data" in funding_res:
             live_funding = float(funding_res["data"].get("fundingRate", 0.0))
         time.sleep(0.2)
         
-        # --- Timeframe 1: 1H Macro ---
+        # 1H macro interval
         res_1h = requests.get(f"{BASE_URL}/kline/{symbol}?interval=Min60", timeout=4).json()
         if res_1h.get("success") and "data" in res_1h:
             p_1h = parse_mexc_kline_payload(res_1h["data"])
@@ -57,9 +72,11 @@ def fetch_single_symbol_safely(symbol: str):
                 df1h["open_interest"] = live_oi
                 df1h["funding_rate"] = live_funding
                 data_feeds["1h"] = df1h
+            else:
+                CACHE["error_logs"].append(f"[{symbol}] 1H array length insufficient")
         time.sleep(0.2)
 
-        # --- Timeframe 2: 15M Anchor ---
+        # 15M anchor interval
         res_15m = requests.get(f"{BASE_URL}/kline/{symbol}?interval=Min15", timeout=4).json()
         if res_15m.get("success") and "data" in res_15m:
             p_15 = parse_mexc_kline_payload(res_15m["data"])
@@ -68,9 +85,11 @@ def fetch_single_symbol_safely(symbol: str):
                 df15["open_interest"] = live_oi
                 df15["funding_rate"] = live_funding
                 data_feeds["15m"] = df15
+            else:
+                CACHE["error_logs"].append(f"[{symbol}] 15M array length insufficient")
         time.sleep(0.2)
 
-        # --- Timeframe 3: 5M Trigger ---
+        # 5M trigger interval
         res_5m = requests.get(f"{BASE_URL}/kline/{symbol}?interval=Min5", timeout=4).json()
         if res_5m.get("success") and "data" in res_5m:
             p_5 = parse_mexc_kline_payload(res_5m["data"])
@@ -79,19 +98,25 @@ def fetch_single_symbol_safely(symbol: str):
                 df5["open_interest"] = live_oi
                 df5["funding_rate"] = live_funding
                 data_feeds["5m"] = df5
+            else:
+                CACHE["error_logs"].append(f"[{symbol}] 5M array length insufficient")
 
         if "1h" in data_feeds and "15m" in data_feeds and "5m" in data_feeds:
             return data_feeds
+            
     except Exception as e:
-        print(f"Network error on {symbol}: {e}")
+        CACHE["error_logs"].append(f"Network system connection dropout on {symbol}: {str(e)}")
     return None
 
 def background_scan_worker():
-    """Runs continuously inside the server RAM memory space, completely decoupled from page views."""
     watchlist = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT"]
+    loop_count = 0
     while True:
+        loop_count += 1
         fresh_results = []
+        
         for symbol in watchlist:
+            CACHE["worker_status"] = f"Loop #{loop_count}: Scanning processing tracks for {symbol}..."
             datasets = fetch_single_symbol_safely(symbol)
             if datasets:
                 try:
@@ -99,33 +124,45 @@ def background_scan_worker():
                     if metrics:
                         fresh_results.append(metrics)
                 except Exception as e:
-                    print(f"Scanning error on memory processing step: {e}")
-            time.sleep(0.4) # Strict pacing interval to maintain pristine IP reputation
+                    CACHE["error_logs"].append(f"Scanner configuration crash: {str(e)}")
+            time.sleep(0.5) # Strict pacing delay to completely bypass firewall throttling
             
         if fresh_results:
             CACHE["results"] = sorted(fresh_results, key=lambda x: x["sort_score"], reverse=True)
             CACHE["global_temp"] = scanner.calculate_market_temperature(fresh_results)
             CACHE["last_updated"] = time.strftime("%H:%M:%S UTC")
+            CACHE["worker_status"] = f"Awaiting next run interval. Loop #{loop_count} processed."
+        else:
+            CACHE["worker_status"] = f"Loop #{loop_count} completed but data feeds array returned blank."
             
-        time.sleep(15) # Wait 15 seconds before starting the next background cycle
+        time.sleep(15)
 
-# Spin up the background thread immediately upon app startup
+# Initialize data worker pipeline
 threading.Thread(target=background_scan_worker, daemon=True).start()
 
 @app.get("/", response_class=HTMLResponse)
 def render_mobile_radar_dashboard():
     raw_scan_results = CACHE["results"]
+    
+    # Live Diagnostics Window (Displays if data cache is empty)
+    if not raw_scan_results:
+        log_items = "".join([f"<li>{err}</li>" for err in CACHE["error_logs"][-15:]])
+        return f"""
+        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="4">
+        <style>body{{font-family:monospace;padding:15px;background:#111;color:#ff3333;line-height:1.4;}}
+        .status{{color:#00ff00;font-weight:bold;margin-bottom:15px; border-bottom: 1px dashed #00ff00; padding-bottom:10px;}}
+        ul{{list-style-type:square;padding-left:20px;color:#bbb;}}</style></head>
+        <body>
+            <div class="status">ENGINE STATUS MONITOR:<br>{CACHE['worker_status']}</div>
+            <h3>Live Error Diagnostics:</h3>
+            {f"<ul>{log_items}</ul>" if log_items else "<p style='color:#666;'>No errors logged yet. Waiting for API cycle...</p>"}
+            <p style="color:#666;font-size:11px;">Page auto-refreshing every 4s.</p>
+        </body></html>
+        """
+
     global_temp = CACHE["global_temp"]
     counts = global_temp["metrics"]
     
-    # Fallback to a clean loading loop screen only if the server hasn't finished its very first pass yet
-    if not raw_scan_results:
-        return """
-        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="5">
-        <style>body{font-family:monospace;padding:20px;background:#1a1a1a;color:#00ff00;text-align:center;}</style></head>
-        <body><h3>Initializing Background Engine Matrix...</h3><p>Building rate-limit proof cache layer. Auto-refreshing in 5s...</p></body></html>
-        """
-
     dashboard_text = f"""MARKET TEMPERATURE
 {global_temp['temperature']}
 No Range: {counts['NO RANGE']}
@@ -190,4 +227,3 @@ Interpretation:
     return f"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="15">
     <style>body{{background-color:#f8f9fa;color:#212529;font-family:monospace;font-size:15px;line-height:1.6;padding:15px;margin:0;white-space:pre-wrap;}}</style>
     </head><body>{dashboard_text}</body></html>"""
-    
