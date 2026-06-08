@@ -7,14 +7,16 @@ class MarketScanner:
         self.detector = RangeDetector(config)
 
     def scan_symbol(self, symbol: str, tf_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        meta_1h = self.detector.detect_range(tf_data["1h"])
         meta_15m = self.detector.detect_range(tf_data["15m"])
         meta_5m = self.detector.detect_range(tf_data["5m"])
 
+        p_1h = self.detector.calculate_pressure(tf_data["1h"], meta_1h)
         p_15m = self.detector.calculate_pressure(tf_data["15m"], meta_15m)
         p_5m = self.detector.calculate_pressure(tf_data["5m"], meta_5m)
 
-        # Clean Dual-Timeframe Fusion Logic Mapping
-        if p_15m == "LOADING" and p_5m in ["HIGH PRESSURE", "ACCUMULATION"]:
+        # 3-Timeframe Harmonized Fusion Logic Grid
+        if p_15m == "LOADING" and p_5m in ["HIGH PRESSURE", "ACCUMULATION"] and p_1h != "DISTRIBUTION":
             final_status, confidence = "ABOUT TO BREAK", "HIGH"
         elif p_15m == "LOADING" or p_5m == "HIGH PRESSURE":
             final_status, confidence = "LOADING", "MEDIUM"
@@ -30,7 +32,7 @@ class MarketScanner:
             return {
                 "symbol": symbol, "status": "NO RANGE", "confidence": "LOW",
                 "width": 0.0, "age": 0, "oi_growth": 0.0, "atr_contract": 0.0,
-                "p_15m": p_15m, "p_5m": p_5m, "sort_score": 0.0
+                "p_1h": p_1h, "p_15m": p_15m, "p_5m": p_5m, "sort_score": 0.0
             }
 
         anchor_meta = meta_15m if meta_15m["status"] == "VALID" else meta_5m
@@ -57,7 +59,7 @@ class MarketScanner:
         return {
             "symbol": symbol, "status": final_status, "confidence": confidence,
             "width": width, "age": age, "oi_growth": oi_growth, "atr_contract": atr_contract,
-            "p_15m": p_15m, "p_5m": p_5m, "sort_score": sort_score
+            "p_1h": p_1h, "p_15m": p_15m, "p_5m": p_5m, "sort_score": sort_score
         }
 
     @staticmethod
