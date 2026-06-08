@@ -12,7 +12,7 @@ scanner = MarketScanner()
 BASE_URL = "https://contract.mexc.com/api/v1/contract"
 
 def get_mexc_futures_symbols():
-    """Fetches valid USDT contract listings trading on MEXC."""
+    """Fetches all active USDT futures listings from MEXC."""
     try:
         response = requests.get(f"{BASE_URL}/detail", timeout=5).json()
         if response.get("success") and "data" in response:
@@ -26,14 +26,14 @@ def get_mexc_futures_symbols():
 
 def fetch_mexc_live_data(symbol: str):
     """
-    Fetches real-time candles, Open Interest, and Funding Rates 
-    from MEXC and transforms dictionary lists into clean DataFrame tracking columns.
+    Fetches live candles, Open Interest, and Funding Rates from MEXC
+    and unpacks MEXC's V1 columnar dictionary keys directly into a pandas DataFrame.
     """
     data_feeds = {}
     tf_map = {"15m": "Min15", "5m": "Min5", "3m": "Min3"}
     
     try:
-        # 1. Fetch live Open Interest and Funding metrics
+        # 1. Gather live ticker metrics and funding metrics
         ticker_res = requests.get(f"{BASE_URL}/ticker/{symbol}", timeout=5).json()
         funding_res = requests.get(f"{BASE_URL}/funding_rate/{symbol}", timeout=5).json()
         
@@ -45,7 +45,7 @@ def fetch_mexc_live_data(symbol: str):
         if funding_res.get("success") and "data" in funding_res:
             live_funding = float(funding_res["data"].get("fundingRate", 0.0))
             
-        # 2. Fetch and parse multi-timeframe candle datasets
+        # 2. Fetch and parse historical intervals using MEXC's key structure
         for tf_label, mexc_tf in tf_map.items():
             kline_url = f"{BASE_URL}/kline/{symbol}?interval={mexc_tf}"
             kline_res = requests.get(kline_url, timeout=5).json()
@@ -55,22 +55,23 @@ def fetch_mexc_live_data(symbol: str):
                 
             kd = kline_res["data"]
             
-            # MEXC V1 response structures elements inside split historical key dictionaries
-            # This constructs a compliant matrix tracking configuration
-            df = pd.DataFrame({
-                "high": pd.to_numeric(kd.get("high", [])),
-                "low": pd.to_numeric(kd.get("low", [])),
-                "close": pd.to_numeric(kd.get("close", [])),
-                "volume": pd.to_numeric(kd.get("vol", []))
-            })
+            # MEXC V1 columns map structures out as dict arrays (e.g. {"high": [...], "low": [...]})
+            high_arr = kd.get("high", [])
+            low_arr = kd.get("low", [])
+            close_arr = kd.get("close", [])
+            vol_arr = kd.get("vol", [])
             
-            if df.empty or len(df) < 15:
-                # If fields return blank or incomplete, try using fallback array parsing
-                if "time" in kd or (isinstance(kd, list) and len(kd) > 0):
-                    pass 
+            if not close_arr or len(close_arr) < 20:
                 return None
                 
-            # Distribute live statistics down the tail end of the calculation vectors
+            df = pd.DataFrame({
+                "high": pd.to_numeric(high_arr),
+                "low": pd.to_numeric(low_arr),
+                "close": pd.to_numeric(close_arr),
+                "volume": pd.to_numeric(vol_arr)
+            })
+            
+            # Append trailing ticker context features down into matrix columns
             df["open_interest"] = live_oi
             df["funding_rate"] = live_funding
             
@@ -82,7 +83,7 @@ def fetch_mexc_live_data(symbol: str):
 
 @app.get("/", response_class=HTMLResponse)
 def render_mobile_radar_dashboard():
-    # Keep list highly targeted to easily operate inside Render's standard free-tier memory thresholds
+    # Focused target set to stay cleanly within free instance performance thresholds
     priority_watchlist = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT"]
     
     raw_scan_results = []
@@ -92,7 +93,7 @@ def render_mobile_radar_dashboard():
         if datasets:
             metrics = scanner.scan_symbol(symbol, datasets)
             raw_scan_results.append(metrics)
-        time.sleep(0.1) # Safe rate-limit buffer padding
+        time.sleep(0.1)  # API connection pacing rate-limiter
 
     if not raw_scan_results:
         return """
@@ -101,11 +102,11 @@ def render_mobile_radar_dashboard():
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <meta http-equiv="refresh" content="5">
-            <style>body { font-family: monospace; padding: 20px; background: #f8f9fa; }</style>
+            <style>body { font-family: monospace; padding: 20px; background: #f8f9fa; color:#333; }</style>
         </head>
         <body>
             <h3>Connecting to MEXC Engine Feeds...</h3>
-            <p>Parsing live market structures. Page will auto-refresh shortly.</p>
+            <p>Syncing tracking vectors. The radar page will refresh itself automatically in 5s.</p>
         </body>
         </html>
         """
@@ -198,4 +199,4 @@ Interpretation:
     </html>
     """
     return html_content
-                
+        
