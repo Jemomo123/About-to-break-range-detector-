@@ -12,31 +12,37 @@ class MarketScanner:
 
     def scan_symbol(self, symbol: str, tf_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
         """Processes cross-timeframe datasets without strict single-layer rejections."""
-        # Check structural statuses across all targets simultaneously
         meta_15m = self.detector.detect_range(tf_data["15m"])
         meta_5m = self.detector.detect_range(tf_data["5m"])
         meta_3m = self.detector.detect_range(tf_data["3m"])
 
-        # Calculate localized structural load indexes
         p_15m = self.detector.calculate_pressure(tf_data["15m"], meta_15m)
         p_5m = self.detector.calculate_pressure(tf_data["5m"], meta_5m)
         p_3m = self.detector.calculate_pressure(tf_data["3m"], meta_3m)
 
-        # Process Multi-Timeframe Fusion Core logic
         final_status, confidence = self.detector.fuse_timeframes(p_15m, p_5m, p_3m)
 
-        # Set default structures if anchor context returns null
         is_valid_range = meta_15m["status"] == "VALID" or meta_5m["status"] == "VALID"
         if not is_valid_range and final_status in ["IGNORE", "STABLE RANGE"]:
-            return {"symbol": symbol, "status": "NO RANGE", "sort_score": -1.0}
+            return {
+                "symbol": symbol,
+                "status": "NO RANGE",
+                "confidence": "LOW",
+                "width": 0.0,
+                "age": 0,
+                "oi_growth": 0.0,
+                "atr_contract": 0.0,
+                "p_15m": "NORMAL",
+                "p_5m": "NORMAL",
+                "p_3m": "NORMAL",
+                "sort_score": -1.0
+            }
 
-        # Extract normalized analytics using available timeframe data
         anchor_meta = meta_15m if meta_15m["status"] == "VALID" else (meta_5m if meta_5m["status"] == "VALID" else meta_3m)
         width = anchor_meta["width"]
         age = anchor_meta["age"]
         atr_contract = anchor_meta["atr_contract"]
 
-        # Calculate percentage open interest variance across 15M lookback frames
         oi_growth = 0.0
         df_15m = tf_data["15m"]
         if "open_interest" in df_15m.columns and len(df_15m) >= 5:
@@ -45,7 +51,6 @@ class MarketScanner:
             if oi_start > 0:
                 oi_growth = round(((oi_end - oi_start) / oi_start) * 100, 2)
 
-        # Absolute Priority Multi-Factor Watchlist Sorting Equation
         status_weights = {
             "CRITICAL": 500, "ABOUT TO BREAK": 400, "LOADING": 300, 
             "BUILDING": 200, "STABLE RANGE": 100, "NO RANGE": 0
@@ -69,9 +74,7 @@ class MarketScanner:
 
     @staticmethod
     def calculate_market_temperature(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculates global structural velocity indexes across all processed symbols."""
         counts = {"NO RANGE": 0, "STABLE RANGE": 0, "BUILDING": 0, "LOADING": 0, "ABOUT TO BREAK": 0, "CRITICAL": 0}
-        
         for r in results:
             status = r.get("status", "NO RANGE")
             if status in counts:
@@ -79,7 +82,6 @@ class MarketScanner:
             else:
                 counts["NO RANGE"] += 1
 
-        # Categorize global thermal market metrics
         if counts["ABOUT TO BREAK"] + counts["CRITICAL"] >= 3:
             temp = "EXPLOSIVE"
         elif counts["LOADING"] >= 4:
