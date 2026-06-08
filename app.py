@@ -12,7 +12,6 @@ scanner = MarketScanner()
 BASE_URL = "https://contract.mexc.com/api/v1/contract"
 
 def get_mexc_futures_symbols():
-    """Fetches all active USDT futures listings from MEXC."""
     try:
         response = requests.get(f"{BASE_URL}/detail", timeout=5).json()
         if response.get("success") and "data" in response:
@@ -25,43 +24,41 @@ def get_mexc_futures_symbols():
     return ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT"]
 
 def fetch_mexc_live_data(symbol: str):
-    """
-    Fetches live candles, Open Interest, and Funding Rates from MEXC
-    and unpacks MEXC's V1 columnar dictionary keys directly into a pandas DataFrame.
-    """
     data_feeds = {}
     tf_map = {"15m": "Min15", "5m": "Min5", "3m": "Min3"}
-    
     try:
-        # 1. Gather live ticker metrics and funding metrics
         ticker_res = requests.get(f"{BASE_URL}/ticker/{symbol}", timeout=5).json()
         funding_res = requests.get(f"{BASE_URL}/funding_rate/{symbol}", timeout=5).json()
-        
-        live_oi = 0.0
-        live_funding = 0.0
+        live_oi, live_funding = 0.0, 0.0
         
         if ticker_res.get("success") and "data" in ticker_res:
             live_oi = float(ticker_res["data"].get("openInterest", 0.0))
         if funding_res.get("success") and "data" in funding_res:
             live_funding = float(funding_res["data"].get("fundingRate", 0.0))
             
-        # 2. Fetch and parse historical intervals using MEXC's key structure
         for tf_label, mexc_tf in tf_map.items():
-            kline_url = f"{BASE_URL}/kline/{symbol}?interval={mexc_tf}"
-            kline_res = requests.get(kline_url, timeout=5).json()
-            
+            kline_res = requests.get(f"{BASE_URL}/kline/{symbol}?interval={mexc_tf}", timeout=5).json()
             if not kline_res.get("success") or "data" not in kline_res:
                 return None
-                
             kd = kline_res["data"]
             
-            # MEXC V1 columns map structures out as dict arrays (e.g. {"high": [...], "low": [...]})
-            high_arr = kd.get("high", [])
-            low_arr = kd.get("low", [])
-            close_arr = kd.get("close", [])
-            vol_arr = kd.get("vol", [])
-            
-            if not close_arr or len(close_arr) < 20:
+            if isinstance(kd, dict) and "close" in kd:
+                high_arr, low_arr, close_arr = kd.get("high", []), kd.get("low", []), kd.get("close", [])
+                vol_arr = kd.get("vol", [])
+            elif isinstance(kd, list) and len(kd) > 0 and isinstance(kd[0], list):
+                high_arr = [x[3] for x in kd]
+                low_arr = [x[4] for x in kd]
+                close_arr = [x[2] for x in kd]
+                vol_arr = [x[5] for x in kd]
+            elif isinstance(kd, list) and len(kd) > 0 and isinstance(kd[0], dict):
+                high_arr = [x.get("high") for x in kd]
+                low_arr = [x.get("low") for x in kd]
+                close_arr = [x.get("close") for x in kd]
+                vol_arr = [x.get("vol", x.get("volume", 0)) for x in kd]
+            else:
+                return None
+                
+            if not close_arr or len(close_arr) < 15:
                 return None
                 
             df = pd.DataFrame({
@@ -70,22 +67,16 @@ def fetch_mexc_live_data(symbol: str):
                 "close": pd.to_numeric(close_arr),
                 "volume": pd.to_numeric(vol_arr)
             })
-            
-            # Append trailing ticker context features down into matrix columns
             df["open_interest"] = live_oi
             df["funding_rate"] = live_funding
-            
             data_feeds[tf_label] = df
-            
         return data_feeds
     except Exception:
         return None
 
 @app.get("/", response_class=HTMLResponse)
 def render_mobile_radar_dashboard():
-    # Focused target set to stay cleanly within free instance performance thresholds
     priority_watchlist = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "DOGE_USDT"]
-    
     raw_scan_results = []
     
     for symbol in priority_watchlist:
@@ -93,7 +84,7 @@ def render_mobile_radar_dashboard():
         if datasets:
             metrics = scanner.scan_symbol(symbol, datasets)
             raw_scan_results.append(metrics)
-        time.sleep(0.1)  # API connection pacing rate-limiter
+        time.sleep(0.1)
 
     if not raw_scan_results:
         return """
@@ -112,8 +103,7 @@ def render_mobile_radar_dashboard():
         """
 
     global_temp = scanner.calculate_market_temperature(raw_scan_results)
-    sorted_pool = [r for r in raw_scan_results if r["sort_score"] >= 0]
-    sorted_pool = sorted(sorted_pool, key=lambda x: x["sort_score"], reverse=True)
+    sorted_pool = sorted(raw_scan_results, key=lambda x: x["sort_score"], reverse=True)
     counts = global_temp["metrics"]
     
     dashboard_text = f"""MARKET TEMPERATURE
