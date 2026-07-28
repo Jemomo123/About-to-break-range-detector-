@@ -1,5 +1,8 @@
-pandas>=2.0.0
-numpy>=1.24.0
-fastapi>=0.100.0
-uvicorn[standard]>=0.23.0
-requests>=2.31.0
+fastapi
+uvicorn
+pandas
+numpy
+requests
+httpx
+python-dotenv
+cachetools
