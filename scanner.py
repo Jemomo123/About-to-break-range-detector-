@@ -18,11 +18,12 @@ class MarketScanner:
 
     def determine_market_control(self, dist_ceil_pct, dist_floor_pct, cvd, oi, funding_rate, df_15m):
         """
-        Market Control Engine: Combines boundary proximity, CVD direction, 
-        OI expansion/contraction, Funding Rate, and Volume acceleration to detect 
-        who is winning the battle before breakout.
+        Institutional Market Control Engine:
+        Evaluates structural imbalance across Price Position, CVD Delta, Funding, 
+        Volume Acceleration, and Range Compression to compute dynamic confidence % 
+        and evidence lists.
         """
-        # 1. Clean and convert inputs
+        # --- 1. Data Normalization ---
         try: cvd_val = float(cvd) if cvd is not None else 0.0
         except (ValueError, TypeError): cvd_val = 0.0
 
@@ -32,7 +33,7 @@ class MarketScanner:
         try: oi_val = float(oi) if oi is not None else 0.0
         except (ValueError, TypeError): oi_val = 0.0
 
-        # 2. Extract Volume Acceleration (Current candle vol vs 5-candle average vol)
+        # Volume Acceleration
         vol_accel = False
         if df_15m is not None and "volume" in df_15m and len(df_15m) >= 5:
             recent_avg_vol = df_15m["volume"].iloc[-6:-1].mean()
@@ -40,95 +41,166 @@ class MarketScanner:
             if recent_avg_vol > 0 and (last_vol / recent_avg_vol) >= 1.25:
                 vol_accel = True
 
-        # 3. Positional & Metric Flags
+        # Position Flags
         near_ceiling = dist_ceil_pct <= 0.8
         near_floor = dist_floor_pct <= 0.8
-        cvd_buying = cvd_val > 0
-        cvd_selling = cvd_val < 0
-        funding_positive = funding_val > 0.005
-        funding_negative = funding_val < -0.005
+        at_ceiling_extreme = dist_ceil_pct <= 0.3
+        at_floor_extreme = dist_floor_pct <= 0.3
 
-        agreed = []
-        conflicted = []
+        cvd_positive = cvd_val > 0
+        cvd_negative = cvd_val < 0
+        funding_bullish_bias = funding_val < -0.005  # Shorts paying longs (Bullish squeeze tailwind)
+        funding_bearish_bias = funding_val > 0.005   # Longs paying shorts (Bearish squeeze risk)
 
-        # Default State
-        state = "✅ BALANCED BATTLE"
-        confidence = 50
-        explanation = "Buyers and sellers are matched with no clear structural absorption or delta dominance."
+        # --- 2. Multi-Factor Scoring Engine ---
+        buyer_score = 0
+        seller_score = 0
+        evidence_pro = []
+        evidence_con = []
 
-        # -------------------------------------------------------------
-        # ENGINE EVALUATION LOGIC
-        # -------------------------------------------------------------
+        # Factor A: Range Boundary Proximity
+        if near_ceiling:
+            buyer_score += 30
+            evidence_pro.append("✔ Price pressing upper boundary")
+        else:
+            evidence_con.append("✘ Price not at resistance")
 
-        # CASE A: BUYER ABSORPTION (Sellers hitting market, but Price Holds Near Ceiling / Doesn't drop)
-        if near_ceiling and cvd_selling:
-            state = "✅ BUYER ABSORPTION"
-            explanation = "Price is holding near resistance despite aggressive market selling. Limit buy wall absorbing supply."
-            confidence = 85 if vol_accel else 75
-            agreed.extend(["Ceiling Proximity", "Negative CVD (Limit Absorbed)"])
-            if vol_accel: agreed.append("Volume Acceleration")
+        if near_floor:
+            seller_score += 30
+            evidence_pro.append("✔ Price pressing lower boundary")
+        else:
+            evidence_con.append("20✘ Price not at support")
 
-        # CASE B: SELLER ABSORPTION (Buyers hitting market, but Price Holds Near Floor / Doesn't push up)
-        elif near_floor and cvd_buying:
-            state = "✅ SELLER ABSORPTION"
-            explanation = "Price is holding near support despite aggressive market buying. Limit sell wall absorbing demand."
-            confidence = 85 if vol_accel else 75
-            agreed.extend(["Floor Proximity", "Positive CVD (Limit Absorbed)"])
-            if vol_accel: agreed.append("Volume Acceleration")
+        # Factor B: CVD Delta Direction
+        if cvd_positive:
+            buyer_score += 25
+            evidence_pro.append("✔ Positive Taker CVD flow")
+        elif cvd_negative:
+            seller_score += 25
+            evidence_pro.append("✔ Negative Taker CVD flow")
+        else:
+            evidence_con.append("✘ Flat/Neutral Delta flow")
 
-        # CASE C: BUYERS IN CONTROL (Strong CVD + Near Resistance + Volume Expansion)
-        elif near_ceiling and cvd_buying:
-            state = "✅ BUYERS IN CONTROL"
-            explanation = "Aggressive taker buying driving price to upper boundary with expanding momentum."
-            confidence = 90 if vol_accel else 80
-            agreed.extend(["Ceiling Proximity", "Positive CVD"])
-            if vol_accel: agreed.append("Volume Acceleration")
-            if funding_positive: agreed.append("Positive Funding Alignment")
+        # Factor C: Volume Acceleration
+        if vol_accel:
+            if buyer_score >= seller_score:
+                buyer_score += 15
+            else:
+                seller_score += 15
+            evidence_pro.append("✔ Volume expansion on 15M bar")
+        else:
+            evidence_con.append("✘ Volume below 1.25x average")
 
-        # CASE D: SELLERS IN CONTROL (Strong Negative CVD + Near Support + Volume Expansion)
-        elif near_floor and cvd_selling:
-            state = "✅ SELLERS IN CONTROL"
-            explanation = "Aggressive taker selling pressing price directly into support."
-            confidence = 90 if vol_accel else 80
-            agreed.extend(["Floor Proximity", "Negative CVD"])
-            if vol_accel: agreed.append("Volume Acceleration")
-            if funding_negative: agreed.append("Negative Funding Alignment")
+        # Factor D: Funding Alignment
+        if funding_bullish_bias:
+            buyer_score += 15
+            evidence_pro.append("✔ Negative funding (Shorts heavy/squeezable)")
+        elif funding_bearish_bias:
+            seller_score += 15
+            evidence_pro.append("✔ Positive funding (Longs heavy/squeezable)")
+        else:
+            evidence_pro.append("✔ Neutral funding environment")
 
-        # CASE E: SHORT SQUEEZE RISK (Heavy Negative Funding / Short Overcrowding near Upper Boundary)
-        elif funding_negative and (near_ceiling or cvd_buying):
-            state = "✅ SHORT SQUEEZE RISK"
-            explanation = "Overcrowded short positioning with price pressing resistance or CVD turning positive."
-            confidence = 80
-            agreed.extend(["Negative Funding (Short Heavy)", "Upward Price/CVD Pressure"])
+        # Factor E: Open Interest Presence
+        if oi_val > 0:
+            if buyer_score > seller_score:
+                buyer_score += 10
+            elif seller_score > buyer_score:
+                seller_score += 10
+            evidence_pro.append("✔ Open Interest actively participating")
+        else:
+            evidence_con.append("✘ Open Interest metric neutral/low")
 
-        # CASE F: LONG SQUEEZE RISK (Heavy Positive Funding / Long Overcrowding near Lower Boundary)
-        elif funding_positive and (near_floor or cvd_selling):
-            state = "✅ LONG SQUEEZE RISK"
-            explanation = "Overcrowded long positioning with price pressing support or CVD turning negative."
-            confidence = 80
-            agreed.extend(["Positive Funding (Long Heavy)", "Downward Price/CVD Pressure"])
+        # --- 3. Institutional Classification & Dynamic Confidence ---
+        
+        # Scenario 1: BUYER ABSORPTION (Limit buy wall absorbing market sells at high prices or near ceiling)
+        if near_ceiling and cvd_negative:
+            state = "🟡 BUYER ABSORPTION"
+            confidence = min(92, 70 + (10 if vol_accel else 0) + (12 if at_ceiling_extreme else 0))
+            reason = "Price continues pressing resistance despite negative CVD. Aggressive limit buy wall absorbing market sell pressure."
+            evidence = [
+                "✔ Price at upper boundary",
+                "✔ Negative CVD (Limit absorption occurring)",
+                "✔ High ceiling price stability",
+                "✔ Volume active at boundary" if vol_accel else "✘ Volume neutral"
+            ]
 
-        # -------------------------------------------------------------
-        # CONFLICT IDENTIFICATION
-        # -------------------------------------------------------------
-        if cvd_selling and state in ["✅ BUYERS IN CONTROL", "✅ BUYER ABSORPTION"]:
-            conflicted.append("Negative Taker CVD vs Upper Range Price")
-        if cvd_buying and state in ["✅ SELLERS IN CONTROL", "✅ SELLER ABSORPTION"]:
-            conflicted.append("Positive Taker CVD vs Lower Range Price")
-        if funding_positive and "SELLERS" in state:
-            conflicted.append("High Positive Funding vs Bearish Control")
-        if funding_negative and "BUYERS" in state:
-            conflicted.append("High Negative Funding vs Bullish Control")
+        # Scenario 2: SELLER ABSORPTION (Limit sell wall absorbing market buys near floor)
+        elif near_floor and cvd_positive:
+            state = "🟣 SELLER ABSORPTION"
+            confidence = min(92, 70 + (10 if vol_accel else 0) + (12 if at_floor_extreme else 0))
+            reason = "Price is pinned near support despite positive CVD. Aggressive limit sell wall absorbing market buy orders."
+            evidence = [
+                "✔ Price at lower boundary",
+                "✔ Positive CVD (Limit absorption occurring)",
+                "✔ Floor price rejection holding",
+                "✔ Volume active at boundary" if vol_accel else "✘ Volume neutral"
+            ]
 
-        if not agreed:
-            agreed.append("Range Compression")
+        # Scenario 3: BUYERS GAINING CONTROL
+        elif buyer_score >= 60 and buyer_score > seller_score + 25:
+            state = "🟢 BUYERS GAINING CONTROL"
+            confidence = min(96, buyer_score + (10 if vol_accel else 0))
+            reason = "Price is pressing ceiling with positive CVD and active volume alignment indicating taker buyers leading auction."
+            evidence = [
+                "✔ Price near upper boundary",
+                "✔ Positive CVD taker dominance",
+                "✔ Volume acceleration present" if vol_accel else "✘ Volume neutral",
+                "✔ Favorable funding tailwind" if funding_bullish_bias else "✔ Neutral funding"
+            ]
+
+        # Scenario 4: SELLERS GAINING CONTROL
+        elif seller_score >= 60 and seller_score > buyer_score + 25:
+            state = "🔴 SELLERS GAINING CONTROL"
+            confidence = min(96, seller_score + (10 if vol_accel else 0))
+            reason = "Price pressing lower support with negative CVD and aggressive market sells driving range expansion."
+            evidence = [
+                "✔ Price near lower boundary",
+                "✔ Negative CVD taker dominance",
+                "✔ Volume acceleration present" if vol_accel else "✘ Volume neutral",
+                "✔ Favorable funding tailwind" if funding_bearish_bias else "✔ Neutral funding"
+            ]
+
+        # Scenario 5: SHORT SQUEEZE RISK
+        elif funding_bullish_bias and (near_ceiling or cvd_positive):
+            state = "⚡ SHORT SQUEEZE RISK"
+            confidence = 82
+            reason = "Overcrowded short positioning with price or CVD moving upward against heavy negative funding."
+            evidence = [
+                "✔ Heavily negative funding rate",
+                "✔ Price/Delta holding upper bias",
+                "✔ Squeeze potential elevated"
+            ]
+
+        # Scenario 6: LONG SQUEEZE RISK
+        elif funding_bearish_bias and (near_floor or cvd_negative):
+            state = "⚠️ LONG SQUEEZE RISK"
+            confidence = 82
+            reason = "Overcrowded long positioning with price or CVD pressing downward against elevated positive funding."
+            evidence = [
+                "✔ Heavily positive funding rate",
+                "✔ Price/Delta holding lower bias",
+                "✔ Cascade potential elevated"
+            ]
+
+        # Scenario 7: TRUE BALANCED BATTLE
+        else:
+            diff = abs(buyer_score - seller_score)
+            confidence = max(35, min(58, 50 + diff))
+            state = "⚖️ TRUE BALANCED BATTLE"
+            reason = "Neither buyers nor sellers show structural dominance. Price and order flow remain balanced within the range."
+            evidence = [
+                "✔ Range compression active",
+                "✘ No CVD delta advantage",
+                "✘ No boundary proximity dominance",
+                "✘ Funding neutral"
+            ]
 
         return {
             "control_state": state,
             "confidence": confidence,
-            "explanation": explanation,
-            "agreed": agreed,
-            "conflicted": conflicted if conflicted else ["None"]
+            "explanation": reason,
+            "evidence": evidence
         }
 
     def scan_symbol(self, symbol, datasets):
@@ -170,8 +242,7 @@ class MarketScanner:
             "control_state": control_analysis["control_state"],
             "confidence": control_analysis["confidence"],
             "explanation": control_analysis["explanation"],
-            "agreed": control_analysis["agreed"],
-            "conflicted": control_analysis["conflicted"],
+            "evidence": control_analysis["evidence"],
             "live_price": live_price,
             "ceiling": ceiling,
             "floor": floor,
