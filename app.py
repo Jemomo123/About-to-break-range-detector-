@@ -1,10 +1,12 @@
-import time
-import threading
-import requests
 import logging
+import threading
+import time
 import pandas as pd
+import requests
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+
+import coinalyze
 from scanner import MarketScanner
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -12,200 +14,167 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 app = FastAPI()
 scanner = MarketScanner()
 
-# Unified endpoints targeting MEXC Contract and OKX Public V5 infrastructures
-MEXC_BASE_URL = "https://contract.mexc.com/api/v1/contract"
 OKX_BASE_URL = "https://www.okx.com/api/v5"
+
+# Requirement 9: Prioritized Watchlist supporting Meme Coins
+WATCHLIST = [
+    "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "DOGE-USDT-SWAP",
+    "PEPE-USDT-SWAP", "BONK-USDT-SWAP", "SHIB-USDT-SWAP", "FLOKI-USDT-SWAP",
+    "WIF-USDT-SWAP", "BRETT-USDT-SWAP", "PENGU-USDT-SWAP", "FARTCOIN-USDT-SWAP",
+    "SPX-USDT-SWAP", "USELESS-USDT-SWAP", "POPCAT-USDT-SWAP", "MOG-USDT-SWAP",
+    "GOAT-USDT-SWAP", "TURBO-USDT-SWAP", "NEIRO-USDT-SWAP", "MEME-USDT-SWAP"
+]
 
 CACHE = {
     "results_dict": {},
-    "global_temp": {"temperature": "COLD", "metrics": {"NO RANGE": 0, "STABLE RANGE": 0, "BUILDING": 0, "LOADING": 0, "ABOUT TO BREAK": 0, "CRITICAL": 0}},
+    "global_temp": {
+        "temperature": "COLD",
+        "metrics": {"BUILDING": 0, "LOADING": 0, "ABOUT TO BREAK": 0, "CRITICAL": 0},
+    },
     "last_updated": "Never",
-    "worker_status": "Starting 1H-15M-5M Fusion Matrix Engine..."
 }
 
-def parse_mexc_kline_payload(kd) -> dict:
+def fetch_okx_candles(symbol: str, bar: str, limit: int = 50) -> pd.DataFrame | None:
+    """Requirement 4: Download candles, price, volume from OKX."""
     try:
-        if isinstance(kd, dict) and all(k in kd for k in ["high", "low", "close", "vol"]):
-            return {
-                "high": [float(x) for x in kd["high"]],
-                "low": [float(x) for x in kd["low"]],
-                "close": [float(x) for x in kd["close"]],
-                "vol": [float(x) for x in kd["vol"]]
-            }
-    except Exception:
-        pass
-    return {}
-
-def to_okx_symbol(mexc_symbol: str) -> str:
-    return mexc_symbol.replace("_", "-") + "-SWAP"
-
-def fetch_from_okx_fallback(mexc_symbol: str):
-    """
-    Automated Backup Route: Pulls Min60, Min15, and Min5 candlesticks from OKX 
-    if MEXC triggers rate limit drops. Transforms data structure arrays natively.
-    """
-    okx_symbol = to_okx_symbol(mexc_symbol)
-    data_feeds = {}
-    
-    # 2. Strict endpoint maps: Only pulling 1H, 15M, and 5M data matrices
-    intervals = {"5m": "5m", "15m": "15m", "1h": "1H"}
-    
-    try:
-        live_oi, live_funding = 0.0, 0.0
-        # Light historical parameters lookup
-        for key, okx_bar in intervals.items():
-            url = f"{OKX_BASE_URL}/market/candles?instId={okx_symbol}&bar={okx_bar}&limit=100"
-            res = requests.get(url, timeout=3).json()
-            
-            if res.get("code") == "0" and "data" in res:
-                raw_candles = res["data"]
-                if len(raw_candles) >= 15:
-                    raw_candles.reverse() # Direct alignment matching chronological loops
-                    data_feeds[key] = pd.DataFrame({
-                        "high": [float(c[2]) for c in raw_candles],
-                        "low": [float(c[3]) for c in raw_candles],
-                        "close": [float(c[4]) for c in raw_candles],
-                        "volume": [float(c[5]) for c in raw_candles]
-                    })
-            time.sleep(0.15)
-            
-        if "1h" in data_feeds and "15m" in data_feeds and "5m" in data_feeds:
-            return data_feeds
-    except Exception:
-        pass
+        url = f"{OKX_BASE_URL}/market/candles?instId={symbol}&bar={bar}&limit={limit}"
+        res = requests.get(url, timeout=4).json()
+        if res.get("code") == "0" and "data" in res:
+            raw = res["data"]
+            if len(raw) >= 15:
+                raw.reverse()
+                return pd.DataFrame({
+                    "high": [float(c[2]) for c in raw],
+                    "low": [float(c[3]) for c in raw],
+                    "close": [float(c[4]) for c in raw],
+                    "volume": [float(c[5]) for c in raw],
+                })
+    except Exception as e:
+        logging.warning(f"[OKX API Error] {symbol} ({bar}): {e}")
     return None
 
-def fetch_single_symbol_safely(symbol: str):
+def fetch_progressive_datasets(symbol: str) -> dict | None:
     """
-    Primary API Connection Route targeting clean MEXC Min60, Min15, and Min5 data layers.
+    Requirement 8: Progressive API sequence to reduce rate limits.
+    15M Scan -> Valid? -> 5M -> Pressure? -> 2M -> Coinalyze
     """
-    data_feeds = {}
-    try:
-        # 1H Fetch Line (Min60)
-        res_1h = requests.get(f"{MEXC_BASE_URL}/kline/{symbol}?interval=Min60", timeout=3).json()
-        if res_1h.get("success") and "data" in res_1h:
-            p_1h = parse_mexc_kline_payload(res_1h["data"])
-            if p_1h and len(p_1h["close"]) >= 15:
-                data_feeds["1h"] = pd.DataFrame({"high": p_1h["high"], "low": p_1h["low"], "close": p_1h["close"], "volume": p_1h["vol"]})
-        time.sleep(0.15)
+    datasets = {}
 
-        # 15M Fetch Line (Min15)
-        res_15m = requests.get(f"{MEXC_BASE_URL}/kline/{symbol}?interval=Min15", timeout=3).json()
-        if res_15m.get("success") and "data" in res_15m:
-            p_15 = parse_mexc_kline_payload(res_15m["data"])
-            if p_15 and len(p_15["close"]) >= 15:
-                data_feeds["15m"] = pd.DataFrame({"high": p_15["high"], "low": p_15["low"], "close": p_15["close"], "volume": p_15["vol"]})
-        time.sleep(0.15)
+    # Step 1: 15M Range Scan
+    df_15m = fetch_okx_candles(symbol, "15m", limit=50)
+    if df_15m is None or not scanner.is_15m_range_valid(df_15m):
+        return None  # Halt immediately if no valid 15M range
 
-        # 5M Fetch Line (Min5)
-        res_5m = requests.get(f"{MEXC_BASE_URL}/kline/{symbol}?interval=Min5", timeout=3).json()
-        if res_5m.get("success") and "data" in res_5m:
-            p_5 = parse_mexc_kline_payload(res_5m["data"])
-            if p_5 and len(p_5["close"]) >= 15:
-                data_feeds["5m"] = pd.DataFrame({"high": p_5["high"], "low": p_5["low"], "close": p_5["close"], "volume": p_5["vol"]})
+    datasets["15m"] = df_15m
+    time.sleep(0.1)
 
-        if "1h" in data_feeds and "15m" in data_feeds and "5m" in data_feeds:
-            return data_feeds
-    except Exception:
-        pass
-    return None
+    # Step 2: 5M Pressure Download
+    df_5m = fetch_okx_candles(symbol, "5m", limit=50)
+    if df_5m is None:
+        return None
+    datasets["5m"] = df_5m
+    time.sleep(0.1)
 
-def background_scan_worker():
-    # 📋 Complete clean 25 watchlist profile matrix
-    watchlist = [
-        "BTC_USDT", "ETH_USDT", "SOL_USDT", "PEPE_USDT", "BONK_USDT",
-        "SHIB_USDT", "USELESS_USDT", "SPACE_USDT", "MOVE_USDT", "ZEC_USDT",
-        "SPX_USDT", "PEOPLE_USDT", "PENGU_USDT", "FARTCOIN_USDT", "LINEA_USDT",
-        "MEME_USDT", "PUMP_USDT", "AIXBT_USDT", "BRETT_USDT", "FOGO_USDT",
-        "GOOGL_USDT", "FLOKI_USDT", "IWM_USDT", "MOODENG_USDT", "NEAR_USDT"
-    ]
-    
-    batch_size = 5
-    batches = [watchlist[i:i + batch_size] for i in range(0, len(watchlist), batch_size)]
-    
+    # Step 3: 2M Entry Trigger Download
+    df_2m = fetch_okx_candles(symbol, "2m", limit=50)
+    datasets["2m"] = df_2m if df_2m is not None else df_5m
+
+    # Step 4: Coinalyze Fetch (Requirement 9: Fallback gracefully if missing)
+    oi = coinalyze.get_open_interest(symbol)
+    funding = coinalyze.get_funding_rate(symbol)
+    cvd = coinalyze.get_cvd(symbol)
+
+    # Requirement 5: Enrich all DataFrames with OHLCV + OI + Funding + CVD
+    for key in datasets:
+        datasets[key]["open_interest"] = oi if oi is not None else 0.0
+        datasets[key]["funding_rate"] = funding if funding is not None else 0.0
+        datasets[key]["cvd"] = cvd if cvd is not None else 0.0
+
+    return datasets
+
+def background_worker():
     while True:
-        for batch_idx, batch in enumerate(batches, 1):
-            for symbol in batch:
-                CACHE["worker_status"] = f"Scanning batch {batch_idx}/{len(batches)}: {symbol}..."
-                
-                datasets = fetch_single_symbol_safely(symbol)
-                
-                # Active Fallback Triggers using the OKX mapping infrastructure
-                if not datasets:
-                    datasets = fetch_from_okx_fallback(symbol)
-                    
+        for symbol in WATCHLIST:
+            try:
+                datasets = fetch_progressive_datasets(symbol)
                 if datasets:
-                    try:
-                        metrics = scanner.scan_symbol(symbol, datasets)
-                        if metrics:
-                            CACHE["results_dict"][symbol] = metrics
-                        else:
-                            # If the structural filter returns None, remove from candidate list safely
-                            CACHE["results_dict"].pop(symbol, None)
-                    except Exception:
-                        pass
-                time.sleep(0.4)
-                
-            all_current_results = list(CACHE["results_dict"].values())
-            if all_current_results:
-                CACHE["global_temp"] = scanner.calculate_market_temperature(all_current_results)
-                CACHE["last_updated"] = time.strftime("%H:%M:%S UTC")
-                
-            time.sleep(4)
+                    metrics = scanner.scan_symbol(symbol, datasets)
+                    if metrics:
+                        CACHE["results_dict"][symbol] = metrics
+                    else:
+                        CACHE["results_dict"].pop(symbol, None)
+                else:
+                    CACHE["results_dict"].pop(symbol, None)
+            except Exception as e:
+                logging.error(f"Error scanning {symbol}: {e}")
+            time.sleep(0.2)
 
-threading.Thread(target=background_scan_worker, daemon=True).start()
+        all_results = list(CACHE["results_dict"].values())
+        if all_results:
+            CACHE["global_temp"] = scanner.calculate_market_temperature(all_results)
+            CACHE["last_updated"] = time.strftime("%H:%M:%S UTC")
+
+        time.sleep(4)
+
+threading.Thread(target=background_worker, daemon=True).start()
 
 @app.get("/", response_class=HTMLResponse)
-def render_mobile_radar_dashboard():
-    raw_scan_results = sorted(list(CACHE["results_dict"].values()), key=lambda x: x["sort_score"], reverse=True)
-    
-    if not raw_scan_results:
+def render_radar_dashboard():
+    results = sorted(list(CACHE["results_dict"].values()), key=lambda x: x["sort_score"], reverse=True)
+
+    if not results:
         return """
         <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="5">
-        <style>body{font-family:monospace;padding:20px;background:#111;color:#00ff00;text-align:center;}</style></head>
-        <body><h3>Refactoring to 1H/15M/5M Core...</h3><p>Compiling new multi-timeframe matrices. Standby...</p></body></html>
+        <style>body{font-family:monospace;background:#111;color:#00ff00;padding:20px;text-align:center;}</style></head>
+        <body><h3>🛰️ ABOUT TO BREAK RANGE RADAR</h3><p>Progressive 15M->5M->2M Scanning Active...</p></body></html>
         """
 
-    global_temp = CACHE["global_temp"]
-    counts = global_temp["metrics"]
-    
-    dashboard_text = f"""MARKET TEMPERATURE
-{global_temp['temperature']}
-No Range Rejected: [Active Structural Filter]
-Building: {counts.get('BUILDING', 0)}
-Loading: {counts.get('LOADING', 0)}
-About To Break: {counts.get('ABOUT TO BREAK', 0)}
-Critical: {counts.get('CRITICAL', 0)}
-Sync Time: {CACHE['last_updated']} (1H Structural Architecture)
-====================================================="""
+    # Category Grouping
+    critical = [r for r in results if r["status"] == "CRITICAL"]
+    about_break = [r for r in results if r["status"] == "ABOUT TO BREAK"]
+    loading = [r for r in results if r["status"] == "LOADING"]
+    building = [r for r in results if r["status"] == "BUILDING"]
 
-    top_candidate = raw_scan_results[0]
-    dashboard_text += f"""\n\nTOP CANDIDATE
-{top_candidate['symbol']}
-Status: {top_candidate['status']}"""
+    top = results[0]
+    reasons_list = "\n".join([f"  • {r}" for r in top.get("reasons", [])])
 
-    dashboard_text += "\n\nTOP 10 RADAR CANDIDATES\n"
-    for idx, item in enumerate(raw_scan_results[:10], 1):
-        dashboard_text += f"{idx:02d}. {item['symbol']:12s} -> {item['status']}\n"
-    dashboard_text += "====================================================="
+    dashboard_text = f"""=====================================================
+🛰️ ABOUT TO BREAK RANGE RADAR
+=====================================================
+Market Temp:  {CACHE['global_temp']['temperature']}
+Sync Time:    {CACHE['last_updated']}
 
-    # 6. High-Visibility Multi-Timeframe Dashboard Metrics Presentation Layer
-    dashboard_text += f"""\n\n{top_candidate['symbol']} Multi-Timeframe Pressure:
+CATEGORIES
+🔥 Critical:       {len(critical)}
+🟠 About To Break: {len(about_break)}
+🟡 Loading:        {len(loading)}
+🟢 Building:       {len(building)}
+=====================================================
 
-1H Pressure (Structure):  [{top_candidate.get('p_1h', 'N/A')}]
-15M Pressure (Build-up): [{top_candidate.get('p_15m', 'N/A')}]
-5M Pressure (Trigger):   [{top_candidate.get('p_5m', 'N/A')}]
+SELECTED TARGET: {top['symbol']}
+Status:         {top['status']}
+Direction:      {top['direction']}
+Score:          {top['sort_score']} / 100
+Confidence:     {top['confidence']}
 
-Vitals:
-Status:          {top_candidate.get('status', 'N/A')}
-Confidence:      {top_candidate.get('confidence', 'MEDIUM')}
-1H Box Width:    {top_candidate.get('width', 0.0)}%
-1H Box Age:      {top_candidate.get('age', 0)} candles
+15M Range Width: {top['width']}%
+15M Range Age:   {top['age']} candles
 
-Interpretation:
-{top_candidate.get('interpretation', '')}
-====================================================="""
+Market Dynamics:
+Open Interest:  {top['open_interest']:,.0f}
+Funding Rate:   {top['funding_rate']:.4f}%
+CVD Metric:     {top['cvd']:,.2f}
+
+Alert Reasons:
+{reasons_list}
+
+=====================================================
+RADAR WATCHLIST MONITOR
+"""
+    for item in results[:10]:
+        icon = "🔥" if item['status'] == "CRITICAL" else "🟠" if item['status'] == "ABOUT TO BREAK" else "🟡" if item['status'] == "LOADING" else "🟢"
+        dashboard_text += f"{icon} {item['symbol']:18s} | {item['status']:14s} | {item['direction']:7s} | Score: {item['sort_score']}\n"
 
     return f"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="15">
-    <style>body{{background-color:#111;color:#fff;font-family:monospace;font-size:15px;line-height:1.6;padding:15px;margin:0;white-space:pre-wrap;}}</style>
+    <style>body{{background-color:#111;color:#fff;font-family:monospace;font-size:14px;line-height:1.5;padding:15px;margin:0;white-space:pre-wrap;}}</style>
     </head><body>{dashboard_text}</body></html>"""
