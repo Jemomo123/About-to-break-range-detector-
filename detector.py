@@ -1,138 +1,149 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple
 
 class RangeDetector:
-    """
-    Project: About To Break Range Detector
-    Handles structural range condition validation and asset stress categorization.
-    """
-    def __init__(self, config: Dict[str, Any] = None):
-        self.config = config or {
-            "max_width_pct": 3.0,        # Maximum high-to-low width boundary limit
-            "min_age_candles": 12,       # Minimum age required to form a valid structural range
-            "atr_period": 14,            # Historical volatility lookback
-            "funding_threshold": 0.0005, # 0.05% absolute funding crowdedness marker
-            "oi_lookback": 5,            # Lookback frame for calculating open interest delta
-        }
 
-    def detect_range(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """STEP 1: DETECT RANGE FIRST"""
-        if len(df) < self.config["min_age_candles"]:
-            return {"status": "NO RANGE", "width": 0.0, "age": 0, "atr_contract": 0.0}
+    def __init__(self, max_range_width_pct: float = 3.0, min_age_candles: int = 15):
+        self.max_range_width_pct = max_range_width_pct
+        self.min_age_candles = min_age_candles
 
-        # Determine structural coordinates using current window length
-        window = df.tail(self.config["min_age_candles"])
-        highest_high = window["high"].max()
-        lowest_low = window["low"].min()
+    def detect_range_15m(self, df_15m: pd.DataFrame) -> dict:
+        """Requirement 2: Primary range detection anchored on the 15M timeframe."""
+        if df_15m is None or len(df_15m) < self.min_age_candles:
+            return {"is_valid": False, "reason": "Insufficient 15M candles"}
 
-        range_width_pct = ((highest_high - lowest_low) / lowest_low) * 100
+        highs = df_15m["high"].tolist()
+        lows = df_15m["low"].tolist()
+        closes = df_15m["close"].tolist()
 
-        if range_width_pct > self.config["max_width_pct"]:
-            return {"status": "NO RANGE", "width": range_width_pct, "age": 0, "atr_contract": 0.0}
+        lookback = min(30, len(closes))
+        ceiling = max(highs[-lookback:])
+        floor = min(lows[-lookback:])
 
-        # Compute volatility metrics and contraction percentages
-        high_low = df["high"] - df["low"]
-        high_close = np.abs(df["high"] - df["close"].shift())
-        low_close = np.abs(df["low"] - df["close"].shift())
-        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        atr = tr.rolling(window=self.config["atr_period"]).mean()
+        if floor <= 0:
+            return {"is_valid": False, "reason": "Invalid price boundary"}
 
-        current_atr = atr.iloc[-1]
-        historical_atr_avg = atr.tail(self.config["min_age_candles"] * 2).mean()
-        
-        atr_contraction = (
-            ((historical_atr_avg - current_atr) / historical_atr_avg) * 100
-            if historical_atr_avg > 0 else 0.0
-        )
+        width_pct = ((ceiling - floor) / floor) * 100.0
 
-        # Backtest duration boundaries 
+        # Range Age (candles contained within boundary limits)
         age = 0
-        for i in range(1, len(df) + 1):
-            idx = -i
-            if (df["high"].iloc[idx] <= highest_high) and (df["low"].iloc[idx] >= lowest_low):
+        for i in range(len(closes) - 1, -1, -1):
+            if lows[i] >= floor * 0.997 and highs[i] <= ceiling * 1.003:
                 age += 1
             else:
                 break
 
-        if age < self.config["min_age_candles"]:
-            return {"status": "NO RANGE", "width": range_width_pct, "age": age, "atr_contract": atr_contraction}
+        is_valid = (width_pct <= self.max_range_width_pct) and (age >= self.min_age_candles)
 
         return {
-            "status": "VALID",
-            "width": round(range_width_pct, 2),
+            "is_valid": is_valid,
+            "width_pct": round(width_pct, 2),
             "age": age,
-            "atr_contract": round(atr_contraction, 2),
-            "current_atr": current_atr,
-            "historical_atr": historical_atr_avg,
+            "ceiling": ceiling,
+            "floor": floor,
+            "live_price": closes[-1],
         }
 
-    def calculate_pressure(self, df: pd.DataFrame, range_meta: Dict[str, Any]) -> str:
-        """STEP 2: CALCULATE PRESSURE SCORE"""
-        if range_meta["status"] == "NO RANGE":
-            return "NORMAL"
+    def evaluate_pressure(self, datasets: dict) -> dict:
+        """Requirement 6 & 7: Rich output object based on rules 1-6."""
+        df_15m = datasets.get("15m")
+        df_5m = datasets.get("5m")
+        df_2m = datasets.get("2m")
 
+        reasons = []
         score = 0
+        direction = "Neutral"
 
-        # Rule 1: Volatility Contraction
-        if range_meta["current_atr"] < range_meta["historical_atr"]:
-            score += 1
+        if df_15m is None or df_5m is None:
+            return {
+                "pressure": "BUILDING",
+                "score": 0,
+                "direction": "Neutral",
+                "reasons": ["Missing required timeframe data"],
+            }
 
-        # Rule 2: Volume Exhaustion
-        recent_vol = df["volume"].tail(5).mean()
-        hist_vol_avg = df["volume"].tail(self.config["min_age_candles"] * 2).mean()
-        if recent_vol < hist_vol_avg:
-            score += 1
+        range_meta = self.detect_range_15m(df_15m)
+        if not range_meta["is_valid"]:
+            return {
+                "pressure": "BUILDING",
+                "score": 0,
+                "direction": "Neutral",
+                "reasons": ["15M structure does not meet range constraints"],
+            }
 
-        # Rule 3: Advanced Open Interest Scoring
-        oi_growth_pct = 0.0
-        if "open_interest" in df.columns and len(df) >= self.config["oi_lookback"]:
-            oi_start = df["open_interest"].iloc[-self.config["oi_lookback"]]
-            oi_end = df["open_interest"].iloc[-1]
-            if oi_start > 0:
-                oi_growth_pct = ((oi_end - oi_start) / oi_start) * 100
-            
-            if oi_growth_pct > 7.0:
-                score += 2
-            elif oi_growth_pct > 3.0:
-                score += 1
+        # Base Range Score
+        score += 20
+        reasons.append(f"Mature 15M range (Width: {range_meta['width_pct']}%, Age: {range_meta['age']} bars)")
 
-        # Rule 4: Funding Crowd Positioning
-        if "funding_rate" in df.columns:
-            abs_funding = abs(df["funding_rate"].iloc[-1])
-            if abs_funding >= self.config["funding_threshold"]:
-                score += 1
+        # 1. ATR Contraction Check
+        tr_15m = np.mean(df_15m["high"] - df_15m["low"])
+        tr_5m = np.mean(df_5m["high"][-5:] - df_5m["low"][-5:])
+        if tr_15m > 0 and (tr_5m / tr_15m) < 0.65:
+            score += 20
+            reasons.append("ATR volatility contracting on 5M")
 
-        # Rule 5: Range Age Bonus Integration
-        age = range_meta["age"]
-        if age > 40:
-            score += 2
-        elif age > 20:
-            score += 1
+        # 2. Boundary Pressure (5M Grinding Ceiling/Floor)
+        live_price = range_meta["live_price"]
+        ceiling = range_meta["ceiling"]
+        floor = range_meta["floor"]
 
-        # Map complete aggregated score framework
-        classification = {
-            0: "NORMAL", 1: "NORMAL", 2: "BUILDING", 
-            3: "LOADING", 4: "HIGH PRESSURE", 5: "HIGH PRESSURE", 6: "HIGH PRESSURE"
+        dist_ceil = (ceiling - live_price) / ceiling * 100
+        dist_floor = (live_price - floor) / floor * 100
+
+        if dist_ceil <= 0.35:
+            score += 15
+            direction = "Bullish"
+            reasons.append("5M price pressing upper ceiling boundary")
+        elif dist_floor <= 0.35:
+            score += 15
+            direction = "Bearish"
+            reasons.append("5M price pressing lower floor boundary")
+
+        # 3. 2M Entry Trigger Acceleration
+        if df_2m is not None and len(df_2m) >= 3:
+            vol_2m = df_2m["volume"].iloc[-1]
+            vol_avg = np.mean(df_2m["volume"].iloc[-5:-1]) if len(df_2m) >= 5 else vol_2m
+            if vol_avg > 0 and (vol_2m / vol_avg) >= 1.5:
+                score += 15
+                reasons.append("2M volume acceleration detected")
+
+        # 4. Open Interest Check
+        if "open_interest" in df_5m.columns and df_5m["open_interest"].iloc[-1] > 0:
+            oi_val = df_5m["open_interest"].iloc[-1]
+            score += 10
+            reasons.append(f"OI active: {oi_val:,.0f}")
+
+        # 5. Funding Rate Check
+        if "funding_rate" in df_5m.columns and df_5m["funding_rate"].iloc[-1] != 0:
+            fr = df_5m["funding_rate"].iloc[-1]
+            if abs(fr) < 0.0002:
+                score += 10
+                reasons.append(f"Funding rate neutral ({fr:.4f}%)")
+
+        # 6. Rule 6: CVD Confirmation from Coinalyze
+        if "cvd" in df_5m.columns and df_5m["cvd"].iloc[-1] != 0:
+            cvd_val = df_5m["cvd"].iloc[-1]
+            if direction == "Bullish" and cvd_val > 0:
+                score += 10
+                reasons.append("CVD confirming bullish delta pressure")
+            elif direction == "Bearish" and cvd_val < 0:
+                score += 10
+                reasons.append("CVD confirming bearish delta pressure")
+
+        # Determine Final Radar Category Status
+        pressure_label = "BUILDING"
+        if score >= 85:
+            pressure_label = "CRITICAL"
+        elif score >= 65:
+            pressure_label = "ABOUT TO BREAK"
+        elif score >= 40:
+            pressure_label = "LOADING"
+
+        return {
+            "pressure": pressure_label,
+            "score": score,
+            "direction": direction,
+            "reasons": reasons,
+            "width": range_meta["width_pct"],
+            "age": range_meta["age"],
         }
-        return classification.get(score, "NORMAL")
-
-    @staticmethod
-    def fuse_timeframes(p_15m: str, p_5m: str, p_3m: str) -> Tuple[str, str]:
-        """STEP 3: MULTI-TIMEFRAME FUSION"""
-        states = {"NORMAL": 0, "BUILDING": 1, "LOADING": 2, "HIGH PRESSURE": 3}
-        s_15, s_5, s_3 = states[p_15m], states[p_5m], states[p_3m]
-
-        # Critical triggers
-        if s_15 >= 2 and s_5 == 3 and s_3 >= 2: return "CRITICAL", "HIGH"
-        if s_15 == 3 and s_5 == 3 and s_3 == 1: return "CRITICAL", "HIGH"
-
-        # About to Break triggers
-        if s_15 == 2 and s_5 == 2 and s_3 == 1: return "ABOUT TO BREAK", "HIGH"
-        if s_15 >= 2 and s_5 >= 2 and s_3 >= 1: return "ABOUT TO BREAK", "MEDIUM"
-
-        # Loading / Building matrices
-        if s_15 == 2 or (s_5 == 2 and s_3 == 2): return "LOADING", "MEDIUM"
-        if s_15 == 1 or s_5 == 1 or s_5 == 2 or s_3 == 2: return "BUILDING", "LOW"
-        if s_15 == 0 and s_5 == 0 and s_3 == 0: return "STABLE RANGE", "LOW"
-        return "IGNORE", "LOW"
