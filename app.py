@@ -3,10 +3,11 @@ import threading
 import time
 import pandas as pd
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
+from cachetools import TTLCache
 
-# Swapped out Coinalyze for free Binance Futures endpoints
+# Module imports
 import binance_data as coinalyze
 from scanner import MarketScanner
 
@@ -15,7 +16,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 app = FastAPI()
 scanner = MarketScanner()
 
-OKX_BASE_URL = "https://www.okx.com/api/v5"
+OKX_BASE_URL = "https://www.okx.com"
+okx_cache = TTLCache(maxsize=300, ttl=20)
 
 WATCHLIST = [
     "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "DOGE-USDT-SWAP",
@@ -35,8 +37,68 @@ CACHE = {
 }
 
 
+# --- OKX Native Fallback Data Fetchers (Bypasses Shared-IP Rate Limits) ---
+
+def fetch_okx_oi(symbol: str) -> float | None:
+    cache_key = f"oi_{symbol}"
+    if cache_key in okx_cache:
+        return okx_cache[cache_key]
+    try:
+        url = f"{OKX_BASE_URL}/api/v5/public/open-interest?instId={symbol}"
+        res = requests.get(url, timeout=3)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("code") == "0" and data.get("data"):
+                val = float(data["data"][0].get("oi", 0.0))
+                okx_cache[cache_key] = val
+                return val
+    except Exception as e:
+        logging.debug(f"[OKX OI Error] {symbol}: {e}")
+    return None
+
+
+def fetch_okx_funding(symbol: str) -> float | None:
+    cache_key = f"funding_{symbol}"
+    if cache_key in okx_cache:
+        return okx_cache[cache_key]
+    try:
+        url = f"{OKX_BASE_URL}/api/v5/public/funding-rate?instId={symbol}"
+        res = requests.get(url, timeout=3)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("code") == "0" and data.get("data"):
+                val = float(data["data"][0].get("fundingRate", 0.0))
+                okx_cache[cache_key] = val
+                return val
+    except Exception as e:
+        logging.debug(f"[OKX Funding Error] {symbol}: {e}")
+    return None
+
+
+def fetch_okx_cvd(symbol: str) -> float | None:
+    cache_key = f"cvd_{symbol}"
+    if cache_key in okx_cache:
+        return okx_cache[cache_key]
+    try:
+        url = f"{OKX_BASE_URL}/api/v5/market/trades?instId={symbol}&limit=100"
+        res = requests.get(url, timeout=3)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("code") == "0" and data.get("data"):
+                trades = data["data"]
+                buy_vol = sum(float(t.get("sz", 0)) for t in trades if t.get("side") == "buy")
+                sell_vol = sum(float(t.get("sz", 0)) for t in trades if t.get("side") == "sell")
+                cvd = buy_vol - sell_vol
+                okx_cache[cache_key] = cvd
+                return cvd
+    except Exception as e:
+        logging.debug(f"[OKX CVD Error] {symbol}: {e}")
+    return None
+
+
+# --- Formatters ---
+
 def format_oi(value: float | None) -> str:
-    """Formats Open Interest into readable currency format ($5.81B, $120.5M)."""
     if value is None or value == 0:
         return "N/A"
     if value >= 1e9:
@@ -49,14 +111,12 @@ def format_oi(value: float | None) -> str:
 
 
 def format_funding(value: float | None) -> str:
-    """Formats Funding Rate into percentage representation (e.g. 0.0062%)."""
     if value is None:
         return "N/A"
     return f"{value * 100:.4f}%"
 
 
 def format_cvd(value: float | None) -> str:
-    """Formats Cumulative Volume Delta into signed unit strings (+18.4M, -2.1M)."""
     if value is None or value == 0:
         return "N/A"
     prefix = "+" if value > 0 else ""
@@ -72,7 +132,7 @@ def format_cvd(value: float | None) -> str:
 
 def fetch_okx_candles(symbol: str, bar: str, limit: int = 50) -> pd.DataFrame | None:
     try:
-        url = f"{OKX_BASE_URL}/market/candles?instId={symbol}&bar={bar}&limit={limit}"
+        url = f"{OKX_BASE_URL}/api/v5/market/candles?instId={symbol}&bar={bar}&limit={limit}"
         res = requests.get(url, timeout=4).json()
         if res.get("code") == "0" and "data" in res:
             raw = res["data"]
@@ -112,10 +172,10 @@ def fetch_progressive_datasets(symbol: str) -> dict | None:
     df_2m = fetch_okx_candles(symbol, "2m", limit=50)
     datasets["2m"] = df_2m if df_2m is not None else df_5m
 
-    # 4. Fetch Binance Metrics via alias (Falls back gracefully to None if unavailable)
-    oi = coinalyze.get_open_interest(symbol)
-    funding = coinalyze.get_funding_rate(symbol)
-    cvd = coinalyze.get_cvd(symbol)
+    # 4. Fetch metrics with automatic fallback to OKX API if Binance rate limits hit
+    oi = coinalyze.get_open_interest(symbol) or fetch_okx_oi(symbol)
+    funding = coinalyze.get_funding_rate(symbol) or fetch_okx_funding(symbol)
+    cvd = coinalyze.get_cvd(symbol) or fetch_okx_cvd(symbol)
 
     for key in datasets:
         datasets[key]["open_interest"] = oi
@@ -153,7 +213,14 @@ def background_worker():
 threading.Thread(target=background_worker, daemon=True).start()
 
 
-@app.get("/", response_class=HTMLResponse)
+# --- Health check endpoint for Render ---
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+
+
+# --- Primary Route: Handles HEAD and GET to satisfy Render Health Checks ---
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def render_radar_dashboard():
     results = sorted(list(CACHE["results_dict"].values()), key=lambda x: x["sort_score"], reverse=True)
 
@@ -172,7 +239,6 @@ def render_radar_dashboard():
     top = results[0]
     bd = top["breakdown"]
 
-    # Applied human-readable formatters
     oi_disp = format_oi(top['open_interest'])
     funding_disp = format_funding(top['funding_rate'])
     cvd_disp = format_cvd(top['cvd'])
