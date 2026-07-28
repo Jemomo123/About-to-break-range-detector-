@@ -6,7 +6,8 @@ import requests
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-import coinalyze
+# Swapped out Coinalyze for free Binance Futures endpoints
+import binance_data as coinalyze
 from scanner import MarketScanner
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -111,7 +112,7 @@ def fetch_progressive_datasets(symbol: str) -> dict | None:
     df_2m = fetch_okx_candles(symbol, "2m", limit=50)
     datasets["2m"] = df_2m if df_2m is not None else df_5m
 
-    # 4. Fetch Coinalyze (Falls back gracefully to None if unavailable)
+    # 4. Fetch Binance Metrics via alias (Falls back gracefully to None if unavailable)
     oi = coinalyze.get_open_interest(symbol)
     funding = coinalyze.get_funding_rate(symbol)
     cvd = coinalyze.get_cvd(symbol)
