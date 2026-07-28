@@ -9,9 +9,9 @@ class MarketScanner:
         if df_15m is None or len(df_15m) < 15:
             return False
         
-        high = df_15m["high"].max()
-        low = df_15m["low"].min()
-        close = df_15m["close"].iloc[-1]
+        high = float(df_15m["high"].max())
+        low = float(df_15m["low"].min())
+        close = float(df_15m["close"].iloc[-1])
         width_pct = ((high - low) / close) * 100
         
         return width_pct <= 3.5  
@@ -24,8 +24,19 @@ class MarketScanner:
         near_ceiling = dist_ceil_pct <= 0.6
         near_floor = dist_floor_pct <= 0.6
         
-        cvd_buying = cvd is not None and cvd > 0
-        cvd_selling = cvd is not None and cvd < 0
+        # Safely extract scalar numeric values
+        try:
+            cvd_val = float(cvd) if cvd is not None else None
+        except (ValueError, TypeError):
+            cvd_val = None
+
+        try:
+            funding_val = float(funding_rate) if funding_rate is not None else None
+        except (ValueError, TypeError):
+            funding_val = None
+
+        cvd_buying = cvd_val is not None and cvd_val > 0
+        cvd_selling = cvd_val is not None and cvd_val < 0
 
         # 1. ABSORPTION (High Taker Effort, Price Fails to Advance)
         if cvd_buying and not near_ceiling:
@@ -42,10 +53,10 @@ class MarketScanner:
             return "SELLERS DOMINATING 📉"
 
         # 3. TRAP / OVERCROWDED
-        if funding_rate is not None:
-            if funding_rate > 0.01 and near_ceiling and cvd_selling:
+        if funding_val is not None:
+            if funding_val > 0.01 and near_ceiling and cvd_selling:
                 return "LONG TRAP BUILDING ⚠️"
-            if funding_rate < -0.01 and near_floor and cvd_buying:
+            if funding_val < -0.01 and near_floor and cvd_buying:
                 return "SHORT TRAP BUILDING ⚠️"
 
         # 4. BALANCED
@@ -53,9 +64,9 @@ class MarketScanner:
 
     def scan_symbol(self, symbol, datasets):
         df_15m = datasets["15m"]
-        live_price = df_15m["close"].iloc[-1]
-        ceiling = df_15m["high"].max()
-        floor = df_15m["low"].min()
+        live_price = float(df_15m["close"].iloc[-1])
+        ceiling = float(df_15m["high"].max())
+        floor = float(df_15m["low"].min())
         
         width = round(((ceiling - floor) / live_price) * 100, 2)
         dist_ceil_pct = round(((ceiling - live_price) / live_price) * 100, 2)
@@ -69,7 +80,7 @@ class MarketScanner:
             dist_ceil_pct=dist_ceil_pct,
             dist_floor_pct=dist_floor_pct,
             cvd=cvd,
-            oi_change=1, # Baseline delta for now
+            oi_change=1,
             funding_rate=funding
         )
         
