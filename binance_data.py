@@ -4,87 +4,78 @@ from cachetools import TTLCache
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# 20-second cache prevents hitting Binance rate limits on scan cycles
+# Cache results for 20 seconds to prevent hitting API limits
 cache = TTLCache(maxsize=300, ttl=20)
-BINANCE_BASE_URL = "https://fapi.binance.com"
-
-
-def _clean_symbol(symbol: str) -> str:
-    """Converts OKX symbol (e.g. BTC-USDT-SWAP or BTC-USDT) to Binance format (BTCUSDT)."""
-    return symbol.replace("-USDT-SWAP", "USDT").replace("-", "").strip().upper()
+OKX_BASE_URL = "https://www.okx.com"
 
 
 def get_open_interest(symbol: str) -> float | None:
-    """Fetches Open Interest in contract units directly from Binance Futures."""
-    clean_sym = _clean_symbol(symbol)
-    cache_key = f"oi_{clean_sym}"
+    """Fetches Open Interest directly from OKX API v5 (matches OKX ticker formats)."""
+    cache_key = f"oi_{symbol}"
     if cache_key in cache:
         return cache[cache_key]
 
     try:
-        url = f"{BINANCE_BASE_URL}/fapi/v1/openInterest?symbol={clean_sym}"
+        url = f"{OKX_BASE_URL}/api/v5/public/open-interest?instId={symbol}"
         res = requests.get(url, timeout=4)
         if res.status_code == 200:
             data = res.json()
-            oi_contracts = float(data.get("openInterest", 0.0))
-            cache[cache_key] = oi_contracts
-            return oi_contracts
-        else:
-            logging.warning(f"[Binance OI HTTP {res.status_code}] {clean_sym}: {res.text}")
+            if data.get("code") == "0" and data.get("data"):
+                oi_val = float(data["data"][0].get("oi", 0.0))
+                cache[cache_key] = oi_val
+                return oi_val
+        logging.warning(f"[OKX OI Response Error] {symbol}: {res.text}")
     except Exception as e:
-        logging.warning(f"[Binance OI Error] {clean_sym}: {e}")
+        logging.warning(f"[OKX OI Exception] {symbol}: {e}")
 
     cache[cache_key] = None
     return None
 
 
 def get_funding_rate(symbol: str) -> float | None:
-    """Fetches real-time estimated Funding Rate directly from Binance Futures."""
-    clean_sym = _clean_symbol(symbol)
-    cache_key = f"funding_{clean_sym}"
+    """Fetches real-time Funding Rate directly from OKX API v5."""
+    cache_key = f"funding_{symbol}"
     if cache_key in cache:
         return cache[cache_key]
 
     try:
-        url = f"{BINANCE_BASE_URL}/fapi/v1/premiumIndex?symbol={clean_sym}"
+        url = f"{OKX_BASE_URL}/api/v5/public/funding-rate?instId={symbol}"
         res = requests.get(url, timeout=4)
         if res.status_code == 200:
             data = res.json()
-            funding = float(data.get("lastFundingRate", 0.0))
-            cache[cache_key] = funding
-            return funding
-        else:
-            logging.warning(f"[Binance Funding HTTP {res.status_code}] {clean_sym}: {res.text}")
+            if data.get("code") == "0" and data.get("data"):
+                funding = float(data["data"][0].get("fundingRate", 0.0))
+                cache[cache_key] = funding
+                return funding
+        logging.warning(f"[OKX Funding Response Error] {symbol}: {res.text}")
     except Exception as e:
-        logging.warning(f"[Binance Funding Error] {clean_sym}: {e}")
+        logging.warning(f"[OKX Funding Exception] {symbol}: {e}")
 
     cache[cache_key] = None
     return None
 
 
-def get_cvd(symbol: str, period: str = "15m", limit: int = 15) -> float | None:
-    """Calculates Net Taker CVD using exact Taker Buy vs Taker Sell volume from Binance Futures."""
-    clean_sym = _clean_symbol(symbol)
-    cache_key = f"cvd_{clean_sym}_{period}"
+def get_cvd(symbol: str) -> float | None:
+    """Estimates taker buy/sell volume imbalance from OKX recent trades."""
+    cache_key = f"cvd_{symbol}"
     if cache_key in cache:
         return cache[cache_key]
 
     try:
-        url = f"{BINANCE_BASE_URL}/futures/data/takerlongshortRatio?pair={clean_sym}&period={period}&limit={limit}"
+        url = f"{OKX_BASE_URL}/api/v5/market/trades?instId={symbol}&limit=100"
         res = requests.get(url, timeout=4)
         if res.status_code == 200:
             data = res.json()
-            if isinstance(data, list) and len(data) > 0:
-                total_buy = sum(float(item.get("buyVol", 0)) for item in data)
-                total_sell = sum(float(item.get("sellVol", 0)) for item in data)
-                
-                cvd = total_buy - total_sell
+            if data.get("code") == "0" and data.get("data"):
+                trades = data["data"]
+                buy_vol = sum(float(t.get("sz", 0)) for t in trades if t.get("side") == "buy")
+                sell_vol = sum(float(t.get("sz", 0)) for t in trades if t.get("side") == "sell")
+                cvd = buy_vol - sell_vol
                 cache[cache_key] = cvd
                 return cvd
-        else:
-            logging.warning(f"[Binance CVD HTTP {res.status_code}] {clean_sym}: {res.text}")
+        logging.warning(f"[OKX CVD Response Error] {symbol}: {res.text}")
     except Exception as e:
-        logging.warning(f"[Binance CVD Error] {clean_sym}: {e}")
+        logging.warning(f"[OKX CVD Exception] {symbol}: {e}")
 
     cache[cache_key] = None
     return None
