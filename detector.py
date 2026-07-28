@@ -1,5 +1,9 @@
 import numpy as np
 import pandas as pd
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 
 class RangeDetector:
 
@@ -8,7 +12,6 @@ class RangeDetector:
         self.min_age_candles = min_age_candles
 
     def detect_range_15m(self, df_15m: pd.DataFrame) -> dict:
-        """Requirement 2: Primary range detection anchored on the 15M timeframe."""
         if df_15m is None or len(df_15m) < self.min_age_candles:
             return {"is_valid": False, "reason": "Insufficient 15M candles"}
 
@@ -25,7 +28,6 @@ class RangeDetector:
 
         width_pct = ((ceiling - floor) / floor) * 100.0
 
-        # Range Age (candles contained within boundary limits)
         age = 0
         for i in range(len(closes) - 1, -1, -1):
             if lows[i] >= floor * 0.997 and highs[i] <= ceiling * 1.003:
@@ -35,31 +37,45 @@ class RangeDetector:
 
         is_valid = (width_pct <= self.max_range_width_pct) and (age >= self.min_age_candles)
 
+        live_price = closes[-1]
+        dist_ceil_pct = max(0.0, ((ceiling - live_price) / live_price) * 100.0)
+        dist_floor_pct = max(0.0, ((live_price - floor) / live_price) * 100.0)
+
         return {
             "is_valid": is_valid,
             "width_pct": round(width_pct, 2),
             "age": age,
             "ceiling": ceiling,
             "floor": floor,
-            "live_price": closes[-1],
+            "live_price": live_price,
+            "dist_ceil_pct": round(dist_ceil_pct, 2),
+            "dist_floor_pct": round(dist_floor_pct, 2),
         }
 
     def evaluate_pressure(self, datasets: dict) -> dict:
-        """Requirement 6 & 7: Rich output object based on rules 1-6."""
         df_15m = datasets.get("15m")
         df_5m = datasets.get("5m")
         df_2m = datasets.get("2m")
 
+        score_breakdown = {
+            "Range Quality": 0,
+            "Open Interest": 0,
+            "CVD": 0,
+            "ATR Compression": 0,
+            "Funding": 0,
+            "Volume": 0,
+        }
+
         reasons = []
-        score = 0
-        direction = "Neutral"
 
         if df_15m is None or df_5m is None:
             return {
                 "pressure": "BUILDING",
                 "score": 0,
-                "direction": "Neutral",
-                "reasons": ["Missing required timeframe data"],
+                "bullish_prob": 50,
+                "bearish_prob": 50,
+                "reasons": ["Missing timeframe data"],
+                "breakdown": score_breakdown,
             }
 
         range_meta = self.detect_range_15m(df_15m)
@@ -67,83 +83,127 @@ class RangeDetector:
             return {
                 "pressure": "BUILDING",
                 "score": 0,
-                "direction": "Neutral",
-                "reasons": ["15M structure does not meet range constraints"],
+                "bullish_prob": 50,
+                "bearish_prob": 50,
+                "reasons": ["15M structure fails range constraints"],
+                "breakdown": score_breakdown,
             }
 
-        # Base Range Score
-        score += 20
-        reasons.append(f"Mature 15M range (Width: {range_meta['width_pct']}%, Age: {range_meta['age']} bars)")
+        # 1. RANGE QUALITY (30% Max Weight)
+        range_q_points = 15  # Base valid range points
+        if range_meta["width_pct"] <= 1.5:
+            range_q_points += 10
+        elif range_meta["width_pct"] <= 2.5:
+            range_q_points += 5
 
-        # 1. ATR Contraction Check
+        if range_meta["age"] >= 30:
+            range_q_points += 5
+
+        score_breakdown["Range Quality"] = range_q_points
+        reasons.append(f"Range Quality: +{range_q_points} (Width: {range_meta['width_pct']}%, Age: {range_meta['age']} bars)")
+
+        # 2. ATR COMPRESSION (15% Max Weight)
         tr_15m = np.mean(df_15m["high"] - df_15m["low"])
         tr_5m = np.mean(df_5m["high"][-5:] - df_5m["low"][-5:])
-        if tr_15m > 0 and (tr_5m / tr_15m) < 0.65:
-            score += 20
-            reasons.append("ATR volatility contracting on 5M")
+        if tr_15m > 0:
+            atr_ratio = tr_5m / tr_15m
+            if atr_ratio < 0.50:
+                score_breakdown["ATR Compression"] = 15
+                reasons.append("ATR Compression: +15 (5M ATR highly compressed)")
+            elif atr_ratio < 0.65:
+                score_breakdown["ATR Compression"] = 10
+                reasons.append("ATR Compression: +10 (5M ATR contracting)")
 
-        # 2. Boundary Pressure (5M Grinding Ceiling/Floor)
-        live_price = range_meta["live_price"]
-        ceiling = range_meta["ceiling"]
-        floor = range_meta["floor"]
+        # 3. VOLUME ACCELERATION (5% Max Weight)
+        if df_2m is not None and len(df_2m) >= 5:
+            vol_2m = df_2m["volume"].iloc[-1]
+            vol_avg = np.mean(df_2m["volume"].iloc[-5:-1])
+            if vol_avg > 0 and (vol_2m / vol_avg) >= 1.5:
+                score_breakdown["Volume"] = 5
+                reasons.append("Volume: +5 (2M trigger volume spike)")
 
-        dist_ceil = (ceiling - live_price) / ceiling * 100
-        dist_floor = (live_price - floor) / floor * 100
+        # Directional Probability Logic
+        bullish_bias_points = 0
+        bearish_bias_points = 0
+
+        # Boundary Proximity Check
+        dist_ceil = range_meta["dist_ceil_pct"]
+        dist_floor = range_meta["dist_floor_pct"]
 
         if dist_ceil <= 0.35:
-            score += 15
-            direction = "Bullish"
-            reasons.append("5M price pressing upper ceiling boundary")
+            bullish_bias_points += 2
+            reasons.append("Price grinding against upper ceiling")
         elif dist_floor <= 0.35:
-            score += 15
-            direction = "Bearish"
-            reasons.append("5M price pressing lower floor boundary")
+            bearish_bias_points += 2
+            reasons.append("Price grinding against lower floor")
 
-        # 3. 2M Entry Trigger Acceleration
-        if df_2m is not None and len(df_2m) >= 3:
-            vol_2m = df_2m["volume"].iloc[-1]
-            vol_avg = np.mean(df_2m["volume"].iloc[-5:-1]) if len(df_2m) >= 5 else vol_2m
-            if vol_avg > 0 and (vol_2m / vol_avg) >= 1.5:
-                score += 15
-                reasons.append("2M volume acceleration detected")
+        # 4. OPEN INTEREST (25% Max Weight)
+        oi_val = df_5m["open_interest"].iloc[-1] if "open_interest" in df_5m.columns else None
+        if oi_val is not None and oi_val > 0:
+            score_breakdown["Open Interest"] = 25
+            reasons.append("Open Interest: +25 (Active OI confirmation)")
+            bullish_bias_points += 1
+        else:
+            reasons.append("Open Interest: N/A (Using technical fallback)")
 
-        # 4. Open Interest Check
-        if "open_interest" in df_5m.columns and df_5m["open_interest"].iloc[-1] > 0:
-            oi_val = df_5m["open_interest"].iloc[-1]
-            score += 10
-            reasons.append(f"OI active: {oi_val:,.0f}")
+        # 5. FUNDING RATE (5% Max Weight)
+        funding_val = df_5m["funding_rate"].iloc[-1] if "funding_rate" in df_5m.columns else None
+        if funding_val is not None:
+            score_breakdown["Funding"] = 5
+            reasons.append("Funding: +5 (Predicted funding available)")
+            if funding_val < 0:
+                bullish_bias_points += 1  # Short squeeze bias
+            elif funding_val > 0:
+                bearish_bias_points += 1
+        else:
+            reasons.append("Funding: N/A")
 
-        # 5. Funding Rate Check
-        if "funding_rate" in df_5m.columns and df_5m["funding_rate"].iloc[-1] != 0:
-            fr = df_5m["funding_rate"].iloc[-1]
-            if abs(fr) < 0.0002:
-                score += 10
-                reasons.append(f"Funding rate neutral ({fr:.4f}%)")
+        # 6. CVD CONFIRMATION (20% Max Weight)
+        cvd_val = df_5m["cvd"].iloc[-1] if "cvd" in df_5m.columns else None
+        if cvd_val is not None and cvd_val != 0:
+            score_breakdown["CVD"] = 20
+            reasons.append("CVD: +20 (Delta volume confirming setup)")
+            if cvd_val > 0:
+                bullish_bias_points += 2
+            else:
+                bearish_bias_points += 2
+        else:
+            reasons.append("CVD: N/A")
 
-        # 6. Rule 6: CVD Confirmation from Coinalyze
-        if "cvd" in df_5m.columns and df_5m["cvd"].iloc[-1] != 0:
-            cvd_val = df_5m["cvd"].iloc[-1]
-            if direction == "Bullish" and cvd_val > 0:
-                score += 10
-                reasons.append("CVD confirming bullish delta pressure")
-            elif direction == "Bearish" and cvd_val < 0:
-                score += 10
-                reasons.append("CVD confirming bearish delta pressure")
+        # Total Dynamic Weighted Score (0 to 100)
+        final_score = min(100, sum(score_breakdown.values()))
 
-        # Determine Final Radar Category Status
-        pressure_label = "BUILDING"
-        if score >= 85:
+        # Probability Calculations
+        total_bias = bullish_bias_points + bearish_bias_points
+        if total_bias == 0:
+            bullish_prob = 50
+            bearish_prob = 50
+        else:
+            bullish_prob = int((bullish_bias_points / total_bias) * 100)
+            bearish_prob = 100 - bullish_prob
+
+        # Category Filtering Thresholds
+        if final_score >= 80:
             pressure_label = "CRITICAL"
-        elif score >= 65:
+        elif final_score >= 65:
             pressure_label = "ABOUT TO BREAK"
-        elif score >= 40:
+        elif final_score >= 45:
             pressure_label = "LOADING"
+        else:
+            pressure_label = "BUILDING"
 
         return {
             "pressure": pressure_label,
-            "score": score,
-            "direction": direction,
+            "score": final_score,
+            "bullish_prob": bullish_prob,
+            "bearish_prob": bearish_prob,
             "reasons": reasons,
+            "breakdown": score_breakdown,
             "width": range_meta["width_pct"],
             "age": range_meta["age"],
+            "ceiling": range_meta["ceiling"],
+            "floor": range_meta["floor"],
+            "live_price": range_meta["live_price"],
+            "dist_ceil_pct": range_meta["dist_ceil_pct"],
+            "dist_floor_pct": range_meta["dist_floor_pct"],
         }
