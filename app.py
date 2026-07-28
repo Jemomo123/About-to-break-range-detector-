@@ -34,6 +34,41 @@ CACHE = {
 }
 
 
+def format_oi(value: float | None) -> str:
+    """Formats Open Interest into readable currency format ($5.81B, $120.5M)."""
+    if value is None or value == 0:
+        return "N/A"
+    if value >= 1e9:
+        return f"${value / 1e9:.2f}B"
+    if value >= 1e6:
+        return f"${value / 1e6:.2f}M"
+    if value >= 1e3:
+        return f"${value / 1e3:.2f}K"
+    return f"${value:.2f}"
+
+
+def format_funding(value: float | None) -> str:
+    """Formats Funding Rate into percentage representation (e.g. 0.0062%)."""
+    if value is None:
+        return "N/A"
+    return f"{value * 100:.4f}%"
+
+
+def format_cvd(value: float | None) -> str:
+    """Formats Cumulative Volume Delta into signed unit strings (+18.4M, -2.1M)."""
+    if value is None or value == 0:
+        return "N/A"
+    prefix = "+" if value > 0 else ""
+    abs_val = abs(value)
+    if abs_val >= 1e9:
+        return f"{prefix}{value / 1e9:.2f}B"
+    if abs_val >= 1e6:
+        return f"{prefix}{value / 1e6:.2f}M"
+    if abs_val >= 1e3:
+        return f"{prefix}{value / 1e3:.2f}K"
+    return f"{prefix}{value:.2f}"
+
+
 def fetch_okx_candles(symbol: str, bar: str, limit: int = 50) -> pd.DataFrame | None:
     try:
         url = f"{OKX_BASE_URL}/market/candles?instId={symbol}&bar={bar}&limit={limit}"
@@ -76,7 +111,7 @@ def fetch_progressive_datasets(symbol: str) -> dict | None:
     df_2m = fetch_okx_candles(symbol, "2m", limit=50)
     datasets["2m"] = df_2m if df_2m is not None else df_5m
 
-    # 4. Fetch Coinalyze (Fall back gracefully if unavailable)
+    # 4. Fetch Coinalyze (Falls back gracefully to None if unavailable)
     oi = coinalyze.get_open_interest(symbol)
     funding = coinalyze.get_funding_rate(symbol)
     cvd = coinalyze.get_cvd(symbol)
@@ -136,9 +171,10 @@ def render_radar_dashboard():
     top = results[0]
     bd = top["breakdown"]
 
-    oi_disp = f"{top['open_interest']:,.0f}" if top['open_interest'] is not None else "N/A"
-    funding_disp = f"{top['funding_rate']:.4f}%" if top['funding_rate'] is not None else "N/A"
-    cvd_disp = f"{top['cvd']:,.2f}" if top['cvd'] is not None else "N/A"
+    # Applied human-readable formatters
+    oi_disp = format_oi(top['open_interest'])
+    funding_disp = format_funding(top['funding_rate'])
+    cvd_disp = format_cvd(top['cvd'])
 
     dashboard_text = f"""=====================================================
 🛰️ ABOUT TO BREAK RANGE RADAR
