@@ -202,8 +202,7 @@ def render_radar_dashboard():
     funding_disp = format_funding(top['funding_rate'])
     cvd_disp = format_cvd(top['cvd'])
 
-    agreed_str = ", ".join(top['agreed'])
-    conflicted_str = ", ".join(top['conflicted'])
+    evidence_formatted = "\n".join(top['evidence'])
 
     dashboard_text = f"""=====================================================
 🛰️ ABOUT TO BREAK RANGE RADAR
@@ -222,13 +221,14 @@ SELECTED TARGET: {top['symbol']}
 Status:         {top['status']}
 
 MARKET CONTROL ENGINE:
-State:       {top['control_state']}
-Confidence:  {top['confidence']}%
-Reason:      {top['explanation']}
+State:      {top['control_state']}
+Confidence: {top['confidence']}%
 
-Evidence Alignment:
-[+] Agreed:     {agreed_str}
-[-] Conflicted: {conflicted_str}
+Reason:
+{top['explanation']}
+
+Evidence:
+{evidence_formatted}
 
 Distance to Breakout:
 Current Price:  {top['live_price']}
