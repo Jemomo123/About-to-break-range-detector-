@@ -33,7 +33,6 @@ CACHE = {
 }
 
 def clean_val(val):
-    """Safely unwraps pandas Series or scalar value into a float or None."""
     if val is None:
         return None
     if isinstance(val, pd.Series):
@@ -203,6 +202,9 @@ def render_radar_dashboard():
     funding_disp = format_funding(top['funding_rate'])
     cvd_disp = format_cvd(top['cvd'])
 
+    agreed_str = ", ".join(top['agreed'])
+    conflicted_str = ", ".join(top['conflicted'])
+
     dashboard_text = f"""=====================================================
 🛰️ ABOUT TO BREAK RANGE RADAR
 =====================================================
@@ -218,16 +220,22 @@ CATEGORIES
 
 SELECTED TARGET: {top['symbol']}
 Status:         {top['status']}
-Market Control:
-{top['control_state']}
+
+MARKET CONTROL ENGINE:
+State:       {top['control_state']}
+Confidence:  {top['confidence']}%
+Reason:      {top['explanation']}
+
+Evidence Alignment:
+[+] Agreed:     {agreed_str}
+[-] Conflicted: {conflicted_str}
 
 Distance to Breakout:
 Current Price:  {top['live_price']}
 Upper Boundary: {top['ceiling']} (Distance: {top['dist_ceil_pct']}%)
 Lower Boundary: {top['floor']} (Distance: {top['dist_floor_pct']}%)
 
-15M Range Width: {top['width']}%
-15M Range Age:   {top['age']} candles
+15M Range Width: {top['width']}% | Age: {top['age']} candles
 
 Market Dynamics:
 Open Interest:  {oi_disp}
@@ -240,7 +248,7 @@ RADAR WATCHLIST MONITOR
     for item in results[:10]:
         icon = "🔥" if item['status'] == "CRITICAL" else "🟠" if item['status'] == "ABOUT TO BREAK" else "🟡" if item['status'] == "LOADING" else "🟢"
         clean_status = item['status'].replace("ABOUT TO BREAK", "ABOUT BREAK")
-        dashboard_text += f"{icon} {item['symbol']:15s} | {clean_status}\n   └ {item['control_state']}\n"
+        dashboard_text += f"{icon} {item['symbol']:15s} | {clean_status}\n   └ {item['control_state']} ({item['confidence']}%)\n"
 
     return f"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="15">
     <style>body{{background-color:#111;color:#fff;font-family:monospace;font-size:13px;line-height:1.4;padding:12px;margin:0;white-space:pre-wrap;}}</style>
