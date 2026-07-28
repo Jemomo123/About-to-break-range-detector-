@@ -217,29 +217,31 @@ CATEGORIES
 =====================================================
 
 SELECTED TARGET: {top['symbol']}
-Status:              {top['status']}
-Market Control:      {top['control_state']}
+Status:         {top['status']}
+Market Control:
+{top['control_state']}
 
 Distance to Breakout:
-Current Price:       {top['live_price']}
-Upper Boundary:      {top['ceiling']} (Distance: {top['dist_ceil_pct']}%)
-Lower Boundary:      {top['floor']} (Distance: {top['dist_floor_pct']}%)
+Current Price:  {top['live_price']}
+Upper Boundary: {top['ceiling']} (Distance: {top['dist_ceil_pct']}%)
+Lower Boundary: {top['floor']} (Distance: {top['dist_floor_pct']}%)
 
-15M Range Width:     {top['width']}%
-15M Range Age:       {top['age']} candles
+15M Range Width: {top['width']}%
+15M Range Age:   {top['age']} candles
 
 Market Dynamics:
-Open Interest:       {oi_disp}
-Funding Rate:        {funding_disp}
-CVD Metric:          {cvd_disp}
+Open Interest:  {oi_disp}
+Funding Rate:   {funding_disp}
+CVD Metric:     {cvd_disp}
 
 =====================================================
 RADAR WATCHLIST MONITOR
 """
     for item in results[:10]:
         icon = "🔥" if item['status'] == "CRITICAL" else "🟠" if item['status'] == "ABOUT TO BREAK" else "🟡" if item['status'] == "LOADING" else "🟢"
-        dashboard_text += f"{icon} {item['symbol']:18s} | {item['status']:14s}\n   └ Control: {item['control_state']}\n"
+        clean_status = item['status'].replace("ABOUT TO BREAK", "ABOUT BREAK")
+        dashboard_text += f"{icon} {item['symbol']:15s} | {clean_status}\n   └ {item['control_state']}\n"
 
     return f"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="15">
-    <style>body{{background-color:#111;color:#fff;font-family:monospace;font-size:14px;line-height:1.5;padding:15px;margin:0;white-space:pre-wrap;}}</style>
+    <style>body{{background-color:#111;color:#fff;font-family:monospace;font-size:13px;line-height:1.4;padding:12px;margin:0;white-space:pre-wrap;}}</style>
     </head><body>{dashboard_text}</body></html>"""
