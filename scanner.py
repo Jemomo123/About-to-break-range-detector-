@@ -1,73 +1,109 @@
-import logging
-from detector import RangeDetector
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
+import pandas as pd
 
 class MarketScanner:
-
     def __init__(self):
-        self.detector = RangeDetector(max_range_width_pct=3.0, min_age_candles=15)
+        pass
 
-    def is_15m_range_valid(self, df_15m) -> bool:
-        if df_15m is None:
+    def is_15m_range_valid(self, df_15m):
+        """Strict 15M Range Gate Check - only tracks compressed ranges."""
+        if df_15m is None or len(df_15m) < 15:
             return False
-        res = self.detector.detect_range_15m(df_15m)
-        return res["is_valid"]
+        
+        high = df_15m["high"].max()
+        low = df_15m["low"].min()
+        close = df_15m["close"].iloc[-1]
+        width_pct = ((high - low) / close) * 100
+        
+        return width_pct <= 3.5  
 
-    def scan_symbol(self, symbol: str, datasets: dict) -> dict | None:
-        if not datasets or "15m" not in datasets or "5m" not in datasets:
-            return None
+    def determine_market_control(self, dist_ceil_pct, dist_floor_pct, cvd, oi_change, funding_rate):
+        """
+        Interprets Effort vs. Result inside the range.
+        Determines who is actually winning the battle.
+        """
+        near_ceiling = dist_ceil_pct <= 0.6
+        near_floor = dist_floor_pct <= 0.6
+        
+        cvd_buying = cvd is not None and cvd > 0
+        cvd_selling = cvd is not None and cvd < 0
 
-        pressure_obj = self.detector.evaluate_pressure(datasets)
+        # 1. ABSORPTION (High Taker Effort, Price Fails to Advance)
+        if cvd_buying and not near_ceiling:
+            return "BUYERS BEING ABSORBED 🛑"
+            
+        if cvd_selling and not near_floor:
+            return "SELLERS BEING ABSORBED 🛑"
 
-        df_5m = datasets["5m"]
-        oi_val = df_5m["open_interest"].iloc[-1] if "open_interest" in df_5m.columns else None
-        funding_val = df_5m["funding_rate"].iloc[-1] if "funding_rate" in df_5m.columns else None
-        cvd_val = df_5m["cvd"].iloc[-1] if "cvd" in df_5m.columns else None
+        # 2. DOMINANCE (Aggressive Takers Moving Price to Boundaries)
+        if cvd_buying and near_ceiling:
+            return "BUYERS DOMINATING 📈"
+            
+        if cvd_selling and near_floor:
+            return "SELLERS DOMINATING 📉"
 
-        logging.info(
-            f"[Scan Result] Symbol: {symbol} | Status: {pressure_obj['pressure']} | "
-            f"Score: {pressure_obj['score']} | Bullish: {pressure_obj['bullish_prob']}% | "
-            f"OI: {'N/A' if oi_val is None else oi_val} | "
-            f"Funding: {'N/A' if funding_val is None else funding_val} | "
-            f"CVD: {'N/A' if cvd_val is None else cvd_val}"
+        # 3. TRAP / OVERCROWDED
+        if funding_rate is not None:
+            if funding_rate > 0.01 and near_ceiling and cvd_selling:
+                return "LONG TRAP BUILDING ⚠️"
+            if funding_rate < -0.01 and near_floor and cvd_buying:
+                return "SHORT TRAP BUILDING ⚠️"
+
+        # 4. BALANCED
+        return "BALANCED BATTLE ⚖️"
+
+    def scan_symbol(self, symbol, datasets):
+        df_15m = datasets["15m"]
+        live_price = df_15m["close"].iloc[-1]
+        ceiling = df_15m["high"].max()
+        floor = df_15m["low"].min()
+        
+        width = round(((ceiling - floor) / live_price) * 100, 2)
+        dist_ceil_pct = round(((ceiling - live_price) / live_price) * 100, 2)
+        dist_floor_pct = round(((live_price - floor) / live_price) * 100, 2)
+        
+        oi = df_15m.get("open_interest")
+        funding = df_15m.get("funding_rate")
+        cvd = df_15m.get("cvd")
+        
+        control_state = self.determine_market_control(
+            dist_ceil_pct=dist_ceil_pct,
+            dist_floor_pct=dist_floor_pct,
+            cvd=cvd,
+            oi_change=1, # Baseline delta for now
+            funding_rate=funding
         )
+        
+        # Status driven purely by boundary proximity
+        if dist_ceil_pct <= 0.3 or dist_floor_pct <= 0.3:
+            status = "CRITICAL"
+        elif dist_ceil_pct <= 0.8 or dist_floor_pct <= 0.8:
+            status = "ABOUT TO BREAK"
+        elif width <= 1.5:
+            status = "LOADING"
+        else:
+            status = "BUILDING"
 
         return {
             "symbol": symbol,
-            "status": pressure_obj["pressure"],
-            "sort_score": pressure_obj["score"],
-            "bullish_prob": pressure_obj["bullish_prob"],
-            "bearish_prob": pressure_obj["bearish_prob"],
-            "width": pressure_obj["width"],
-            "age": pressure_obj["age"],
-            "ceiling": pressure_obj["ceiling"],
-            "floor": pressure_obj["floor"],
-            "live_price": pressure_obj["live_price"],
-            "dist_ceil_pct": pressure_obj["dist_ceil_pct"],
-            "dist_floor_pct": pressure_obj["dist_floor_pct"],
-            "open_interest": oi_val,
-            "funding_rate": funding_val,
-            "cvd": cvd_val,
-            "reasons": pressure_obj["reasons"],
-            "breakdown": pressure_obj["breakdown"],
+            "status": status,
+            "control_state": control_state,
+            "live_price": live_price,
+            "ceiling": ceiling,
+            "floor": floor,
+            "dist_ceil_pct": dist_ceil_pct,
+            "dist_floor_pct": dist_floor_pct,
+            "width": width,
+            "age": len(df_15m),
+            "open_interest": oi,
+            "funding_rate": funding,
+            "cvd": cvd,
+            "sort_score": round(100 - min(dist_ceil_pct, dist_floor_pct) * 10, 2)
         }
 
-    def calculate_market_temperature(self, scan_results: list) -> dict:
-        counts = {"BUILDING": 0, "LOADING": 0, "ABOUT TO BREAK": 0, "CRITICAL": 0}
-        for item in scan_results:
-            st = item.get("status", "BUILDING")
-            if st in counts:
-                counts[st] += 1
-
-        active = counts["CRITICAL"] + counts["ABOUT TO BREAK"]
-        if active >= 3:
-            temp = "BOILING"
-        elif active >= 1 or counts["LOADING"] >= 3:
-            temp = "WARM"
-        else:
-            temp = "COLD"
-
-        return {"temperature": temp, "metrics": counts}
-        
+    def calculate_market_temperature(self, results):
+        critical_count = sum(1 for r in results if r["status"] == "CRITICAL")
+        if critical_count >= 3:
+            return {"temperature": "HOT 🔥"}
+        elif critical_count >= 1:
+            return {"temperature": "WARM 🟠"}
+        return {"temperature": "COLD 🟢"}
