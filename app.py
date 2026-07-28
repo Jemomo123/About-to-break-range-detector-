@@ -16,7 +16,6 @@ scanner = MarketScanner()
 
 OKX_BASE_URL = "https://www.okx.com/api/v5"
 
-# Requirement 9: Prioritized Watchlist supporting Meme Coins
 WATCHLIST = [
     "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "DOGE-USDT-SWAP",
     "PEPE-USDT-SWAP", "BONK-USDT-SWAP", "SHIB-USDT-SWAP", "FLOKI-USDT-SWAP",
@@ -34,8 +33,8 @@ CACHE = {
     "last_updated": "Never",
 }
 
+
 def fetch_okx_candles(symbol: str, bar: str, limit: int = 50) -> pd.DataFrame | None:
-    """Requirement 4: Download candles, price, volume from OKX."""
     try:
         url = f"{OKX_BASE_URL}/market/candles?instId={symbol}&bar={bar}&limit={limit}"
         res = requests.get(url, timeout=4).json()
@@ -53,44 +52,42 @@ def fetch_okx_candles(symbol: str, bar: str, limit: int = 50) -> pd.DataFrame | 
         logging.warning(f"[OKX API Error] {symbol} ({bar}): {e}")
     return None
 
+
 def fetch_progressive_datasets(symbol: str) -> dict | None:
-    """
-    Requirement 8: Progressive API sequence to reduce rate limits.
-    15M Scan -> Valid? -> 5M -> Pressure? -> 2M -> Coinalyze
-    """
     datasets = {}
 
-    # Step 1: 15M Range Scan
+    # 1. 15M Range Gate Check
     df_15m = fetch_okx_candles(symbol, "15m", limit=50)
     if df_15m is None or not scanner.is_15m_range_valid(df_15m):
-        return None  # Halt immediately if no valid 15M range
+        logging.info(f"[Scanner Pipeline] {symbol} rejected: No valid 15M range")
+        return None
 
     datasets["15m"] = df_15m
     time.sleep(0.1)
 
-    # Step 2: 5M Pressure Download
+    # 2. 5M Pressure Check
     df_5m = fetch_okx_candles(symbol, "5m", limit=50)
     if df_5m is None:
         return None
     datasets["5m"] = df_5m
     time.sleep(0.1)
 
-    # Step 3: 2M Entry Trigger Download
+    # 3. 2M Trigger Acceleration
     df_2m = fetch_okx_candles(symbol, "2m", limit=50)
     datasets["2m"] = df_2m if df_2m is not None else df_5m
 
-    # Step 4: Coinalyze Fetch (Requirement 9: Fallback gracefully if missing)
+    # 4. Fetch Coinalyze (Fall back gracefully if unavailable)
     oi = coinalyze.get_open_interest(symbol)
     funding = coinalyze.get_funding_rate(symbol)
     cvd = coinalyze.get_cvd(symbol)
 
-    # Requirement 5: Enrich all DataFrames with OHLCV + OI + Funding + CVD
     for key in datasets:
-        datasets[key]["open_interest"] = oi if oi is not None else 0.0
-        datasets[key]["funding_rate"] = funding if funding is not None else 0.0
-        datasets[key]["cvd"] = cvd if cvd is not None else 0.0
+        datasets[key]["open_interest"] = oi
+        datasets[key]["funding_rate"] = funding
+        datasets[key]["cvd"] = cvd
 
     return datasets
+
 
 def background_worker():
     while True:
@@ -107,7 +104,7 @@ def background_worker():
                     CACHE["results_dict"].pop(symbol, None)
             except Exception as e:
                 logging.error(f"Error scanning {symbol}: {e}")
-            time.sleep(0.2)
+            time.sleep(0.25)
 
         all_results = list(CACHE["results_dict"].values())
         if all_results:
@@ -116,7 +113,9 @@ def background_worker():
 
         time.sleep(4)
 
+
 threading.Thread(target=background_worker, daemon=True).start()
+
 
 @app.get("/", response_class=HTMLResponse)
 def render_radar_dashboard():
@@ -129,14 +128,17 @@ def render_radar_dashboard():
         <body><h3>🛰️ ABOUT TO BREAK RANGE RADAR</h3><p>Progressive 15M->5M->2M Scanning Active...</p></body></html>
         """
 
-    # Category Grouping
     critical = [r for r in results if r["status"] == "CRITICAL"]
     about_break = [r for r in results if r["status"] == "ABOUT TO BREAK"]
     loading = [r for r in results if r["status"] == "LOADING"]
     building = [r for r in results if r["status"] == "BUILDING"]
 
     top = results[0]
-    reasons_list = "\n".join([f"  • {r}" for r in top.get("reasons", [])])
+    bd = top["breakdown"]
+
+    oi_disp = f"{top['open_interest']:,.0f}" if top['open_interest'] is not None else "N/A"
+    funding_disp = f"{top['funding_rate']:.4f}%" if top['funding_rate'] is not None else "N/A"
+    cvd_disp = f"{top['cvd']:,.2f}" if top['cvd'] is not None else "N/A"
 
     dashboard_text = f"""=====================================================
 🛰️ ABOUT TO BREAK RANGE RADAR
@@ -152,28 +154,38 @@ CATEGORIES
 =====================================================
 
 SELECTED TARGET: {top['symbol']}
-Status:         {top['status']}
-Direction:      {top['direction']}
-Score:          {top['sort_score']} / 100
-Confidence:     {top['confidence']}
+Status:              {top['status']}
+Bullish Probability: {top['bullish_prob']}%
+Bearish Probability: {top['bearish_prob']}%
+Final Score:         {top['sort_score']} / 100
 
-15M Range Width: {top['width']}%
-15M Range Age:   {top['age']} candles
+Distance to Breakout:
+Current Price:       {top['live_price']}
+Upper Boundary:      {top['ceiling']} (Distance: {top['dist_ceil_pct']}%)
+Lower Boundary:      {top['floor']} (Distance: {top['dist_floor_pct']}%)
+
+15M Range Width:     {top['width']}%
+15M Range Age:       {top['age']} candles
 
 Market Dynamics:
-Open Interest:  {top['open_interest']:,.0f}
-Funding Rate:   {top['funding_rate']:.4f}%
-CVD Metric:     {top['cvd']:,.2f}
+Open Interest:       {oi_disp}
+Funding Rate:        {funding_disp}
+CVD Metric:          {cvd_disp}
 
-Alert Reasons:
-{reasons_list}
+Score Breakdown:
+• Range Quality:     +{bd['Range Quality']} / 30
+• Open Interest:     +{bd['Open Interest']} / 25
+• CVD Confirmation:  +{bd['CVD']} / 20
+• ATR Compression:   +{bd['ATR Compression']} / 15
+• Funding Rate:      +{bd['Funding']} / 5
+• Volume Spike:      +{bd['Volume']} / 5
 
 =====================================================
 RADAR WATCHLIST MONITOR
 """
     for item in results[:10]:
         icon = "🔥" if item['status'] == "CRITICAL" else "🟠" if item['status'] == "ABOUT TO BREAK" else "🟡" if item['status'] == "LOADING" else "🟢"
-        dashboard_text += f"{icon} {item['symbol']:18s} | {item['status']:14s} | {item['direction']:7s} | Score: {item['sort_score']}\n"
+        dashboard_text += f"{icon} {item['symbol']:18s} | {item['status']:14s} | Bull: {item['bullish_prob']}% | Score: {item['sort_score']}\n"
 
     return f"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="15">
     <style>body{{background-color:#111;color:#fff;font-family:monospace;font-size:14px;line-height:1.5;padding:15px;margin:0;white-space:pre-wrap;}}</style>
