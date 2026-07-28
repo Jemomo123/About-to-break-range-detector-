@@ -32,6 +32,19 @@ CACHE = {
     "last_updated": "Never",
 }
 
+def clean_val(val):
+    """Safely unwraps pandas Series or scalar value into a float or None."""
+    if val is None:
+        return None
+    if isinstance(val, pd.Series):
+        if val.empty:
+            return None
+        val = val.iloc[0]
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
 def fetch_okx_oi(symbol: str) -> float | None:
     cache_key = f"oi_{symbol}"
     if cache_key in okx_cache: return okx_cache[cache_key]
@@ -80,25 +93,28 @@ def fetch_okx_cvd(symbol: str) -> float | None:
     except: pass
     return None
 
-def format_oi(value: float | None) -> str:
-    if value is None or value == 0: return "N/A"
-    if value >= 1e9: return f"${value / 1e9:.2f}B"
-    if value >= 1e6: return f"${value / 1e6:.2f}M"
-    if value >= 1e3: return f"${value / 1e3:.2f}K"
-    return f"${value:.2f}"
+def format_oi(value) -> str:
+    num = clean_val(value)
+    if num is None or num == 0: return "N/A"
+    if num >= 1e9: return f"${num / 1e9:.2f}B"
+    if num >= 1e6: return f"${num / 1e6:.2f}M"
+    if num >= 1e3: return f"${num / 1e3:.2f}K"
+    return f"${num:.2f}"
 
-def format_funding(value: float | None) -> str:
-    if value is None: return "N/A"
-    return f"{value * 100:.4f}%"
+def format_funding(value) -> str:
+    num = clean_val(value)
+    if num is None: return "N/A"
+    return f"{num * 100:.4f}%"
 
-def format_cvd(value: float | None) -> str:
-    if value is None or value == 0: return "N/A"
-    prefix = "+" if value > 0 else ""
-    abs_val = abs(value)
-    if abs_val >= 1e9: return f"{prefix}{value / 1e9:.2f}B"
-    if abs_val >= 1e6: return f"{prefix}{value / 1e6:.2f}M"
-    if abs_val >= 1e3: return f"{prefix}{value / 1e3:.2f}K"
-    return f"{prefix}{value:.2f}"
+def format_cvd(value) -> str:
+    num = clean_val(value)
+    if num is None or num == 0: return "N/A"
+    prefix = "+" if num > 0 else ""
+    abs_val = abs(num)
+    if abs_val >= 1e9: return f"{prefix}{num / 1e9:.2f}B"
+    if abs_val >= 1e6: return f"{prefix}{num / 1e6:.2f}M"
+    if abs_val >= 1e3: return f"{prefix}{num / 1e3:.2f}K"
+    return f"{prefix}{num:.2f}"
 
 def fetch_okx_candles(symbol: str, bar: str, limit: int = 50) -> pd.DataFrame | None:
     try:
@@ -126,9 +142,9 @@ def fetch_progressive_datasets(symbol: str) -> dict | None:
     datasets["15m"] = df_15m
     time.sleep(0.1)
     
-    oi = coinalyze.get_open_interest(symbol) or fetch_okx_oi(symbol)
-    funding = coinalyze.get_funding_rate(symbol) or fetch_okx_funding(symbol)
-    cvd = coinalyze.get_cvd(symbol) or fetch_okx_cvd(symbol)
+    oi = clean_val(coinalyze.get_open_interest(symbol)) or fetch_okx_oi(symbol)
+    funding = clean_val(coinalyze.get_funding_rate(symbol)) or fetch_okx_funding(symbol)
+    cvd = clean_val(coinalyze.get_cvd(symbol)) or fetch_okx_cvd(symbol)
 
     for key in datasets:
         datasets[key]["open_interest"] = oi
