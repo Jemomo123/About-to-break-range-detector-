@@ -16,51 +16,120 @@ class MarketScanner:
         
         return width_pct <= 3.5  
 
-    def determine_market_control(self, dist_ceil_pct, dist_floor_pct, cvd, oi_change, funding_rate):
+    def determine_market_control(self, dist_ceil_pct, dist_floor_pct, cvd, oi, funding_rate, df_15m):
         """
-        Interprets Effort vs. Result inside the range.
-        Determines who is actually winning the battle.
+        Market Control Engine: Combines boundary proximity, CVD direction, 
+        OI expansion/contraction, Funding Rate, and Volume acceleration to detect 
+        who is winning the battle before breakout.
         """
-        near_ceiling = dist_ceil_pct <= 0.6
-        near_floor = dist_floor_pct <= 0.6
-        
-        # Safely extract scalar numeric values
-        try:
-            cvd_val = float(cvd) if cvd is not None else None
-        except (ValueError, TypeError):
-            cvd_val = None
+        # 1. Clean and convert inputs
+        try: cvd_val = float(cvd) if cvd is not None else 0.0
+        except (ValueError, TypeError): cvd_val = 0.0
 
-        try:
-            funding_val = float(funding_rate) if funding_rate is not None else None
-        except (ValueError, TypeError):
-            funding_val = None
+        try: funding_val = float(funding_rate) if funding_rate is not None else 0.0
+        except (ValueError, TypeError): funding_val = 0.0
 
-        cvd_buying = cvd_val is not None and cvd_val > 0
-        cvd_selling = cvd_val is not None and cvd_val < 0
+        try: oi_val = float(oi) if oi is not None else 0.0
+        except (ValueError, TypeError): oi_val = 0.0
 
-        # 1. ABSORPTION (High Taker Effort, Price Fails to Advance)
-        if cvd_buying and not near_ceiling:
-            return "BUYERS BEING ABSORBED 🛑"
-            
-        if cvd_selling and not near_floor:
-            return "SELLERS BEING ABSORBED 🛑"
+        # 2. Extract Volume Acceleration (Current candle vol vs 5-candle average vol)
+        vol_accel = False
+        if df_15m is not None and "volume" in df_15m and len(df_15m) >= 5:
+            recent_avg_vol = df_15m["volume"].iloc[-6:-1].mean()
+            last_vol = df_15m["volume"].iloc[-1]
+            if recent_avg_vol > 0 and (last_vol / recent_avg_vol) >= 1.25:
+                vol_accel = True
 
-        # 2. DOMINANCE (Aggressive Takers Moving Price to Boundaries)
-        if cvd_buying and near_ceiling:
-            return "BUYERS DOMINATING 📈"
-            
-        if cvd_selling and near_floor:
-            return "SELLERS DOMINATING 📉"
+        # 3. Positional & Metric Flags
+        near_ceiling = dist_ceil_pct <= 0.8
+        near_floor = dist_floor_pct <= 0.8
+        cvd_buying = cvd_val > 0
+        cvd_selling = cvd_val < 0
+        funding_positive = funding_val > 0.005
+        funding_negative = funding_val < -0.005
 
-        # 3. TRAP / OVERCROWDED
-        if funding_val is not None:
-            if funding_val > 0.01 and near_ceiling and cvd_selling:
-                return "LONG TRAP BUILDING ⚠️"
-            if funding_val < -0.01 and near_floor and cvd_buying:
-                return "SHORT TRAP BUILDING ⚠️"
+        agreed = []
+        conflicted = []
 
-        # 4. BALANCED
-        return "BALANCED BATTLE ⚖️"
+        # Default State
+        state = "✅ BALANCED BATTLE"
+        confidence = 50
+        explanation = "Buyers and sellers are matched with no clear structural absorption or delta dominance."
+
+        # -------------------------------------------------------------
+        # ENGINE EVALUATION LOGIC
+        # -------------------------------------------------------------
+
+        # CASE A: BUYER ABSORPTION (Sellers hitting market, but Price Holds Near Ceiling / Doesn't drop)
+        if near_ceiling and cvd_selling:
+            state = "✅ BUYER ABSORPTION"
+            explanation = "Price is holding near resistance despite aggressive market selling. Limit buy wall absorbing supply."
+            confidence = 85 if vol_accel else 75
+            agreed.extend(["Ceiling Proximity", "Negative CVD (Limit Absorbed)"])
+            if vol_accel: agreed.append("Volume Acceleration")
+
+        # CASE B: SELLER ABSORPTION (Buyers hitting market, but Price Holds Near Floor / Doesn't push up)
+        elif near_floor and cvd_buying:
+            state = "✅ SELLER ABSORPTION"
+            explanation = "Price is holding near support despite aggressive market buying. Limit sell wall absorbing demand."
+            confidence = 85 if vol_accel else 75
+            agreed.extend(["Floor Proximity", "Positive CVD (Limit Absorbed)"])
+            if vol_accel: agreed.append("Volume Acceleration")
+
+        # CASE C: BUYERS IN CONTROL (Strong CVD + Near Resistance + Volume Expansion)
+        elif near_ceiling and cvd_buying:
+            state = "✅ BUYERS IN CONTROL"
+            explanation = "Aggressive taker buying driving price to upper boundary with expanding momentum."
+            confidence = 90 if vol_accel else 80
+            agreed.extend(["Ceiling Proximity", "Positive CVD"])
+            if vol_accel: agreed.append("Volume Acceleration")
+            if funding_positive: agreed.append("Positive Funding Alignment")
+
+        # CASE D: SELLERS IN CONTROL (Strong Negative CVD + Near Support + Volume Expansion)
+        elif near_floor and cvd_selling:
+            state = "✅ SELLERS IN CONTROL"
+            explanation = "Aggressive taker selling pressing price directly into support."
+            confidence = 90 if vol_accel else 80
+            agreed.extend(["Floor Proximity", "Negative CVD"])
+            if vol_accel: agreed.append("Volume Acceleration")
+            if funding_negative: agreed.append("Negative Funding Alignment")
+
+        # CASE E: SHORT SQUEEZE RISK (Heavy Negative Funding / Short Overcrowding near Upper Boundary)
+        elif funding_negative and (near_ceiling or cvd_buying):
+            state = "✅ SHORT SQUEEZE RISK"
+            explanation = "Overcrowded short positioning with price pressing resistance or CVD turning positive."
+            confidence = 80
+            agreed.extend(["Negative Funding (Short Heavy)", "Upward Price/CVD Pressure"])
+
+        # CASE F: LONG SQUEEZE RISK (Heavy Positive Funding / Long Overcrowding near Lower Boundary)
+        elif funding_positive and (near_floor or cvd_selling):
+            state = "✅ LONG SQUEEZE RISK"
+            explanation = "Overcrowded long positioning with price pressing support or CVD turning negative."
+            confidence = 80
+            agreed.extend(["Positive Funding (Long Heavy)", "Downward Price/CVD Pressure"])
+
+        # -------------------------------------------------------------
+        # CONFLICT IDENTIFICATION
+        # -------------------------------------------------------------
+        if cvd_selling and state in ["✅ BUYERS IN CONTROL", "✅ BUYER ABSORPTION"]:
+            conflicted.append("Negative Taker CVD vs Upper Range Price")
+        if cvd_buying and state in ["✅ SELLERS IN CONTROL", "✅ SELLER ABSORPTION"]:
+            conflicted.append("Positive Taker CVD vs Lower Range Price")
+        if funding_positive and "SELLERS" in state:
+            conflicted.append("High Positive Funding vs Bearish Control")
+        if funding_negative and "BUYERS" in state:
+            conflicted.append("High Negative Funding vs Bullish Control")
+
+        if not agreed:
+            agreed.append("Range Compression")
+
+        return {
+            "control_state": state,
+            "confidence": confidence,
+            "explanation": explanation,
+            "agreed": agreed,
+            "conflicted": conflicted if conflicted else ["None"]
+        }
 
     def scan_symbol(self, symbol, datasets):
         df_15m = datasets["15m"]
@@ -76,12 +145,13 @@ class MarketScanner:
         funding = df_15m.get("funding_rate")
         cvd = df_15m.get("cvd")
         
-        control_state = self.determine_market_control(
+        control_analysis = self.determine_market_control(
             dist_ceil_pct=dist_ceil_pct,
             dist_floor_pct=dist_floor_pct,
             cvd=cvd,
-            oi_change=1,
-            funding_rate=funding
+            oi=oi,
+            funding_rate=funding,
+            df_15m=df_15m
         )
         
         # Status driven purely by boundary proximity
@@ -97,7 +167,11 @@ class MarketScanner:
         return {
             "symbol": symbol,
             "status": status,
-            "control_state": control_state,
+            "control_state": control_analysis["control_state"],
+            "confidence": control_analysis["confidence"],
+            "explanation": control_analysis["explanation"],
+            "agreed": control_analysis["agreed"],
+            "conflicted": control_analysis["conflicted"],
             "live_price": live_price,
             "ceiling": ceiling,
             "floor": floor,
