@@ -33,7 +33,7 @@ class MarketScanner:
         try: oi_val = float(oi) if oi is not None else 0.0
         except (ValueError, TypeError): oi_val = 0.0
 
-        # Volume Acceleration
+        # Volume Acceleration Check
         vol_accel = False
         if df_15m is not None and "volume" in df_15m and len(df_15m) >= 5:
             recent_avg_vol = df_15m["volume"].iloc[-6:-1].mean()
@@ -41,11 +41,11 @@ class MarketScanner:
             if recent_avg_vol > 0 and (last_vol / recent_avg_vol) >= 1.25:
                 vol_accel = True
 
-        # Position Flags
-        near_ceiling = dist_ceil_pct <= 0.8
-        near_floor = dist_floor_pct <= 0.8
+        # Position & Boundary Flags
         at_ceiling_extreme = dist_ceil_pct <= 0.3
         at_floor_extreme = dist_floor_pct <= 0.3
+        near_ceiling = dist_ceil_pct <= 0.8
+        near_floor = dist_floor_pct <= 0.8
 
         cvd_positive = cvd_val > 0
         cvd_negative = cvd_val < 0
@@ -59,17 +59,23 @@ class MarketScanner:
         evidence_con = []
 
         # Factor A: Range Boundary Proximity
-        if near_ceiling:
+        if at_ceiling_extreme:
+            buyer_score += 40
+            evidence_pro.append("✔ Price at upper boundary extreme (CRITICAL)")
+        elif near_ceiling:
             buyer_score += 30
             evidence_pro.append("✔ Price pressing upper boundary")
         else:
             evidence_con.append("✘ Price not at resistance")
 
-        if near_floor:
+        if at_floor_extreme:
+            seller_score += 40
+            evidence_pro.append("✔ Price at lower boundary extreme (CRITICAL)")
+        elif near_floor:
             seller_score += 30
             evidence_pro.append("✔ Price pressing lower boundary")
         else:
-            evidence_con.append("20✘ Price not at support")
+            evidence_con.append("✘ Price not at support")
 
         # Factor B: CVD Delta Direction
         if cvd_positive:
@@ -114,31 +120,31 @@ class MarketScanner:
         # --- 3. Institutional Classification & Dynamic Confidence ---
         
         # Scenario 1: BUYER ABSORPTION (Limit buy wall absorbing market sells at high prices or near ceiling)
-        if near_ceiling and cvd_negative:
+        if (near_ceiling or at_ceiling_extreme) and cvd_negative:
             state = "🟡 BUYER ABSORPTION"
-            confidence = min(92, 70 + (10 if vol_accel else 0) + (12 if at_ceiling_extreme else 0))
+            confidence = min(94, 72 + (10 if vol_accel else 0) + (12 if at_ceiling_extreme else 0))
             reason = "Price continues pressing resistance despite negative CVD. Aggressive limit buy wall absorbing market sell pressure."
             evidence = [
-                "✔ Price at upper boundary",
+                "✔ Price pressing upper boundary",
                 "✔ Negative CVD (Limit absorption occurring)",
                 "✔ High ceiling price stability",
                 "✔ Volume active at boundary" if vol_accel else "✘ Volume neutral"
             ]
 
         # Scenario 2: SELLER ABSORPTION (Limit sell wall absorbing market buys near floor)
-        elif near_floor and cvd_positive:
+        elif (near_floor or at_floor_extreme) and cvd_positive:
             state = "🟣 SELLER ABSORPTION"
-            confidence = min(92, 70 + (10 if vol_accel else 0) + (12 if at_floor_extreme else 0))
+            confidence = min(94, 72 + (10 if vol_accel else 0) + (12 if at_floor_extreme else 0))
             reason = "Price is pinned near support despite positive CVD. Aggressive limit sell wall absorbing market buy orders."
             evidence = [
-                "✔ Price at lower boundary",
+                "✔ Price pressing lower boundary",
                 "✔ Positive CVD (Limit absorption occurring)",
                 "✔ Floor price rejection holding",
                 "✔ Volume active at boundary" if vol_accel else "✘ Volume neutral"
             ]
 
         # Scenario 3: BUYERS GAINING CONTROL
-        elif buyer_score >= 60 and buyer_score > seller_score + 25:
+        elif buyer_score >= 60 and buyer_score > seller_score + 20:
             state = "🟢 BUYERS GAINING CONTROL"
             confidence = min(96, buyer_score + (10 if vol_accel else 0))
             reason = "Price is pressing ceiling with positive CVD and active volume alignment indicating taker buyers leading auction."
@@ -150,7 +156,7 @@ class MarketScanner:
             ]
 
         # Scenario 4: SELLERS GAINING CONTROL
-        elif seller_score >= 60 and seller_score > buyer_score + 25:
+        elif seller_score >= 60 and seller_score > buyer_score + 20:
             state = "🔴 SELLERS GAINING CONTROL"
             confidence = min(96, seller_score + (10 if vol_accel else 0))
             reason = "Price pressing lower support with negative CVD and aggressive market sells driving range expansion."
@@ -186,10 +192,12 @@ class MarketScanner:
         # Scenario 7: TRUE BALANCED BATTLE
         else:
             diff = abs(buyer_score - seller_score)
-            confidence = max(35, min(58, 50 + diff))
+            confidence = max(38, min(58, 50 + diff))
             state = "⚖️ TRUE BALANCED BATTLE"
             reason = "Neither buyers nor sellers show structural dominance. Price and order flow remain balanced within the range."
-            evidence = [
+            
+            # Dynamically output supportive vs missing factors
+            evidence = evidence_pro + evidence_con if evidence_pro else [
                 "✔ Range compression active",
                 "✘ No CVD delta advantage",
                 "✘ No boundary proximity dominance",
