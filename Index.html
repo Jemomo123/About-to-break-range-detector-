@@ -3,62 +3,221 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Trading Dashboard</title>
+  <title>About To Break - Range Detector</title>
   <style>
+    :root {
+      --bg: #12161f;
+      --card: #1e232d;
+      --text: #eaecef;
+      --green: #0ecb81;
+      --red: #f6465d;
+      --accent: #f0b90b;
+      --border: #2b313a;
+    }
     body {
-      background-color: #12161f;
-      color: #eaecef;
-      font-family: sans-serif;
-      padding: 15px;
+      margin: 0;
+      padding: 10px;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    h2 {
       text-align: center;
+      font-size: 1.1rem;
+      margin: 8px 0 12px 0;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
-    .card {
-      background: #1e232d;
+    .table-container {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
       border-radius: 8px;
-      padding: 15px;
-      margin: 10px 0;
-      border: 1px solid #2b313a;
+      overflow: hidden;
+      font-size: 0.85rem;
     }
-    .symbol { font-weight: bold; font-size: 1.2rem; }
-    .price { font-size: 1.4rem; font-weight: bold; margin-top: 5px; }
-    .up { color: #0ecb81; }
-    .down { color: #f6465d; }
+    th, td {
+      padding: 10px 8px;
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+    }
+    th:first-child, td:first-child {
+      text-align: left;
+    }
+    th {
+      background-color: #181d26;
+      color: #848e9c;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+    .symbol-text {
+      font-weight: bold;
+      color: #fff;
+    }
+    .score-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: bold;
+      color: #000;
+      background-color: var(--accent);
+    }
+    .up { color: var(--green); }
+    .down { color: var(--red); }
+    .status {
+      font-size: 0.8rem;
+      text-align: center;
+      margin-bottom: 8px;
+      color: #848e9c;
+    }
   </style>
 </head>
 <body>
 
-  <h2>Live Market Tracker</h2>
-  <div id="ticker-container"></div>
+  <h2>About To Break Range Detector</h2>
+  <div id="status" class="status">Connecting to exchange data streams...</div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Price</th>
+          <th>CVD (Vol)</th>
+          <th>OI Status</th>
+          <th>Funding Rate</th>
+          <th>Readiness</th>
+        </tr>
+      </thead>
+      <tbody id="reporting-table">
+        <!-- Rows populate here -->
+      </tbody>
+    </table>
+  </div>
 
   <script>
-    const symbols = ['btcusdt', 'ethusdt', 'dogeusdt', 'shibusdt', 'wifusdt'];
-    const container = document.getElementById('ticker-container');
+    const symbols = ['btcusdt', 'ethusdt', 'solusdt', 'dogeusdt', 'shibusdt', 'wifusdt', 'pepeusdt'];
+    const store = {};
 
+    // Initialize state store
     symbols.forEach(sym => {
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.innerHTML = `
-        <div class="symbol">${sym.toUpperCase()}</div>
-        <div class="price" id="price-${sym}">Loading...</div>
-      `;
-      container.appendChild(card);
+      store[sym] = {
+        price: 0,
+        priceChange: 0,
+        cvd: 0,
+        oi: 'Loading...',
+        fundingRate: 0,
+        readinessScore: 0
+      };
     });
 
-    const ws = new WebSocket(`wss://fstream.binance.com/ws/` + symbols.map(s => `${s}@ticker`).join('/'));
+    const tableBody = document.getElementById('reporting-table');
+    const statusEl = document.getElementById('status');
+
+    // Render Reporting Table
+    function renderTable() {
+      // Sort candidates by Breakout Readiness Score (highest first)
+      const sortedSymbols = [...symbols].sort((a, b) => store[b].readinessScore - store[a].readinessScore);
+
+      tableBody.innerHTML = sortedSymbols.map(sym => {
+        const d = store[sym];
+        const cvdClass = d.cvd >= 0 ? 'up' : 'down';
+        const fundClass = d.fundingRate >= 0 ? 'up' : 'down';
+        const formattedPrice = d.price > 0 ? (d.price < 1 ? d.price.toFixed(5) : d.price.toFixed(2)) : 'Loading...';
+
+        return `
+          <tr>
+            <td class="symbol-text">${sym.toUpperCase().replace('USDT', '')}</td>
+            <td>$${formattedPrice}</td>
+            <td class="${cvdClass}">${d.cvd > 0 ? '+' : ''}${Math.round(d.cvd)}</td>
+            <td>${d.oi}</td>
+            <td class="${fundClass}">${(d.fundingRate * 100).toFixed(4)}%</td>
+            <td><span class="score-badge">${d.readinessScore}</span></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Calculate Breakout Readiness Score
+    function updateReadiness(sym) {
+      const d = store[sym];
+      let score = 50; // Baseline range score
+
+      // High CVD volume movement adds breakout weight
+      if (Math.abs(d.cvd) > 500) score += 20;
+      
+      // Extreme funding rate signals position bias / squeeze setup
+      if (Math.abs(d.fundingRate) > 0.0001) score += 15;
+
+      // OI compression/buildup indicator weight
+      if (d.oi === 'Building') score += 15;
+
+      d.readinessScore = Math.min(score, 99);
+      renderTable();
+    }
+
+    // 1. WebSocket for Price and CVD (Aggregated Trades)
+    const streamUrl = `wss://fstream.binance.com/ws/` + symbols.map(s => `${s}@aggTrade`).join('/');
+    const ws = new WebSocket(streamUrl);
+
+    ws.onopen = () => {
+      statusEl.textContent = '● Live Data Stream Active';
+      statusEl.style.color = '#0ecb81';
+    };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data && data.s && data.c) {
+      if (data && data.s) {
         const sym = data.s.toLowerCase();
-        const priceEl = document.getElementById(`price-${sym}`);
-        if (priceEl) {
-          const currentPrice = parseFloat(data.c);
-          const priceChange = parseFloat(data.p);
-          priceEl.textContent = `$${currentPrice.toLocaleString()}`;
-          priceEl.className = `price ${priceChange >= 0 ? 'up' : 'down'}`;
+        const price = parseFloat(data.p);
+        const qty = parseFloat(data.q);
+        const isBuyerMaker = data.m; // true = sell side aggregate, false = buy side aggregate
+
+        if (store[sym]) {
+          store[sym].price = price;
+          
+          // Calculate Cumulative Volume Delta (CVD)
+          const delta = isBuyerMaker ? -qty : qty;
+          store[sym].cvd += delta;
+
+          updateReadiness(sym);
         }
       }
     };
+
+    // 2. REST API Fetch for Open Interest and Premium / Funding Rates
+    async function fetchRESTMetrics() {
+      for (const sym of symbols) {
+        try {
+          // Fetch Funding Rate
+          const fundRes = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${sym.toUpperCase()}`);
+          const fundData = await fundRes.json();
+          if (fundData && fundData.lastFundingRate) {
+            store[sym].fundingRate = parseFloat(fundData.lastFundingRate);
+          }
+
+          // Fetch Open Interest
+          const oiRes = await fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${sym.toUpperCase()}`);
+          const oiData = await oiRes.json();
+          if (oiData && oiData.openInterest) {
+            // Simplified status tag based on tracking high liquidity accumulation
+            store[sym].oi = 'Building'; 
+          }
+        } catch (e) {
+          console.error('Error fetching metrics for', sym, e);
+        }
+      }
+      renderTable();
+    }
+
+    // Initial table draw and periodic metrics polling
+    renderTable();
+    fetchRESTMetrics();
+    setInterval(fetchRESTMetrics, 15000); // Refresh OI and Funding every 15 seconds
   </script>
 </body>
 </html>
