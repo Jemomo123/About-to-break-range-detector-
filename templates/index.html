@@ -118,18 +118,18 @@
             color: #cccccc;
         }
         
-        /* Status Color-Coding */
-        .status-high-squeeze {
+        /* Status Color-Coding (Updated for Containment Terms) */
+        .status-high-consolidation {
             background-color: rgba(255, 23, 68, 0.15);
             color: #ff4081;
             border: 1px solid rgba(255, 23, 68, 0.3);
         }
-        .status-mod-squeeze {
+        .status-consolidation {
             background-color: rgba(255, 145, 0, 0.15);
             color: #ffab40;
             border: 1px solid rgba(255, 145, 0, 0.3);
         }
-        .status-normal {
+        .status-weak-consolidation {
             background-color: #2c2c2c;
             color: #aaaaaa;
         }
@@ -171,12 +171,12 @@
                     <td class="symbol">{{ row['SYMBOL'] }}</td>
                     <td><span class="badge badge-timeframe">{{ row['TIMEFRAME'] }}</span></td>
                     <td>
-                        {% if 'HIGH SQUEEZE' in row['STATUS'] %}
-                            <span class="badge status-high-squeeze">{{ row['STATUS'] }}</span>
-                        {% elif 'MODERATE' in row['STATUS'] %}
-                            <span class="badge status-mod-squeeze">{{ row['STATUS'] }}</span>
+                        {% if 'HIGH CONSOLIDATION' in row['STATUS'] %}
+                            <span class="badge status-high-consolidation">{{ row['STATUS'] }}</span>
+                        {% elif 'CONSOLIDATION' in row['STATUS'] %}
+                            <span class="badge status-consolidation">{{ row['STATUS'] }}</span>
                         {% else %}
-                            <span class="badge status-normal">{{ row['STATUS'] }}</span>
+                            <span class="badge status-weak-consolidation">{{ row['STATUS'] }}</span>
                         {% endif %}
                     </td>
                     <td>
