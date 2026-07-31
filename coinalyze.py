@@ -1,129 +1,81 @@
+# coinalyze.py
+# =====================================================================
+# VERSION 1.0 — ORDER FLOW TELEMETRY PROVIDER
+# =====================================================================
+
 import logging
-import os
-from cachetools import TTLCache
-from dotenv import load_dotenv
 import requests
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+COINALYZE_API_KEY = ""  # Set via environment or config if required
 
-COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY", "").strip()
-BASE_URL = "https://api.coinalyze.net/v1"
-
-# 45-second cache to honor rate limits and prevent spam
-cache = TTLCache(maxsize=200, ttl=45)
-
-# Requirement 1 & 2: Startup key check with SINGLE log entry
-IS_CONFIGURED = bool(COINALYZE_API_KEY)
-
-if IS_CONFIGURED:
-    logging.info("[Coinalyze] Integration initialized with valid API Key.")
-else:
-    logging.warning("[Coinalyze] Coinalyze API key not configured in environment variables.")
-
-
-def _get_headers():
-    return {"api_key": COINALYZE_API_KEY} if IS_CONFIGURED else {}
-
-
-def _format_symbol(symbol: str) -> str:
-    """Converts OKX format (e.g. BTC-USDT-SWAP) to Coinalyze perpetual ticker format (BTCUSDT.A)."""
-    clean = symbol.replace("-USDT-SWAP", "USDT")
-    return f"{clean}.A"
-
-
-def get_open_interest(symbol: str) -> float | None:
-    if not IS_CONFIGURED:
+def fetch_open_interest(symbol):
+    """
+    Fetches raw Open Interest telemetry from Coinalyze API.
+    Performs ZERO scoring, evaluation, or range boundary logic.
+    """
+    if not COINALYZE_API_KEY:
         return None
 
-    cache_key = f"oi_{symbol}"
-    if cache_key in cache:
-        return cache[cache_key]
+    url = "https://api.coinalyze.net/v1/open-interest"
+    params = {
+        "symbols": symbol.upper(),
+        "api_key": COINALYZE_API_KEY
+    }
 
     try:
-        coinalyze_symbol = _format_symbol(symbol)
-        url = f"{BASE_URL}/open-interest?symbols={coinalyze_symbol}"
-        res = requests.get(url, headers=_get_headers(), timeout=4)
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200:
+            logger.warning(f"Coinalyze API returned status {response.status_code} for {symbol}")
+            return None
 
-        if res.status_code == 200:
-            data = res.json()
-            if data and isinstance(data, list) and len(data) > 0:
-                val = float(data[0].get("value", 0.0))
-                cache[cache_key] = val
-                return val
-            else:
-                logging.info(f"[Coinalyze] Symbol not supported for OI: {symbol}")
-        elif res.status_code in [400, 404]:
-            logging.info(f"[Coinalyze] Symbol not supported: {symbol}")
-        else:
-            logging.warning(f"[Coinalyze] OI fetch failed [{res.status_code}] for {symbol}")
-    except Exception as e:
-        logging.error(f"[Coinalyze] Network error fetching OI for {symbol}: {e}")
-
-    cache[cache_key] = None
-    return None
-
-
-def get_funding_rate(symbol: str) -> float | None:
-    if not IS_CONFIGURED:
+        data = response.json()
+        if isinstance(data, list) and len(data) > 0:
+            return data[0].get("value")
         return None
 
-    cache_key = f"funding_{symbol}"
-    if cache_key in cache:
-        return cache[cache_key]
-
-    try:
-        coinalyze_symbol = _format_symbol(symbol)
-        url = f"{BASE_URL}/predicted-funding-rate?symbols={coinalyze_symbol}"
-        res = requests.get(url, headers=_get_headers(), timeout=4)
-
-        if res.status_code == 200:
-            data = res.json()
-            if data and isinstance(data, list) and len(data) > 0:
-                val = float(data[0].get("value", 0.0))
-                cache[cache_key] = val
-                return val
-            else:
-                logging.info(f"[Coinalyze] Symbol not supported for Funding: {symbol}")
-        elif res.status_code in [400, 404]:
-            logging.info(f"[Coinalyze] Symbol not supported: {symbol}")
-        else:
-            logging.warning(f"[Coinalyze] Funding fetch failed [{res.status_code}] for {symbol}")
     except Exception as e:
-        logging.error(f"[Coinalyze] Network error fetching Funding for {symbol}: {e}")
-
-    cache[cache_key] = None
-    return None
-
-
-def get_cvd(symbol: str) -> float | None:
-    if not IS_CONFIGURED:
+        logger.error(f"Error fetching Coinalyze Open Interest for {symbol}: {e}")
         return None
 
-    cache_key = f"cvd_{symbol}"
-    if cache_key in cache:
-        return cache[cache_key]
+
+def fetch_funding_rate(symbol):
+    """
+    Fetches raw Funding Rate telemetry from Coinalyze API.
+    Performs ZERO scoring or evaluation.
+    """
+    if not COINALYZE_API_KEY:
+        return None
+
+    url = "https://api.coinalyze.net/v1/predicted-funding-rate"
+    params = {
+        "symbols": symbol.upper(),
+        "api_key": COINALYZE_API_KEY
+    }
 
     try:
-        coinalyze_symbol = _format_symbol(symbol)
-        url = f"{BASE_URL}/current-cvd?symbols={coinalyze_symbol}"
-        res = requests.get(url, headers=_get_headers(), timeout=4)
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200:
+            return None
 
-        if res.status_code == 200:
-            data = res.json()
-            if data and isinstance(data, list) and len(data) > 0:
-                val = float(data[0].get("value", 0.0))
-                cache[cache_key] = val
-                return val
-            else:
-                logging.info(f"[Coinalyze] Symbol not supported for CVD: {symbol}")
-        elif res.status_code in [400, 404]:
-            logging.info(f"[Coinalyze] Symbol not supported: {symbol}")
-        else:
-            logging.warning(f"[Coinalyze] CVD fetch failed [{res.status_code}] for {symbol}")
+        data = response.json()
+        if isinstance(data, list) and len(data) > 0:
+            return data[0].get("value")
+        return None
+
     except Exception as e:
-        logging.error(f"[Coinalyze] Network error fetching CVD for {symbol}: {e}")
+        logger.error(f"Error fetching Coinalyze Funding Rate for {symbol}: {e}")
+        return None
 
-    cache[cache_key] = None
+
+def fetch_cvd(symbol):
+    """
+    Raw telemetry stub for Cumulative Volume Delta (CVD).
+    Performs ZERO calculation, scoring, or interpretation.
+    """
+    if not COINALYZE_API_KEY:
+        return None
+
+    # Reserved for raw CVD endpoint integration
     return None
