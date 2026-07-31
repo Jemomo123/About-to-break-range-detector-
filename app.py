@@ -1,255 +1,221 @@
-import logging
-import threading
-import time
-import pandas as pd
-import requests
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-from cachetools import TTLCache
+# app.py
+# =====================================================================
+# VERSION 1.0 — SINGLE SOURCE OF TRUTH & CORE ENGINE
+# =====================================================================
 
-import binance_data as coinalyze
-from scanner import MarketScanner
+import numpy as np
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# Operational Constants
+DEFAULT_TIMEFRAME = "1h"
+TARGET_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 
-app = FastAPI()
-scanner = MarketScanner()
 
-OKX_BASE_URL = "https://www.okx.com"
-okx_cache = TTLCache(maxsize=300, ttl=20)
+# =====================================================================
+# 1. RANGE ENGINE (SINGLE SOURCE OF TRUTH)
+# =====================================================================
 
-WATCHLIST = [
-    "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "DOGE-USDT-SWAP",
-    "PEPE-USDT-SWAP", "BONK-USDT-SWAP", "SHIB-USDT-SWAP", "FLOKI-USDT-SWAP",
-    "WIF-USDT-SWAP", "BRETT-USDT-SWAP", "PENGU-USDT-SWAP", "FARTCOIN-USDT-SWAP",
-    "SPX-USDT-SWAP", "USELESS-USDT-SWAP", "POPCAT-USDT-SWAP", "MOG-USDT-SWAP",
-    "GOAT-USDT-SWAP", "TURBO-USDT-SWAP", "NEIRO-USDT-SWAP", "MEME-USDT-SWAP"
-]
-
-CACHE = {
-    "results_dict": {},
-    "global_temp": {"temperature": "COLD"},
-    "last_updated": "Never",
-}
-
-def clean_val(val):
-    if val is None:
-        return None
-    if isinstance(val, pd.Series):
-        if val.empty:
-            return None
-        val = val.iloc[0]
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
-
-def fetch_okx_oi(symbol: str) -> float | None:
-    cache_key = f"oi_{symbol}"
-    if cache_key in okx_cache: return okx_cache[cache_key]
-    try:
-        url = f"{OKX_BASE_URL}/api/v5/public/open-interest?instId={symbol}"
-        res = requests.get(url, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("code") == "0" and data.get("data"):
-                val = float(data["data"][0].get("oi", 0.0))
-                okx_cache[cache_key] = val
-                return val
-    except: pass
-    return None
-
-def fetch_okx_funding(symbol: str) -> float | None:
-    cache_key = f"funding_{symbol}"
-    if cache_key in okx_cache: return okx_cache[cache_key]
-    try:
-        url = f"{OKX_BASE_URL}/api/v5/public/funding-rate?instId={symbol}"
-        res = requests.get(url, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("code") == "0" and data.get("data"):
-                val = float(data["data"][0].get("fundingRate", 0.0))
-                okx_cache[cache_key] = val
-                return val
-    except: pass
-    return None
-
-def fetch_okx_cvd(symbol: str) -> float | None:
-    cache_key = f"cvd_{symbol}"
-    if cache_key in okx_cache: return okx_cache[cache_key]
-    try:
-        url = f"{OKX_BASE_URL}/api/v5/market/trades?instId={symbol}&limit=100"
-        res = requests.get(url, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("code") == "0" and data.get("data"):
-                trades = data["data"]
-                buy_vol = sum(float(t.get("sz", 0)) for t in trades if t.get("side") == "buy")
-                sell_vol = sum(float(t.get("sz", 0)) for t in trades if t.get("side") == "sell")
-                cvd = buy_vol - sell_vol
-                okx_cache[cache_key] = cvd
-                return cvd
-    except: pass
-    return None
-
-def format_oi(value) -> str:
-    num = clean_val(value)
-    if num is None or num == 0: return "N/A"
-    if num >= 1e9: return f"${num / 1e9:.2f}B"
-    if num >= 1e6: return f"${num / 1e6:.2f}M"
-    if num >= 1e3: return f"${num / 1e3:.2f}K"
-    return f"${num:.2f}"
-
-def format_funding(value) -> str:
-    num = clean_val(value)
-    if num is None: return "N/A"
-    return f"{num * 100:.4f}%"
-
-def format_cvd(value) -> str:
-    num = clean_val(value)
-    if num is None or num == 0: return "N/A"
-    prefix = "+" if num > 0 else ""
-    abs_val = abs(num)
-    if abs_val >= 1e9: return f"{prefix}{num / 1e9:.2f}B"
-    if abs_val >= 1e6: return f"{prefix}{num / 1e6:.2f}M"
-    if abs_val >= 1e3: return f"{prefix}{num / 1e3:.2f}K"
-    return f"{prefix}{num:.2f}"
-
-def fetch_okx_candles(symbol: str, bar: str, limit: int = 50) -> pd.DataFrame | None:
-    try:
-        url = f"{OKX_BASE_URL}/api/v5/market/candles?instId={symbol}&bar={bar}&limit={limit}"
-        res = requests.get(url, timeout=4).json()
-        if res.get("code") == "0" and "data" in res:
-            raw = res["data"]
-            if len(raw) >= 15:
-                raw.reverse()
-                return pd.DataFrame({
-                    "high": [float(c[2]) for c in raw],
-                    "low": [float(c[3]) for c in raw],
-                    "close": [float(c[4]) for c in raw],
-                    "volume": [float(c[5]) for c in raw],
-                })
-    except: pass
-    return None
-
-def fetch_progressive_datasets(symbol: str) -> dict | None:
-    datasets = {}
-    df_15m = fetch_okx_candles(symbol, "15m", limit=50)
-    if df_15m is None or not scanner.is_15m_range_valid(df_15m):
-        return None
-
-    datasets["15m"] = df_15m
-    time.sleep(0.1)
+def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
+    """
+    Absolute sole engine for range boundary calculations across the repository.
+    Calculates v_high, v_low, height, touches, containment, and expansion status.
     
-    oi = clean_val(coinalyze.get_open_interest(symbol)) or fetch_okx_oi(symbol)
-    funding = clean_val(coinalyze.get_funding_rate(symbol)) or fetch_okx_funding(symbol)
-    cvd = clean_val(coinalyze.get_cvd(symbol)) or fetch_okx_cvd(symbol)
+    Parameters:
+        highs (np.ndarray): Array of high prices
+        lows (np.ndarray): Array of low prices
+        closes (np.ndarray): Array of close prices
+        volumes (np.ndarray): Array of volume values
+        lookback_window (int): Number of historical bars to evaluate
+        
+    Returns:
+        dict: Standardized range boundary metrics object
+    """
+    if len(closes) < lookback_window:
+        return None
 
-    for key in datasets:
-        datasets[key]["open_interest"] = oi
-        datasets[key]["funding_rate"] = funding
-        datasets[key]["cvd"] = cvd
+    window_highs = highs[-lookback_window:]
+    window_lows = lows[-lookback_window:]
+    window_closes = closes[-lookback_window:]
 
-    return datasets
+    v_high = float(np.max(window_highs))
+    v_low = float(np.min(window_lows))
+    r_height = v_high - v_low
 
-def background_worker():
-    while True:
-        for symbol in WATCHLIST:
-            try:
-                datasets = fetch_progressive_datasets(symbol)
-                if datasets:
-                    metrics = scanner.scan_symbol(symbol, datasets)
-                    if metrics:
-                        CACHE["results_dict"][symbol] = metrics
-                    else:
-                        CACHE["results_dict"].pop(symbol, None)
-                else:
-                    CACHE["results_dict"].pop(symbol, None)
-            except Exception as e:
-                logging.error(f"Error scanning {symbol}: {e}")
-            time.sleep(0.25)
+    if r_height <= 0:
+        return None
 
-        all_results = list(CACHE["results_dict"].values())
-        if all_results:
-            CACHE["global_temp"] = scanner.calculate_market_temperature(all_results)
-            CACHE["last_updated"] = time.strftime("%H:%M:%S UTC")
-        time.sleep(4)
+    # Calculate touches near boundaries (within 1.5% buffer of height)
+    touch_buffer = r_height * 0.015
+    upper_touches = int(np.sum(window_highs >= (v_high - touch_buffer)))
+    lower_touches = int(np.sum(window_lows <= (v_low + touch_buffer)))
 
-threading.Thread(target=background_worker, daemon=True).start()
+    # Calculate containment percentage (closes inside inner 90% boundary)
+    inner_upper = v_high - (r_height * 0.05)
+    inner_lower = v_low + (r_height * 0.05)
+    contained_count = np.sum((window_closes <= inner_upper) & (window_closes >= inner_lower))
+    containment_pct = round(float((contained_count / lookback_window) * 100.0), 1)
 
-@app.get("/healthz")
-def healthz():
-    return {"status": "ok"}
+    # Structural validity and expansion checks
+    is_structurally_valid = containment_pct >= 70.0 and upper_touches >= 2 and lower_touches >= 2
+    
+    current_close = closes[-1]
+    has_already_expanded = current_close > v_high or current_close < v_low
 
-@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
-def render_radar_dashboard():
-    results = sorted(list(CACHE["results_dict"].values()), key=lambda x: x["sort_score"], reverse=True)
+    return {
+        "v_high": v_high,
+        "v_low": v_low,
+        "r_height": r_height,
+        "upper_touches": upper_touches,
+        "lower_touches": lower_touches,
+        "containment_pct": containment_pct,
+        "is_structurally_valid": is_structurally_valid,
+        "has_already_expanded": has_already_expanded,
+        "lookback_window": lookback_window
+    }
 
-    if not results:
-        return """
-        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="5">
-        <style>body{font-family:monospace;background:#111;color:#00ff00;padding:20px;text-align:center;}</style></head>
-        <body><h3>🛰️ ABOUT TO BREAK RANGE RADAR</h3><p>Scanning For Auction Compression...</p></body></html>
-        """
 
-    critical = [r for r in results if r["status"] == "CRITICAL"]
-    about_break = [r for r in results if r["status"] == "ABOUT TO BREAK"]
-    loading = [r for r in results if r["status"] == "LOADING"]
-    building = [r for r in results if r["status"] == "BUILDING"]
+# =====================================================================
+# 2. STATUS ENGINE
+# =====================================================================
 
-    top = results[0]
-    oi_disp = format_oi(top['open_interest'])
-    funding_disp = format_funding(top['funding_rate'])
-    cvd_disp = format_cvd(top['cvd'])
+def calculate_status_engine(highs, lows, closes, val_range):
+    """
+    Evaluates market consolidation, compression, or expansion state.
+    """
+    if val_range is None:
+        return {"status_score": 0, "status_label": "NO_RANGE"}
 
-    evidence_formatted = "\n".join(top['evidence'])
+    if val_range["has_already_expanded"]:
+        return {"status_score": 10, "status_label": "EXPANDED"}
 
-    dashboard_text = f"""=====================================================
-🛰️ ABOUT TO BREAK RANGE RADAR
-=====================================================
-Market Temp:  {CACHE['global_temp']['temperature']}
-Sync Time:    {CACHE['last_updated']}
+    containment = val_range["containment_pct"]
+    
+    if containment >= 85.0:
+        status_score = 90
+        status_label = "HIGH SQUEEZE"
+    elif containment >= 70.0:
+        status_score = 75
+        status_label = "CONSOLIDATION"
+    else:
+        status_score = 40
+        status_label = "LOOSE RANGE"
 
-CATEGORIES
-🔥 Critical:       {len(critical)}
-🟠 About To Break: {len(about_break)}
-🟡 Loading:        {len(loading)}
-🟢 Building:       {len(building)}
-=====================================================
+    return {
+        "status_score": status_score,
+        "status_label": status_label
+    }
 
-SELECTED TARGET: {top['symbol']}
-Status:         {top['status']}
 
-MARKET CONTROL ENGINE:
-State:      {top['control_state']}
-Confidence: {top['confidence']}%
+# =====================================================================
+# 3. BATTLE ENGINE
+# =====================================================================
 
-Reason:
-{top['explanation']}
+def calculate_battle_engine(volumes, taker_buy_volumes=None, open_interest=None, funding_rates=None):
+    """
+    Evaluates buyer vs. seller control and volume effort.
+    """
+    if volumes is None or len(volumes) < 20:
+        return {"battle_score": 50, "battle_label": "NEUTRAL"}
 
-Evidence:
-{evidence_formatted}
+    recent_vol = volumes[-5:]
+    avg_vol = np.mean(volumes[-20:])
+    vol_ratio = np.mean(recent_vol) / avg_vol if avg_vol > 0 else 1.0
 
-Distance to Breakout:
-Current Price:  {top['live_price']}
-Upper Boundary: {top['ceiling']} (Distance: {top['dist_ceil_pct']}%)
-Lower Boundary: {top['floor']} (Distance: {top['dist_floor_pct']}%)
+    if taker_buy_volumes is not None and len(taker_buy_volumes) >= 5:
+        buy_ratio = np.sum(taker_buy_volumes[-5:]) / np.sum(recent_vol) if np.sum(recent_vol) > 0 else 0.5
+    else:
+        buy_ratio = 0.5
 
-15M Range Width: {top['width']}% | Age: {top['age']} candles
+    if buy_ratio > 0.55 and vol_ratio > 1.2:
+        battle_score = 85
+        battle_label = "BULL DOMINANCE"
+    elif buy_ratio < 0.45 and vol_ratio > 1.2:
+        battle_score = 15
+        battle_label = "BEAR DOMINANCE"
+    else:
+        battle_score = 50
+        battle_label = "BALANCED"
 
-Market Dynamics:
-Open Interest:  {oi_disp}
-Funding Rate:   {funding_disp}
-CVD Metric:     {cvd_disp}
+    return {
+        "battle_score": battle_score,
+        "battle_label": battle_label
+    }
 
-=====================================================
-RADAR WATCHLIST MONITOR
-"""
-    for item in results[:10]:
-        icon = "🔥" if item['status'] == "CRITICAL" else "🟠" if item['status'] == "ABOUT TO BREAK" else "🟡" if item['status'] == "LOADING" else "🟢"
-        clean_status = item['status'].replace("ABOUT TO BREAK", "ABOUT BREAK")
-        dashboard_text += f"{icon} {item['symbol']:15s} | {clean_status}\n   └ {item['control_state']} ({item['confidence']}%)\n"
 
-    return f"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="refresh" content="15">
-    <style>body{{background-color:#111;color:#fff;font-family:monospace;font-size:13px;line-height:1.4;padding:12px;margin:0;white-space:pre-wrap;}}</style>
-    </head><body>{dashboard_text}</body></html>"""
+# =====================================================================
+# 4. LOCATION ENGINE
+# =====================================================================
+
+def calculate_location_engine(closes, val_range):
+    """
+    Evaluates position of current close price within the validated range.
+    """
+    if val_range is None or val_range["r_height"] <= 0:
+        return {"location_score": 50, "location_label": "MID_RANGE", "position_pct": 50.0}
+
+    current_close = closes[-1]
+    v_low = val_range["v_low"]
+    r_height = val_range["r_height"]
+
+    position_pct = round(((current_close - v_low) / r_height) * 100.0, 1)
+
+    if position_pct >= 80.0:
+        location_score = 90
+        location_label = "UPPER RESISTANCE"
+    elif position_pct <= 20.0:
+        location_score = 90
+        location_label = "LOWER SUPPORT"
+    else:
+        location_score = 40
+        location_label = "MID RANGE"
+
+    return {
+        "location_score": location_score,
+        "location_label": location_label,
+        "position_pct": position_pct
+    }
+
+
+# =====================================================================
+# 5. BREAKOUT READINESS ENGINE
+# =====================================================================
+
+def calculate_breakout_readiness(status_score, battle_score, location_score, val_range):
+    """
+    Synthesizes Status, Battle, and Location engines into a final readiness score.
+    """
+    if val_range is None or val_range["has_already_expanded"]:
+        return {"readiness_score": 0, "readiness_label": "INACTIVE"}
+
+    # Weighted score calculation
+    readiness_score = int(round((status_score * 0.40) + (battle_score * 0.30) + (location_score * 0.30)))
+
+    if readiness_score >= 80:
+        readiness_label = "IMMINENT"
+    elif readiness_score >= 60:
+        readiness_label = "BUILDING"
+    else:
+        readiness_label = "LOW"
+
+    return {
+        "readiness_score": readiness_score,
+        "readiness_label": readiness_label
+    }
+
+
+# =====================================================================
+# 6. EVIDENCE SYNTHESIS ENGINE
+# =====================================================================
+
+def generate_compact_evidence(status, battle, location, readiness, val_range):
+    """
+    Generates structured, compact technical evidence string.
+    """
+    if val_range is None:
+        return "NO_DATA"
+
+    return (
+        f"CNT:{val_range['containment_pct']}% | "
+        f"TCH:[U:{val_range['upper_touches']}/L:{val_range['lower_touches']}] | "
+        f"POS:{location['position_pct']}% | "
+        f"BAT:{battle['battle_label']}"
+    )
