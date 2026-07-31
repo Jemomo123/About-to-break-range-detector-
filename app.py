@@ -79,7 +79,8 @@ def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
 
 def calculate_status_engine(highs, lows, closes, val_range):
     """
-    Evaluates market consolidation, compression, or expansion state.
+    Evaluates market containment state within the validated range.
+    Strictly uses approved containment-based terminology.
     """
     if val_range is None:
         return {"status_score": 0, "status_label": "NO_RANGE"}
@@ -91,13 +92,13 @@ def calculate_status_engine(highs, lows, closes, val_range):
     
     if containment >= 85.0:
         status_score = 90
-        status_label = "HIGH SQUEEZE"
+        status_label = "HIGH CONSOLIDATION"
     elif containment >= 70.0:
         status_score = 75
         status_label = "CONSOLIDATION"
     else:
         status_score = 40
-        status_label = "LOOSE RANGE"
+        status_label = "WEAK CONSOLIDATION"
 
     return {
         "status_score": status_score,
@@ -209,7 +210,7 @@ def calculate_breakout_readiness(status_score, battle_score, location_score, val
 def generate_compact_evidence(status, battle, location, readiness, val_range):
     """
     Generates structured, human-readable trader evidence string for UI rendering.
-    Replaces developer shorthand abbreviations with clear, full-text sections.
+    Maps evidence interpretation cleanly to approved containment terminology.
     """
     if val_range is None:
         return "NO_DATA"
@@ -231,19 +232,19 @@ def generate_compact_evidence(status, battle, location, readiness, val_range):
     else:
         position_text = f"{dist_from_support}% above support"
 
-    # Contextual interpretation synthesis based on range location
+    # Contextual interpretation based on containment level
     status_str = status.get("status_label", "") if isinstance(status, dict) else str(status)
-    if "HIGH SQUEEZE" in status_str:
+    if "HIGH CONSOLIDATION" in status_str:
         if position_pct >= 80.0:
-            interpretation = "Tight compression near the upper boundary.\nWatching for breakout confirmation."
+            interpretation = "High range containment near upper boundary.\nWatching for breakout confirmation."
         elif position_pct <= 20.0:
-            interpretation = "Tight compression near the lower boundary.\nWatching for breakdown confirmation."
+            interpretation = "High range containment near lower boundary.\nWatching for breakdown confirmation."
         else:
-            interpretation = "High energy squeeze coiled at mid-range.\nAwaiting direction signal."
+            interpretation = "High range containment coiled at mid-range.\nAwaiting direction signal."
     elif "CONSOLIDATION" in status_str:
-        interpretation = "Active consolidation within range boundaries."
+        interpretation = "Active containment within validated range boundaries."
     else:
-        interpretation = "Price operating within normal range distribution."
+        interpretation = "Price operating within loose range distribution."
 
     return (
         f"Range Quality: {containment:.0f}%\n\n"
