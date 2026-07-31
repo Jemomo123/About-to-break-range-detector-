@@ -1,81 +1,60 @@
+# binance_data.py
+# =====================================================================
+# VERSION 1.0 — RAW MARKET DATA PROVIDER
+# =====================================================================
+
 import logging
 import requests
-from cachetools import TTLCache
+import numpy as np
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
-# Cache results for 20 seconds to prevent hitting API limits
-cache = TTLCache(maxsize=300, ttl=20)
-OKX_BASE_URL = "https://www.okx.com"
-
-
-def get_open_interest(symbol: str) -> float | None:
-    """Fetches Open Interest directly from OKX API v5 (matches OKX ticker formats)."""
-    cache_key = f"oi_{symbol}"
-    if cache_key in cache:
-        return cache[cache_key]
-
-    try:
-        url = f"{OKX_BASE_URL}/api/v5/public/open-interest?instId={symbol}"
-        res = requests.get(url, timeout=4)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("code") == "0" and data.get("data"):
-                oi_val = float(data["data"][0].get("oi", 0.0))
-                cache[cache_key] = oi_val
-                return oi_val
-        logging.warning(f"[OKX OI Response Error] {symbol}: {res.text}")
-    except Exception as e:
-        logging.warning(f"[OKX OI Exception] {symbol}: {e}")
-
-    cache[cache_key] = None
-    return None
-
-
-def get_funding_rate(symbol: str) -> float | None:
-    """Fetches real-time Funding Rate directly from OKX API v5."""
-    cache_key = f"funding_{symbol}"
-    if cache_key in cache:
-        return cache[cache_key]
+def fetch_binance_futures_klines(symbol, interval="1h", limit=100):
+    """
+    Fetches raw futures OHLCV and taker volume data from Binance.
+    Performs ZERO scoring, indicator, or range boundary calculations.
+    
+    Parameters:
+        symbol (str): Target trading pair (e.g., "BTCUSDT")
+        interval (str): Kline interval (e.g., "1h", "15m")
+        limit (int): Number of candles to fetch (default: 100)
+        
+    Returns:
+        dict: Raw price/volume numpy arrays or None if request fails.
+    """
+    url = "https://fapi.binance.com/fapi/v1/klines"
+    params = {
+        "symbol": symbol.upper(),
+        "interval": interval,
+        "limit": limit
+    }
 
     try:
-        url = f"{OKX_BASE_URL}/api/v5/public/funding-rate?instId={symbol}"
-        res = requests.get(url, timeout=4)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("code") == "0" and data.get("data"):
-                funding = float(data["data"][0].get("fundingRate", 0.0))
-                cache[cache_key] = funding
-                return funding
-        logging.warning(f"[OKX Funding Response Error] {symbol}: {res.text}")
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200:
+            logger.warning(f"Binance API returned status code {response.status_code} for {symbol}")
+            return None
+
+        data = response.json()
+        if not isinstance(data, list) or len(data) == 0:
+            logger.warning(f"Binance API returned empty payload for {symbol}")
+            return None
+
+        # Parse raw OHLCV arrays
+        highs = np.array([float(candle[2]) for candle in data], dtype=float)
+        lows = np.array([float(candle[3]) for candle in data], dtype=float)
+        closes = np.array([float(candle[4]) for candle in data], dtype=float)
+        volumes = np.array([float(candle[5]) for candle in data], dtype=float)
+        taker_buy_volumes = np.array([float(candle[9]) for candle in data], dtype=float)
+
+        return {
+            "highs": highs,
+            "lows": lows,
+            "closes": closes,
+            "volumes": volumes,
+            "taker_buy_volumes": taker_buy_volumes
+        }
+
     except Exception as e:
-        logging.warning(f"[OKX Funding Exception] {symbol}: {e}")
-
-    cache[cache_key] = None
-    return None
-
-
-def get_cvd(symbol: str) -> float | None:
-    """Estimates taker buy/sell volume imbalance from OKX recent trades."""
-    cache_key = f"cvd_{symbol}"
-    if cache_key in cache:
-        return cache[cache_key]
-
-    try:
-        url = f"{OKX_BASE_URL}/api/v5/market/trades?instId={symbol}&limit=100"
-        res = requests.get(url, timeout=4)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("code") == "0" and data.get("data"):
-                trades = data["data"]
-                buy_vol = sum(float(t.get("sz", 0)) for t in trades if t.get("side") == "buy")
-                sell_vol = sum(float(t.get("sz", 0)) for t in trades if t.get("side") == "sell")
-                cvd = buy_vol - sell_vol
-                cache[cache_key] = cvd
-                return cvd
-        logging.warning(f"[OKX CVD Response Error] {symbol}: {res.text}")
-    except Exception as e:
-        logging.warning(f"[OKX CVD Exception] {symbol}: {e}")
-
-    cache[cache_key] = None
-    return None
+        logger.error(f"Error fetching Binance data for {symbol}: {e}")
+        return None
