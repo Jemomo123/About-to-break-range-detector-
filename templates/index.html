@@ -3,57 +3,154 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Version 1.0 Market Scanner</title>
+    <title>Market Scanner — Version 1.1</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
         body {
             background-color: #121212;
             color: #e0e0e0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 20px;
+            margin: 0;
+            padding: 12px;
+        }
+        .header-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
         }
         h2 {
             color: #ffffff;
-            margin-bottom: 15px;
+            margin: 0;
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+        .timestamp {
+            font-size: 0.75rem;
+            color: #888888;
+            background-color: #1e1e1e;
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid #2c2c2c;
         }
         .table-container {
             overflow-x: auto;
+            max-height: 85vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            border: 1px solid #2c2c2c;
+            border-radius: 6px;
         }
         table {
             width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
             background-color: #1e1e1e;
+            font-size: 0.85rem;
         }
         th, td {
-            padding: 12px 15px;
+            padding: 10px 14px;
             text-align: left;
             border-bottom: 1px solid #2c2c2c;
+            white-space: nowrap;
         }
+        /* Sticky Table Header */
         th {
             background-color: #252525;
-            color: #b0b0b0;
-            font-size: 0.85rem;
+            color: #888888;
+            font-size: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             position: sticky;
             top: 0;
+            z-index: 10;
         }
-        tr:hover {
-            background-color: #2a2a2a;
+        /* Sticky SYMBOL Column (First Column) */
+        th:first-child, td:first-child {
+            position: sticky;
+            left: 0;
+            z-index: 5;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.4);
         }
+        th:first-child {
+            z-index: 15;
+            background-color: #252525;
+        }
+        /* Zebra Striping */
+        tbody tr:nth-child(odd) td {
+            background-color: #1a1a1a;
+        }
+        tbody tr:nth-child(even) td {
+            background-color: #151515;
+        }
+        tbody tr:hover td {
+            background-color: #242424 !important;
+        }
+        
         .symbol {
-            font-weight: bold;
-            color: #ffffff;
+            font-weight: 700;
+            color: #00e676;
         }
-        .evidence {
-            font-family: monospace;
-            font-size: 0.9rem;
-            color: #888888;
+
+        /* Trader-Friendly Evidence Styling */
+        .evidence-cell {
+            white-space: pre-line;
+            line-height: 1.45;
+            font-size: 0.8rem;
+            color: #d1d1d1;
+            min-width: 240px;
         }
+
+        /* Badges & Dynamic Colors */
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+        .badge-timeframe {
+            background-color: #2c2c2c;
+            color: #cccccc;
+        }
+        
+        /* Status Color-Coding */
+        .status-high-squeeze {
+            background-color: rgba(255, 23, 68, 0.15);
+            color: #ff4081;
+            border: 1px solid rgba(255, 23, 68, 0.3);
+        }
+        .status-mod-squeeze {
+            background-color: rgba(255, 145, 0, 0.15);
+            color: #ffab40;
+            border: 1px solid rgba(255, 145, 0, 0.3);
+        }
+        .status-normal {
+            background-color: #2c2c2c;
+            color: #aaaaaa;
+        }
+
+        /* Battle State Color-Coding */
+        .battle-bulls { color: #00e676; font-weight: 600; }
+        .battle-bears { color: #ff5252; font-weight: 600; }
+        .battle-balanced { color: #e0e0e0; font-weight: 500; }
+
+        /* Breakout Readiness Color-Coding */
+        .readiness-high { color: #00e676; font-weight: 700; }
+        .readiness-med { color: #ffab40; font-weight: 700; }
+        .readiness-low { color: #888888; font-weight: 400; }
     </style>
 </head>
 <body>
 
-    <h2>Market Scanner — Version 1.0</h2>
+    <div class="header-container">
+        <h2>Market Scanner — Version 1.1</h2>
+        <div class="timestamp">Last Updated: <span id="update-time">--:--:-- UTC</span></div>
+    </div>
 
     <div class="table-container">
         <table>
@@ -68,21 +165,50 @@
                     <th>EVIDENCE</th>
                 </tr>
             </thead>
-            <tbody id="scanner-table-body">
+            <tbody>
                 {% for row in rows %}
                 <tr>
                     <td class="symbol">{{ row['SYMBOL'] }}</td>
-                    <td>{{ row['TIMEFRAME'] }}</td>
-                    <td>{{ row['STATUS'] }}</td>
-                    <td>{{ row['BATTLE'] }}</td>
+                    <td><span class="badge badge-timeframe">{{ row['TIMEFRAME'] }}</span></td>
+                    <td>
+                        {% if 'HIGH SQUEEZE' in row['STATUS'] %}
+                            <span class="badge status-high-squeeze">{{ row['STATUS'] }}</span>
+                        {% elif 'MODERATE' in row['STATUS'] %}
+                            <span class="badge status-mod-squeeze">{{ row['STATUS'] }}</span>
+                        {% else %}
+                            <span class="badge status-normal">{{ row['STATUS'] }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if 'BULL' in row['BATTLE'].upper() %}
+                            <span class="battle-bulls">{{ row['BATTLE'] }}</span>
+                        {% elif 'BEAR' in row['BATTLE'].upper() %}
+                            <span class="battle-bears">{{ row['BATTLE'] }}</span>
+                        {% else %}
+                            <span class="battle-balanced">{{ row['BATTLE'] }}</span>
+                        {% endif %}
+                    </td>
                     <td>{{ row['LOCATION'] }}</td>
-                    <td>{{ row['BREAKOUT READINESS'] }}</td>
-                    <td class="evidence">{{ row['EVIDENCE'] }}</td>
+                    <td>
+                        {% set score = row['BREAKOUT READINESS'] | string | replace(' BUILDING', '') | replace(' READY', '') | int %}
+                        {% if score >= 75 %}
+                            <span class="readiness-high">{{ row['BREAKOUT READINESS'] }}</span>
+                        {% elif score >= 50 %}
+                            <span class="readiness-med">{{ row['BREAKOUT READINESS'] }}</span>
+                        {% else %}
+                            <span class="readiness-low">{{ row['BREAKOUT READINESS'] }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="evidence-cell">{{ row['EVIDENCE'] }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
+    <script>
+        // Stamp UTC execution time upon payload render
+        document.getElementById('update-time').innerText = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    </script>
 </body>
 </html>
