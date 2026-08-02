@@ -1,16 +1,16 @@
 # app.py
 # =====================================================================
-# VERSION 1.2.4 — SINGLE SOURCE OF TRUTH & FLASK APPLICATION
+# VERSION 1.2 — SINGLE SOURCE OF TRUTH & FLASK APPLICATION
 # =====================================================================
 
 from flask import Flask, render_template, request
 import numpy as np
+from config import WATCHLIST
 
 app = Flask(__name__)
 
 DEFAULT_TIMEFRAME = "1h"
 SUPPORTED_TIMEFRAMES = ["3m", "5m", "15m", "1h", "4h"]
-TARGET_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 
 
 def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
@@ -89,7 +89,6 @@ def calculate_battle_engine(volumes, taker_buy_volumes=None, open_interest=None,
     else:
         buy_ratio = 0.5
 
-    # Direct real-data scaling (no static replacement)
     battle_score = float(np.clip(buy_ratio * 100.0, 0.0, 100.0))
 
     if buy_ratio >= 0.55 and vol_ratio > 1.2:
@@ -138,11 +137,9 @@ def calculate_breakout_readiness(status_score, battle_score, location_score, val
     bull_power = float(battle_score)
     bear_power = 100.0 - bull_power
 
-    # Neutral Battle Zone Thresholding (45% - 55%)
     buyers_in_control = bull_power >= 55.0
     sellers_in_control = bear_power >= 55.0
 
-    # Boundary Context
     near_resistance = position_pct >= 75.0
     near_support = position_pct <= 25.0
 
@@ -179,11 +176,9 @@ def calculate_breakout_readiness(status_score, battle_score, location_score, val
             effective_battle = bear_power
 
     else:
-        # Mid-Range: Preserve full dominant strength
         direction = "MID_RANGE"
         effective_battle = max(bull_power, bear_power)
 
-    # Aggregation: Battle (50%), Structure (30%), Location (20%)
     structure_component = status_score * 0.30
     battle_component = min(effective_battle, 100.0) * 0.50
     location_component = location_score * 0.20
@@ -191,7 +186,6 @@ def calculate_breakout_readiness(status_score, battle_score, location_score, val
     readiness_score = int(round(structure_component + battle_component + location_component))
     readiness_score = min(max(readiness_score, 0), 100)
 
-    # Scale Mapping
     if readiness_score >= 95:
         readiness_label = "IMMINENT"
     elif readiness_score >= 90:
@@ -262,7 +256,7 @@ def index():
 
     from scanner import run_scanner_pipeline
 
-    rows = run_scanner_pipeline(TARGET_SYMBOLS, timeframe=selected_tf)
+    rows = run_scanner_pipeline(WATCHLIST, timeframe=selected_tf)
 
     return render_template(
         "index.html",
@@ -270,6 +264,7 @@ def index():
         selected_tf=selected_tf,
         supported_tfs=SUPPORTED_TIMEFRAMES
     )
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
