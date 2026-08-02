@@ -1,84 +1,13 @@
 # app.py
 # =====================================================================
-# VERSION 1.2 — TIMEFRAME UPGRADE & SINGLE SOURCE OF TRUTH
+# VERSION 1.0 — SINGLE SOURCE OF TRUTH & CORE ENGINE
 # =====================================================================
 
 import numpy as np
-from flask import Flask, jsonify, render_template, request
-
-app = Flask(__name__)
 
 # Operational Constants
-SUPPORTED_TIMEFRAMES = ["2m", "5m", "15m"]
-DEFAULT_TIMEFRAME = "5m"
+DEFAULT_TIMEFRAME = "1h"
 TARGET_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
-
-
-# =====================================================================
-# FLASK ROUTES
-# =====================================================================
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-
-@app.route("/api/scan")
-def scan():
-    # Parse timeframe query parameter; default to 5m
-    tf = request.args.get("timeframe", DEFAULT_TIMEFRAME)
-    if tf not in SUPPORTED_TIMEFRAMES:
-        tf = DEFAULT_TIMEFRAME
-
-    data = run_scanner(timeframe=tf)
-    return jsonify({"timeframe": tf, "results": data})
-
-
-def run_scanner(timeframe=DEFAULT_TIMEFRAME):
-    """
-    Executes scan across TARGET_SYMBOLS for the selected timeframe.
-    app.py performs ALL indicator and metrics calculations.
-    """
-    results = []
-    
-    for symbol in TARGET_SYMBOLS:
-        # Fetch Binance OHLCV data using the selected timeframe interval
-        highs, lows, closes, volumes, taker_buy_vols = fetch_binance_klines(symbol, interval=timeframe)
-        
-        if len(closes) < 50:
-            continue
-
-        # Single Source of Truth Engine Execution
-        val_range = get_validated_range(highs, lows, closes, volumes)
-        status = calculate_status_engine(highs, lows, closes, val_range)
-        battle = calculate_battle_engine(volumes, taker_buy_vols)
-        location = calculate_location_engine(closes, val_range)
-        readiness = calculate_breakout_readiness(
-            status["status_score"], battle["battle_score"], location["location_score"], val_range
-        )
-        evidence = generate_compact_evidence(status, battle, location, readiness, val_range)
-
-        results.append({
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "status": status["status_label"],
-            "battle": battle["battle_label"],
-            "location": location["location_label"],
-            "readiness": readiness["readiness_label"],
-            "evidence": evidence
-        })
-
-    return results
-
-
-def fetch_binance_klines(symbol, interval="5m", limit=100):
-    """
-    Placeholder/Helper for Binance Klines fetching logic.
-    Returns: highs, lows, closes, volumes, taker_buy_volumes as numpy arrays.
-    """
-    # Replace with your production Binance API call passing standard interval=interval
-    # e.g., https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=2m&limit=100
-    return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
 
 
 # =====================================================================
@@ -89,6 +18,16 @@ def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
     """
     Absolute sole engine for range boundary calculations across the repository.
     Calculates v_high, v_low, height, touches, containment, and expansion status.
+    
+    Parameters:
+        highs (np.ndarray): Array of high prices
+        lows (np.ndarray): Array of low prices
+        closes (np.ndarray): Array of close prices
+        volumes (np.ndarray): Array of volume values
+        lookback_window (int): Number of historical bars to evaluate
+        
+    Returns:
+        dict: Standardized range boundary metrics object
     """
     if len(closes) < lookback_window:
         return None
@@ -135,16 +74,15 @@ def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
 
 
 # =====================================================================
-# 2. STATUS ENGINE (UPDATED TO COMPACT STATUS LABELS)
+# 2. STATUS ENGINE
 # =====================================================================
 
 def calculate_status_engine(highs, lows, closes, val_range):
     """
-    Evaluates market containment state within the validated range.
-    Uses compact labels to prevent status UI blowout on mobile/small screens.
+    Evaluates market consolidation, compression, or expansion state.
     """
     if val_range is None:
-        return {"status_score": 0, "status_label": "NO RANGE"}
+        return {"status_score": 0, "status_label": "NO_RANGE"}
 
     if val_range["has_already_expanded"]:
         return {"status_score": 10, "status_label": "EXPANDED"}
@@ -153,13 +91,13 @@ def calculate_status_engine(highs, lows, closes, val_range):
     
     if containment >= 85.0:
         status_score = 90
-        status_label = "HIGH COMP"
+        status_label = "HIGH SQUEEZE"
     elif containment >= 70.0:
         status_score = 75
-        status_label = "COMP"
+        status_label = "CONSOLIDATION"
     else:
         status_score = 40
-        status_label = "LOOSE COMP"
+        status_label = "LOOSE RANGE"
 
     return {
         "status_score": status_score,
@@ -212,7 +150,7 @@ def calculate_location_engine(closes, val_range):
     Evaluates position of current close price within the validated range.
     """
     if val_range is None or val_range["r_height"] <= 0:
-        return {"location_score": 50, "location_label": "MID RANGE", "position_pct": 50.0}
+        return {"location_score": 50, "location_label": "MID_RANGE", "position_pct": 50.0}
 
     current_close = closes[-1]
     v_low = val_range["v_low"]
@@ -270,47 +208,14 @@ def calculate_breakout_readiness(status_score, battle_score, location_score, val
 
 def generate_compact_evidence(status, battle, location, readiness, val_range):
     """
-    Generates structured, human-readable trader evidence string for UI rendering.
-    Maps evidence interpretation cleanly to approved containment terminology.
+    Generates structured, compact technical evidence string.
     """
     if val_range is None:
         return "NO_DATA"
 
-    containment = val_range.get("containment_pct", 0.0)
-    u_touches = val_range.get("upper_touches", 0)
-    l_touches = val_range.get("lower_touches", 0)
-    
-    # Extract order flow label in title case
-    battle_label = battle.get("battle_label", "BALANCED").title() if isinstance(battle, dict) else str(battle).title()
-    
-    # Calculate distance relative to boundary
-    position_pct = location.get("position_pct", 50.0) if isinstance(location, dict) else 50.0
-    dist_from_resistance = round(100.0 - position_pct, 1)
-    dist_from_support = round(position_pct, 1)
-
-    if position_pct >= 50.0:
-        position_text = f"{dist_from_resistance}% below resistance"
-    else:
-        position_text = f"{dist_from_support}% above support"
-
-    # Contextual interpretation based on containment level
-    status_str = status.get("status_label", "") if isinstance(status, dict) else str(status)
-    if "HIGH COMP" in status_str:
-        if position_pct >= 80.0:
-            interpretation = "High range containment near upper boundary.\nWatching for breakout confirmation."
-        elif position_pct <= 20.0:
-            interpretation = "High range containment near lower boundary.\nWatching for breakdown confirmation."
-        else:
-            interpretation = "High range containment coiled at mid-range.\nAwaiting direction signal."
-    elif "COMP" in status_str:
-        interpretation = "Active containment within validated range boundaries."
-    else:
-        interpretation = "Price operating within loose range distribution."
-
     return (
-        f"Range Quality: {containment:.0f}%\n\n"
-        f"Price Position:\n{position_text}\n\n"
-        f"Range Touches:\nUpper: {u_touches}\nLower: {l_touches}\n\n"
-        f"Order Flow:\n{battle_label}\n\n"
-        f"Interpretation:\n{interpretation}"
+        f"CNT:{val_range['containment_pct']}% | "
+        f"TCH:[U:{val_range['upper_touches']}/L:{val_range['lower_touches']}] | "
+        f"POS:{location['position_pct']}% | "
+        f"BAT:{battle['battle_label']}"
     )
