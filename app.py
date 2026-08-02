@@ -1,6 +1,6 @@
 # app.py
 # =====================================================================
-# VERSION 1.2.1 — SINGLE SOURCE OF TRUTH & FLASK APPLICATION
+# VERSION 1.2 — SINGLE SOURCE OF TRUTH & FLASK APPLICATION
 # =====================================================================
 
 from flask import Flask, render_template, request
@@ -8,15 +8,10 @@ import numpy as np
 
 app = Flask(__name__)
 
-# Operational Constants
 DEFAULT_TIMEFRAME = "1h"
 SUPPORTED_TIMEFRAMES = ["3m", "5m", "15m", "1h", "4h"]
 TARGET_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 
-
-# =====================================================================
-# 1. RANGE ENGINE (SINGLE SOURCE OF TRUTH)
-# =====================================================================
 
 def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
     if len(closes) < lookback_window:
@@ -131,14 +126,23 @@ def calculate_location_engine(closes, val_range):
 
 def calculate_breakout_readiness(status_score, battle_score, location_score, val_range):
     if val_range is None or val_range["has_already_expanded"]:
-        return {"readiness_score": 0, "readiness_label": "INACTIVE"}
+        return {"readiness_score": 0, "readiness_label": "LOW"}
 
     readiness_score = int(round((status_score * 0.40) + (battle_score * 0.30) + (location_score * 0.30)))
 
-    if readiness_score >= 80:
+    # Version 1.2 Readiness Scale Mapping
+    if readiness_score >= 95:
         readiness_label = "IMMINENT"
-    elif readiness_score >= 60:
+    elif readiness_score >= 90:
+        readiness_label = "VERY HIGH"
+    elif readiness_score >= 80:
+        readiness_label = "HIGH"
+    elif readiness_score >= 70:
         readiness_label = "BUILDING"
+    elif readiness_score >= 60:
+        readiness_label = "DEVELOPING"
+    elif readiness_score >= 40:
+        readiness_label = "WATCH"
     else:
         readiness_label = "LOW"
 
@@ -166,28 +170,24 @@ def generate_compact_evidence(status, battle, location, readiness, val_range):
     status_str = status.get("status_label", "") if isinstance(status, dict) else str(status)
     if "HIGH CONSOLIDATION" in status_str:
         if position_pct >= 80.0:
-            interpretation = "High range containment near upper boundary.\nWatching for breakout confirmation."
+            interpretation = "High range containment near upper boundary. Watching for breakout confirmation."
         elif position_pct <= 20.0:
-            interpretation = "High range containment near lower boundary.\nWatching for breakdown confirmation."
+            interpretation = "High range containment near lower boundary. Watching for breakdown confirmation."
         else:
-            interpretation = "High range containment coiled at mid-range.\nAwaiting direction signal."
+            interpretation = "High range containment coiled at mid-range. Awaiting direction signal."
     elif "CONSOLIDATION" in status_str:
         interpretation = "Active containment within validated range boundaries."
     else:
         interpretation = "Price operating within loose range distribution."
 
     return (
-        f"Range Quality: {containment:.0f}%\n\n"
-        f"Price Position:\n{position_text}\n\n"
-        f"Range Touches:\nUpper: {u_touches}\nLower: {l_touches}\n\n"
-        f"Order Flow:\n{battle_label}\n\n"
-        f"Interpretation:\n{interpretation}"
+        f"Range Quality: {containment:.0f}%\n"
+        f"Price Position: {position_text}\n"
+        f"Range Touches: Upper ({u_touches}), Lower ({l_touches})\n"
+        f"Order Flow: {battle_label}\n"
+        f"Interpretation: {interpretation}"
     )
 
-
-# =====================================================================
-# SINGLE ROUTE DEFINITION
-# =====================================================================
 
 @app.route("/")
 def index():
