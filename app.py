@@ -1,6 +1,6 @@
 # app.py
 # =====================================================================
-# VERSION 1.2 — SINGLE SOURCE OF TRUTH & FLASK APPLICATION
+# VERSION 1.2.4 — SINGLE SOURCE OF TRUTH & FLASK APPLICATION
 # =====================================================================
 
 from flask import Flask, render_template, request
@@ -78,7 +78,7 @@ def calculate_status_engine(highs, lows, closes, val_range):
 
 def calculate_battle_engine(volumes, taker_buy_volumes=None, open_interest=None, funding_rates=None):
     if volumes is None or len(volumes) < 20:
-        return {"battle_score": 50, "battle_label": "NEUTRAL"}
+        return {"battle_score": 50.0, "battle_label": "NEUTRAL"}
 
     recent_vol = volumes[-5:]
     avg_vol = np.mean(volumes[-20:])
@@ -89,14 +89,14 @@ def calculate_battle_engine(volumes, taker_buy_volumes=None, open_interest=None,
     else:
         buy_ratio = 0.5
 
-    if buy_ratio > 0.55 and vol_ratio > 1.2:
-        battle_score = 85
+    # Direct real-data scaling (no static replacement)
+    battle_score = float(np.clip(buy_ratio * 100.0, 0.0, 100.0))
+
+    if buy_ratio >= 0.55 and vol_ratio > 1.2:
         battle_label = "BULL DOMINANCE"
-    elif buy_ratio < 0.45 and vol_ratio > 1.2:
-        battle_score = 15
+    elif buy_ratio <= 0.45 and vol_ratio > 1.2:
         battle_label = "BEAR DOMINANCE"
     else:
-        battle_score = 50
         battle_label = "BALANCED"
 
     return {"battle_score": battle_score, "battle_label": battle_label}
@@ -124,13 +124,74 @@ def calculate_location_engine(closes, val_range):
     return {"location_score": location_score, "location_label": location_label, "position_pct": position_pct}
 
 
-def calculate_breakout_readiness(status_score, battle_score, location_score, val_range):
-    if val_range is None or val_range["has_already_expanded"]:
-        return {"readiness_score": 0, "readiness_label": "LOW"}
+def calculate_breakout_readiness(status_score, battle_score, location_score, val_range, battle_label="BALANCED", position_pct=50.0):
+    """
+    VERSION 1.2.4 — DIRECTIONAL ALIGNMENT ENGINE
+    - 50% Battle, 30% Structure, 20% Location
+    - Real market battle scores used directly
+    - 45%-55% Neutral Zone for Battle Power
+    - Multipliers: 1.12x Reward (Alignment), 0.75x Penalty (Misalignment)
+    """
+    if val_range is None or val_range.get("has_already_expanded", False):
+        return {"readiness_score": 0, "readiness_label": "LOW", "direction": "NEUTRAL"}
 
-    readiness_score = int(round((status_score * 0.40) + (battle_score * 0.30) + (location_score * 0.30)))
+    bull_power = float(battle_score)
+    bear_power = 100.0 - bull_power
 
-    # Version 1.2 Readiness Scale Mapping
+    # Neutral Battle Zone Thresholding (45% - 55%)
+    buyers_in_control = bull_power >= 55.0
+    sellers_in_control = bear_power >= 55.0
+
+    # Boundary Context
+    near_resistance = position_pct >= 75.0
+    near_support = position_pct <= 25.0
+
+    REWARD_MULT = 1.12
+    PENALTY_MULT = 0.75
+
+    alignment_multiplier = 1.0
+    direction = "NEUTRAL"
+
+    if near_resistance:
+        if buyers_in_control:
+            alignment_multiplier = REWARD_MULT
+            direction = "UPSIDE"
+            effective_battle = bull_power * alignment_multiplier
+        elif sellers_in_control:
+            alignment_multiplier = PENALTY_MULT
+            direction = "REJECTION_RISK"
+            effective_battle = bull_power * alignment_multiplier
+        else:
+            direction = "RESISTANCE_BALANCED"
+            effective_battle = bull_power
+
+    elif near_support:
+        if sellers_in_control:
+            alignment_multiplier = REWARD_MULT
+            direction = "DOWNSIDE"
+            effective_battle = bear_power * alignment_multiplier
+        elif buyers_in_control:
+            alignment_multiplier = PENALTY_MULT
+            direction = "ABSORPTION_RISK"
+            effective_battle = bear_power * alignment_multiplier
+        else:
+            direction = "SUPPORT_BALANCED"
+            effective_battle = bear_power
+
+    else:
+        # Mid-Range: Preserve full dominant strength
+        direction = "MID_RANGE"
+        effective_battle = max(bull_power, bear_power)
+
+    # Aggregation: Battle (50%), Structure (30%), Location (20%)
+    structure_component = status_score * 0.30
+    battle_component = min(effective_battle, 100.0) * 0.50
+    location_component = location_score * 0.20
+
+    readiness_score = int(round(structure_component + battle_component + location_component))
+    readiness_score = min(max(readiness_score, 0), 100)
+
+    # Scale Mapping
     if readiness_score >= 95:
         readiness_label = "IMMINENT"
     elif readiness_score >= 90:
@@ -146,7 +207,11 @@ def calculate_breakout_readiness(status_score, battle_score, location_score, val
     else:
         readiness_label = "LOW"
 
-    return {"readiness_score": readiness_score, "readiness_label": readiness_label}
+    return {
+        "readiness_score": readiness_score,
+        "readiness_label": readiness_label,
+        "direction": direction
+    }
 
 
 def generate_compact_evidence(status, battle, location, readiness, val_range):
