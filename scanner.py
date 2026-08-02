@@ -75,5 +75,5 @@ def run_scanner_pipeline(symbols, timeframe="1h"):
 
     return rows
 
-# Alias for backward compatibility
+# Alias for backward compatibility across modules
 fetch_and_process_market_data = run_scanner_pipeline
