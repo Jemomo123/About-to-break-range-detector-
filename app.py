@@ -1,6 +1,6 @@
 # app.py
 # =====================================================================
-# VERSION 1.2.1 — SINGLE SOURCE OF TRUTH & ENGINE CALCULATIONS
+# VERSION 1.2.1 — SINGLE SOURCE OF TRUTH & FLASK APPLICATION
 # =====================================================================
 
 from flask import Flask, render_template, request
@@ -186,7 +186,7 @@ def generate_compact_evidence(status, battle, location, readiness, val_range):
 
 
 # =====================================================================
-# ROUTE DEFINITION
+# SINGLE ROUTE DEFINITION
 # =====================================================================
 
 @app.route("/")
