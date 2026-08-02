@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About To Break — Range Scanner — Version 1.1</title>
+    <title>About To Break — Range Scanner — Version 1.2</title>
     <style>
         * {
             box-sizing: border-box;
@@ -38,6 +38,46 @@
             border-radius: 4px;
             border: 1px solid #2c2c2c;
         }
+
+        /* Timeframe Selector Toolbar Controls */
+        .tf-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 12px;
+            background-color: #1e1e1e;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #2c2c2c;
+            width: fit-content;
+        }
+        .tf-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #888888;
+            margin-right: 4px;
+        }
+        .tf-btn {
+            background-color: #151515;
+            color: #aaaaaa;
+            border: 1px solid #2c2c2c;
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease-in-out;
+        }
+        .tf-btn:hover {
+            background-color: #242424;
+            color: #ffffff;
+        }
+        .tf-btn.active {
+            background-color: #00e676;
+            color: #121212;
+            border-color: #00e676;
+        }
+
         .table-container {
             overflow-x: auto;
             max-height: 85vh;
@@ -119,18 +159,18 @@
             color: #cccccc;
         }
         
-        /* Status Color-Coding */
-        .status-high-consolidation {
+        /* Compact Status Color-Coding (Updated to match Version 1.2 app.py) */
+        .status-high-comp {
             background-color: rgba(255, 23, 68, 0.15);
             color: #ff4081;
             border: 1px solid rgba(255, 23, 68, 0.3);
         }
-        .status-consolidation {
+        .status-comp {
             background-color: rgba(255, 145, 0, 0.15);
             color: #ffab40;
             border: 1px solid rgba(255, 145, 0, 0.3);
         }
-        .status-weak-consolidation {
+        .status-loose-comp {
             background-color: #2c2c2c;
             color: #aaaaaa;
         }
@@ -149,8 +189,16 @@
 <body>
 
     <div class="header-container">
-        <h2>About To Break<br>Range Scanner — Version 1.1</h2>
+        <h2>About To Break<br>Range Scanner — Version 1.2</h2>
         <div class="timestamp">Last Updated: <span id="update-time">--:--:-- UTC</span></div>
+    </div>
+
+    <!-- Timeframe Selector Toolbar (Default: 5m) -->
+    <div class="tf-toolbar">
+        <span class="tf-label">Timeframe:</span>
+        <button class="tf-btn" data-tf="2m" onclick="selectTimeframe('2m')">2m</button>
+        <button class="tf-btn active" data-tf="5m" onclick="selectTimeframe('5m')">5m</button>
+        <button class="tf-btn" data-tf="15m" onclick="selectTimeframe('15m')">15m</button>
     </div>
 
     <div class="table-container">
@@ -166,50 +214,97 @@
                     <th>EVIDENCE</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for row in rows %}
-                <tr>
-                    <td class="symbol">{{ row['SYMBOL'] }}</td>
-                    <td><span class="badge badge-timeframe">{{ row['TIMEFRAME'] }}</span></td>
-                    <td>
-                        {% if 'HIGH CONSOLIDATION' in row['STATUS'] %}
-                            <span class="badge status-high-consolidation">{{ row['STATUS'] }}</span>
-                        {% elif 'CONSOLIDATION' in row['STATUS'] %}
-                            <span class="badge status-consolidation">{{ row['STATUS'] }}</span>
-                        {% else %}
-                            <span class="badge status-weak-consolidation">{{ row['STATUS'] }}</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if 'BULL' in row['BATTLE'].upper() %}
-                            <span class="battle-bulls">{{ row['BATTLE'] }}</span>
-                        {% elif 'BEAR' in row['BATTLE'].upper() %}
-                            <span class="battle-bears">{{ row['BATTLE'] }}</span>
-                        {% else %}
-                            <span class="battle-balanced">{{ row['BATTLE'] }}</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ row['LOCATION'] }}</td>
-                    <td>
-                        {% set score = row['BREAKOUT READINESS'] | string | replace(' BUILDING', '') | replace(' READY', '') | int %}
-                        {% if score >= 75 %}
-                            <span class="readiness-high">{{ row['BREAKOUT READINESS'] }}</span>
-                        {% elif score >= 50 %}
-                            <span class="readiness-med">{{ row['BREAKOUT READINESS'] }}</span>
-                        {% else %}
-                            <span class="readiness-low">{{ row['BREAKOUT READINESS'] }}</span>
-                        {% endif %}
-                    </td>
-                    <td class="evidence-cell">{{ row['EVIDENCE'] }}</td>
-                </tr>
-                {% endfor %}
+            <tbody id="scanner-tbody">
+                <!-- Data populated dynamically via API -->
             </tbody>
         </table>
     </div>
 
     <script>
-        // Stamp UTC execution time upon payload render
-        document.getElementById('update-time').innerText = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+        let selectedTimeframe = '5m';
+
+        function updateTimestamp() {
+            document.getElementById('update-time').innerText = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+        }
+
+        function selectTimeframe(tf) {
+            if (selectedTimeframe === tf) return;
+            selectedTimeframe = tf;
+
+            // Toggle active toolbar button state
+            document.querySelectorAll('.tf-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tf === tf);
+            });
+
+            // Refresh scanner data without page reload
+            fetchScanData();
+        }
+
+        async function fetchScanData() {
+            try {
+                const response = await fetch(`/api/scan?timeframe=${selectedTimeframe}`);
+                const data = await response.json();
+                renderTable(data.results);
+                updateTimestamp();
+            } catch (error) {
+                console.error("Failed to update scanner data:", error);
+            }
+        }
+
+        function renderTable(rows) {
+            const tbody = document.getElementById('scanner-tbody');
+            tbody.innerHTML = '';
+
+            if (!rows || rows.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: #888;">No scanner data available</td></tr>`;
+                return;
+            }
+
+            rows.forEach(row => {
+                const tr = document.createElement('tr');
+
+                // Status Badge Helper
+                let statusBadgeClass = 'status-loose-comp';
+                if (row.status.includes('HIGH COMP')) {
+                    statusBadgeClass = 'status-high-comp';
+                } else if (row.status.includes('COMP')) {
+                    statusBadgeClass = 'status-comp';
+                }
+
+                // Battle Style Helper
+                let battleClass = 'battle-balanced';
+                const battleUpper = (row.battle || '').toUpperCase();
+                if (battleUpper.includes('BULL')) {
+                    battleClass = 'battle-bulls';
+                } else if (battleUpper.includes('BEAR')) {
+                    battleClass = 'battle-bears';
+                }
+
+                // Breakout Readiness Style Helper
+                let readinessClass = 'readiness-low';
+                const readinessUpper = (row.readiness || '').toUpperCase();
+                if (readinessUpper.includes('IMMINENT') || readinessUpper.includes('READY')) {
+                    readinessClass = 'readiness-high';
+                } else if (readinessUpper.includes('BUILDING')) {
+                    readinessClass = 'readiness-med';
+                }
+
+                tr.innerHTML = `
+                    <td class="symbol">${row.symbol}</td>
+                    <td><span class="badge badge-timeframe">${row.timeframe}</span></td>
+                    <td><span class="badge ${statusBadgeClass}">${row.status}</span></td>
+                    <td><span class="${battleClass}">${row.battle}</span></td>
+                    <td>${row.location}</td>
+                    <td><span class="${readinessClass}">${row.readiness}</span></td>
+                    <td class="evidence-cell">${row.evidence}</td>
+                `;
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Initial fetch on page load (Default 5m)
+        fetchScanData();
     </script>
 </body>
 </html>
