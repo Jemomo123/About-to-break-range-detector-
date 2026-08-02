@@ -38,9 +38,10 @@ def fetch_binance_klines(symbol, interval="1h", limit=100):
     return None, None, None, None, None
 
 
-def fetch_and_process_market_data(symbols, timeframe="1h"):
+def run_scanner_pipeline(symbols, timeframe="1h"):
     """
-    Executes core engine pipeline for the specified timeframe parameter.
+    Executes core engine pipeline for the specified symbols and timeframe parameter.
+    Module-level function required by server.py / app.py.
     """
     rows = []
     
@@ -73,3 +74,6 @@ def fetch_and_process_market_data(symbols, timeframe="1h"):
         })
 
     return rows
+
+# Alias for backward compatibility
+fetch_and_process_market_data = run_scanner_pipeline
