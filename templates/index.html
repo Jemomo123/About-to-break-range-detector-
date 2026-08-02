@@ -2,202 +2,189 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About To Break — Range Scanner — Version 1.2.1</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Range Breakout Scanner v1.2</title>
     <style>
-        * {
-            box-sizing: border-box;
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --text-main: #c9d1d9;
+            --text-bright: #ffffff;
+            --accent-green: #238636;
+            --accent-blue: #58a6ff;
+            --accent-gold: #d29922;
         }
+
         body {
-            background-color: #121212;
-            color: #e0e0e0;
+            background-color: var(--bg-color);
+            color: var(--text-main);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
             padding: 12px;
         }
-        .header-container {
+
+        .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 12px;
-            flex-wrap: wrap;
-            gap: 8px;
         }
-        h2 {
-            color: #ffffff;
-            margin: 0;
-            font-size: 1.1rem;
-            font-weight: 700;
-            line-height: 1.25;
+
+        .title {
+            font-size: 16px;
+            font-weight: bold;
+            color: var(--text-bright);
         }
-        .controls-container {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-        }
-        .tf-selector {
-            display: flex;
-            gap: 4px;
-            background-color: #1e1e1e;
-            padding: 4px;
-            border-radius: 6px;
-            border: 1px solid #2c2c2c;
-        }
-        .tf-btn {
-            color: #888888;
+
+        .tf-selector a {
+            color: var(--text-main);
             text-decoration: none;
-            padding: 4px 10px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            border-radius: 4px;
-            transition: all 0.2s ease;
-        }
-        .tf-btn.active {
-            background-color: #00e676;
-            color: #121212;
-        }
-        .timestamp {
-            font-size: 0.75rem;
-            color: #888888;
-            background-color: #1e1e1e;
             padding: 4px 8px;
+            border: 1px solid var(--border-color);
             border-radius: 4px;
-            border: 1px solid #2c2c2c;
-            margin-left: auto;
+            font-size: 12px;
+            margin-left: 4px;
         }
-        
-        /* Table Container & Mobile Scrolling */
+
+        .tf-selector a.active {
+            background-color: var(--accent-blue);
+            color: #000;
+            font-weight: bold;
+            border-color: var(--accent-blue);
+        }
+
+        /* 7-Column Table Container with Mobile Horizontal Scroll */
         .table-container {
             width: 100%;
             overflow-x: auto;
-            max-height: 80vh;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            border: 1px solid #2c2c2c;
+            border: 1px solid var(--border-color);
             border-radius: 6px;
-            background-color: #1e1e1e;
+            background-color: var(--card-bg);
+            -webkit-overflow-scrolling: touch;
         }
+
         table {
             width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            font-size: 0.85rem;
+            border-collapse: collapse;
+            white-space: nowrap;
+            font-size: 13px;
         }
+
         th, td {
             padding: 10px 12px;
             text-align: left;
-            border-bottom: 1px solid #2c2c2c;
-            white-space: nowrap;
-            vertical-align: top; /* Prevents tall cells from stretching content poorly */
+            border-bottom: 1px solid var(--border-color);
         }
-        
-        /* Sticky Header */
+
         th {
-            background-color: #252525;
-            color: #888888;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            position: sticky;
-            top: 0;
-            z-index: 10;
+            background-color: #21262d;
+            color: var(--text-bright);
+            font-weight: 600;
         }
-        
-        /* Sticky First Column (SYMBOL) */
+
+        /* Sticky SYMBOL Column for Mobile Scroll */
         th:first-child, td:first-child {
             position: sticky;
             left: 0;
-            background-color: #1a1a1a;
-            z-index: 5;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.5);
+            background-color: #161b22;
+            z-index: 2;
+            border-right: 1px solid var(--border-color);
+            font-weight: bold;
+            color: var(--accent-blue);
         }
+
         th:first-child {
-            background-color: #252525;
-            z-index: 15;
-        }
-        
-        /* Zebra Striping */
-        tbody tr:nth-child(odd) td {
-            background-color: #1a1a1a;
-        }
-        tbody tr:nth-child(even) td {
-            background-color: #151515;
-        }
-        tbody tr:nth-child(even) td:first-child {
-            background-color: #151515;
-        }
-        tbody tr:hover td {
-            background-color: #242424 !important;
-        }
-        
-        .symbol {
-            font-weight: 700;
-            color: #00e676;
+            background-color: #21262d;
+            z-index: 3;
         }
 
-        /* Evidence Multi-line Formatting */
-        .evidence-cell {
-            white-space: pre-line;
-            line-height: 1.4;
-            font-size: 0.8rem;
-            color: #d1d1d1;
-            min-width: 220px;
+        tr:hover td {
+            background-color: #1c2128;
+            cursor: pointer;
         }
 
-        /* Badges & Dynamic Colors */
-        .badge {
-            display: inline-block;
-            padding: 3px 8px;
+        /* Modal Overlay for Coin Details */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            width: 100%;
+            max-width: 420px;
+            padding: 16px;
+            color: var(--text-main);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--text-bright);
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-main);
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px dashed #21262d;
+            font-size: 13px;
+        }
+
+        .detail-label { color: #8b949e; }
+        .detail-val { font-weight: 600; color: var(--text-bright); }
+
+        .evidence-box {
+            margin-top: 12px;
+            background: #0d1117;
+            padding: 10px;
             border-radius: 4px;
-            font-weight: 600;
-            font-size: 0.75rem;
+            font-family: monospace;
+            font-size: 11px;
+            white-space: pre-wrap;
+            border: 1px solid var(--border-color);
         }
-        .badge-timeframe {
-            background-color: #2c2c2c;
-            color: #cccccc;
-        }
-        
-        .status-high-consolidation {
-            background-color: rgba(255, 23, 68, 0.15);
-            color: #ff4081;
-            border: 1px solid rgba(255, 23, 68, 0.3);
-        }
-        .status-consolidation {
-            background-color: rgba(255, 145, 0, 0.15);
-            color: #ffab40;
-            border: 1px solid rgba(255, 145, 0, 0.3);
-        }
-        .status-weak-consolidation {
-            background-color: #2c2c2c;
-            color: #aaaaaa;
-        }
-
-        .battle-bulls { color: #00e676; font-weight: 600; }
-        .battle-bears { color: #ff5252; font-weight: 600; }
-        .battle-balanced { color: #e0e0e0; font-weight: 500; }
-
-        .readiness-high { color: #00e676; font-weight: 700; }
-        .readiness-med { color: #ffab40; font-weight: 700; }
-        .readiness-low { color: #888888; font-weight: 400; }
     </style>
 </head>
 <body>
 
-    <div class="header-container">
-        <h2>About To Break<br>Range Scanner — Version 1.2.1</h2>
-    </div>
-
-    <div class="controls-container">
+    <div class="header">
+        <div class="title">SCANNER v1.2</div>
         <div class="tf-selector">
             {% for tf in supported_tfs %}
-                <a href="/?tf={{ tf }}" class="tf-btn {% if tf == selected_tf %}active{% endif %}">{{ tf }}</a>
+                <a href="/?tf={{ tf }}" class="{% if tf == selected_tf %}active{% endif %}">{{ tf }}</a>
             {% endfor %}
         </div>
-        <div class="timestamp">Last Updated: <span id="update-time">--:--:-- UTC</span></div>
     </div>
 
+    <!-- MAIN 7-COLUMN TABLE -->
     <div class="table-container">
         <table>
             <thead>
@@ -213,47 +200,64 @@
             </thead>
             <tbody>
                 {% for row in rows %}
-                <tr>
-                    <td class="symbol">{{ row['SYMBOL'] }}</td>
-                    <td><span class="badge badge-timeframe">{{ row['TIMEFRAME'] }}</span></td>
-                    <td>
-                        {% if 'HIGH CONSOLIDATION' in row['STATUS'] %}
-                            <span class="badge status-high-consolidation">{{ row['STATUS'] }}</span>
-                        {% elif 'CONSOLIDATION' in row['STATUS'] %}
-                            <span class="badge status-consolidation">{{ row['STATUS'] }}</span>
-                        {% else %}
-                            <span class="badge status-weak-consolidation">{{ row['STATUS'] }}</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if 'BULL' in row['BATTLE'].upper() %}
-                            <span class="battle-bulls">{{ row['BATTLE'] }}</span>
-                        {% elif 'BEAR' in row['BATTLE'].upper() %}
-                            <span class="battle-bears">{{ row['BATTLE'] }}</span>
-                        {% else %}
-                            <span class="battle-balanced">{{ row['BATTLE'] }}</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ row['LOCATION'] }}</td>
-                    <td>
-                        {% set score = row['BREAKOUT READINESS'] | string | replace(' BUILDING', '') | replace(' READY', '') | int %}
-                        {% if score >= 75 %}
-                            <span class="readiness-high">{{ row['BREAKOUT READINESS'] }}</span>
-                        {% elif score >= 50 %}
-                            <span class="readiness-med">{{ row['BREAKOUT READINESS'] }}</span>
-                        {% else %}
-                            <span class="readiness-low">{{ row['BREAKOUT READINESS'] }}</span>
-                        {% endif %}
-                    </td>
-                    <td class="evidence-cell">{{ row['EVIDENCE'] }}</td>
+                <tr onclick="openDetails('{{ row.SYMBOL }}', '{{ row.CURRENT_PRICE }}', '{{ row.RES_PRICE }}', '{{ row.SUP_PRICE }}', '{{ row.RANGE_SIZE }}', '{{ row.DIST_RES }}', '{{ row.DIST_SUP }}', '{{ row.EXCHANGE }}', `{{ row.EVIDENCE }}`)">
+                    <td>{{ row.SYMBOL }}</td>
+                    <td>{{ row.TIMEFRAME }}</td>
+                    <td>{{ row.STATUS }}</td>
+                    <td>{{ row.BATTLE }}</td>
+                    <td>{{ row.LOCATION }}</td>
+                    <td style="font-weight: bold; color: var(--accent-gold);">{{ row['BREAKOUT READINESS'] }}</td>
+                    <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis;">{{ row.EVIDENCE.split('\n')[0] }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
+    <!-- COIN DETAILS MODAL -->
+    <div id="detailsModal" class="modal-overlay" onclick="closeDetails(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div id="modalSymbol" class="modal-title">BTCUSDT</div>
+                <button class="close-btn" onclick="hideModal()">&times;</button>
+            </div>
+            
+            <div class="detail-row"><span class="detail-label">Data Source:</span><span id="mExchange" class="detail-val"></span></div>
+            <div class="detail-row"><span class="detail-label">Current Price:</span><span id="mCurrPrice" class="detail-val"></span></div>
+            <div class="detail-row"><span class="detail-label">Resistance Price:</span><span id="mResPrice" class="detail-val" style="color:#f85149;"></span></div>
+            <div class="detail-row"><span class="detail-label">Support Price:</span><span id="mSupPrice" class="detail-val" style="color:#3fb950;"></span></div>
+            <div class="detail-row"><span class="detail-label">Range Size:</span><span id="mRangeSize" class="detail-val"></span></div>
+            <div class="detail-row"><span class="detail-label">Distance to Resistance:</span><span id="mDistRes" class="detail-val"></span></div>
+            <div class="detail-row"><span class="detail-label">Distance to Support:</span><span id="mDistSup" class="detail-val"></span></div>
+
+            <div class="evidence-box" id="mEvidence"></div>
+        </div>
+    </div>
+
     <script>
-        document.getElementById('update-time').innerText = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+        function openDetails(symbol, curr, res, sup, range, distRes, distSup, exchange, evidence) {
+            document.getElementById('modalSymbol').innerText = symbol + ' Details';
+            document.getElementById('mExchange').innerText = exchange + ' Futures';
+            document.getElementById('mCurrPrice').innerText = '$' + curr;
+            document.getElementById('mResPrice').innerText = '$' + res;
+            document.getElementById('mSupPrice').innerText = '$' + sup;
+            document.getElementById('mRangeSize').innerText = '$' + range;
+            document.getElementById('mDistRes').innerText = distRes;
+            document.getElementById('mDistSup').innerText = distSup;
+            document.getElementById('mEvidence').innerText = evidence;
+            
+            document.getElementById('detailsModal').style.display = 'flex';
+        }
+
+        function hideModal() {
+            document.getElementById('detailsModal').style.display = 'none';
+        }
+
+        function closeDetails(event) {
+            if (event.target.id === 'detailsModal') {
+                hideModal();
+            }
+        }
     </script>
 </body>
 </html>
