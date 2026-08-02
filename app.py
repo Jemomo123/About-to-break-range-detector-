@@ -1,12 +1,16 @@
 # app.py
 # =====================================================================
-# VERSION 1.0 — SINGLE SOURCE OF TRUTH & CORE ENGINE
+# VERSION 1.2.1 — SINGLE SOURCE OF TRUTH & ENGINE CALCULATIONS
 # =====================================================================
 
+from flask import Flask, render_template, request
 import numpy as np
+
+app = Flask(__name__)
 
 # Operational Constants
 DEFAULT_TIMEFRAME = "1h"
+SUPPORTED_TIMEFRAMES = ["3m", "5m", "15m", "1h", "4h"]
 TARGET_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 
 
@@ -15,20 +19,6 @@ TARGET_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 # =====================================================================
 
 def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
-    """
-    Absolute sole engine for range boundary calculations across the repository.
-    Calculates v_high, v_low, height, touches, containment, and expansion status.
-    
-    Parameters:
-        highs (np.ndarray): Array of high prices
-        lows (np.ndarray): Array of low prices
-        closes (np.ndarray): Array of close prices
-        volumes (np.ndarray): Array of volume values
-        lookback_window (int): Number of historical bars to evaluate
-        
-    Returns:
-        dict: Standardized range boundary metrics object
-    """
     if len(closes) < lookback_window:
         return None
 
@@ -43,20 +33,16 @@ def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
     if r_height <= 0:
         return None
 
-    # Calculate touches near boundaries (within 1.5% buffer of height)
     touch_buffer = r_height * 0.015
     upper_touches = int(np.sum(window_highs >= (v_high - touch_buffer)))
     lower_touches = int(np.sum(window_lows <= (v_low + touch_buffer)))
 
-    # Calculate containment percentage (closes inside inner 90% boundary)
     inner_upper = v_high - (r_height * 0.05)
     inner_lower = v_low + (r_height * 0.05)
     contained_count = np.sum((window_closes <= inner_upper) & (window_closes >= inner_lower))
     containment_pct = round(float((contained_count / lookback_window) * 100.0), 1)
 
-    # Structural validity and expansion checks
     is_structurally_valid = containment_pct >= 70.0 and upper_touches >= 2 and lower_touches >= 2
-    
     current_close = closes[-1]
     has_already_expanded = current_close > v_high or current_close < v_low
 
@@ -73,14 +59,7 @@ def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
     }
 
 
-# =====================================================================
-# 2. STATUS ENGINE
-# =====================================================================
-
 def calculate_status_engine(highs, lows, closes, val_range):
-    """
-    Evaluates market consolidation, compression, or expansion state.
-    """
     if val_range is None:
         return {"status_score": 0, "status_label": "NO_RANGE"}
 
@@ -91,28 +70,18 @@ def calculate_status_engine(highs, lows, closes, val_range):
     
     if containment >= 85.0:
         status_score = 90
-        status_label = "HIGH SQUEEZE"
+        status_label = "HIGH CONSOLIDATION"
     elif containment >= 70.0:
         status_score = 75
         status_label = "CONSOLIDATION"
     else:
         status_score = 40
-        status_label = "LOOSE RANGE"
+        status_label = "WEAK CONSOLIDATION"
 
-    return {
-        "status_score": status_score,
-        "status_label": status_label
-    }
+    return {"status_score": status_score, "status_label": status_label}
 
-
-# =====================================================================
-# 3. BATTLE ENGINE
-# =====================================================================
 
 def calculate_battle_engine(volumes, taker_buy_volumes=None, open_interest=None, funding_rates=None):
-    """
-    Evaluates buyer vs. seller control and volume effort.
-    """
     if volumes is None or len(volumes) < 20:
         return {"battle_score": 50, "battle_label": "NEUTRAL"}
 
@@ -135,27 +104,16 @@ def calculate_battle_engine(volumes, taker_buy_volumes=None, open_interest=None,
         battle_score = 50
         battle_label = "BALANCED"
 
-    return {
-        "battle_score": battle_score,
-        "battle_label": battle_label
-    }
+    return {"battle_score": battle_score, "battle_label": battle_label}
 
-
-# =====================================================================
-# 4. LOCATION ENGINE
-# =====================================================================
 
 def calculate_location_engine(closes, val_range):
-    """
-    Evaluates position of current close price within the validated range.
-    """
     if val_range is None or val_range["r_height"] <= 0:
         return {"location_score": 50, "location_label": "MID_RANGE", "position_pct": 50.0}
 
     current_close = closes[-1]
     v_low = val_range["v_low"]
     r_height = val_range["r_height"]
-
     position_pct = round(((current_close - v_low) / r_height) * 100.0, 1)
 
     if position_pct >= 80.0:
@@ -168,25 +126,13 @@ def calculate_location_engine(closes, val_range):
         location_score = 40
         location_label = "MID RANGE"
 
-    return {
-        "location_score": location_score,
-        "location_label": location_label,
-        "position_pct": position_pct
-    }
+    return {"location_score": location_score, "location_label": location_label, "position_pct": position_pct}
 
-
-# =====================================================================
-# 5. BREAKOUT READINESS ENGINE
-# =====================================================================
 
 def calculate_breakout_readiness(status_score, battle_score, location_score, val_range):
-    """
-    Synthesizes Status, Battle, and Location engines into a final readiness score.
-    """
     if val_range is None or val_range["has_already_expanded"]:
         return {"readiness_score": 0, "readiness_label": "INACTIVE"}
 
-    # Weighted score calculation
     readiness_score = int(round((status_score * 0.40) + (battle_score * 0.30) + (location_score * 0.30)))
 
     if readiness_score >= 80:
@@ -196,26 +142,69 @@ def calculate_breakout_readiness(status_score, battle_score, location_score, val
     else:
         readiness_label = "LOW"
 
-    return {
-        "readiness_score": readiness_score,
-        "readiness_label": readiness_label
-    }
+    return {"readiness_score": readiness_score, "readiness_label": readiness_label}
 
-
-# =====================================================================
-# 6. EVIDENCE SYNTHESIS ENGINE
-# =====================================================================
 
 def generate_compact_evidence(status, battle, location, readiness, val_range):
-    """
-    Generates structured, compact technical evidence string.
-    """
     if val_range is None:
         return "NO_DATA"
 
+    containment = val_range.get("containment_pct", 0.0)
+    u_touches = val_range.get("upper_touches", 0)
+    l_touches = val_range.get("lower_touches", 0)
+    battle_label = battle.get("battle_label", "BALANCED").title() if isinstance(battle, dict) else str(battle).title()
+    
+    position_pct = location.get("position_pct", 50.0) if isinstance(location, dict) else 50.0
+    dist_from_resistance = round(100.0 - position_pct, 1)
+    dist_from_support = round(position_pct, 1)
+
+    if position_pct >= 50.0:
+        position_text = f"{dist_from_resistance}% below resistance"
+    else:
+        position_text = f"{dist_from_support}% above support"
+
+    status_str = status.get("status_label", "") if isinstance(status, dict) else str(status)
+    if "HIGH CONSOLIDATION" in status_str:
+        if position_pct >= 80.0:
+            interpretation = "High range containment near upper boundary.\nWatching for breakout confirmation."
+        elif position_pct <= 20.0:
+            interpretation = "High range containment near lower boundary.\nWatching for breakdown confirmation."
+        else:
+            interpretation = "High range containment coiled at mid-range.\nAwaiting direction signal."
+    elif "CONSOLIDATION" in status_str:
+        interpretation = "Active containment within validated range boundaries."
+    else:
+        interpretation = "Price operating within loose range distribution."
+
     return (
-        f"CNT:{val_range['containment_pct']}% | "
-        f"TCH:[U:{val_range['upper_touches']}/L:{val_range['lower_touches']}] | "
-        f"POS:{location['position_pct']}% | "
-        f"BAT:{battle['battle_label']}"
+        f"Range Quality: {containment:.0f}%\n\n"
+        f"Price Position:\n{position_text}\n\n"
+        f"Range Touches:\nUpper: {u_touches}\nLower: {l_touches}\n\n"
+        f"Order Flow:\n{battle_label}\n\n"
+        f"Interpretation:\n{interpretation}"
     )
+
+
+# =====================================================================
+# ROUTE DEFINITION
+# =====================================================================
+
+@app.route("/")
+def index():
+    selected_tf = request.args.get("tf", DEFAULT_TIMEFRAME)
+    if selected_tf not in SUPPORTED_TIMEFRAMES:
+        selected_tf = DEFAULT_TIMEFRAME
+
+    from scanner import run_scanner_pipeline
+
+    rows = run_scanner_pipeline(TARGET_SYMBOLS, timeframe=selected_tf)
+
+    return render_template(
+        "index.html",
+        rows=rows,
+        selected_tf=selected_tf,
+        supported_tfs=SUPPORTED_TIMEFRAMES
+    )
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
