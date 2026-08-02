@@ -2,261 +2,87 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Range Breakout Scanner v1.2</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About To Break Range Terminal</title>
     <style>
-        :root {
-            --bg-color: #0d1117;
-            --card-bg: #161b22;
-            --border-color: #30363d;
-            --text-main: #c9d1d9;
-            --text-bright: #ffffff;
-            --accent-green: #238636;
-            --accent-blue: #58a6ff;
-            --accent-gold: #d29922;
-        }
+        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 12px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
+        .title { font-size: 1.1rem; font-weight: bold; color: #58a6ff; margin: 0; }
+        .tf-buttons { display: flex; gap: 6px; }
+        .tf-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; }
+        .tf-btn.active { background: #238636; color: #ffffff; border-color: #2ea043; }
+        
+        .table-container { overflow-x: auto; background: #161b22; border-radius: 8px; border: 1px solid #30363d; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
+        th { background: #21262d; color: #8b949e; padding: 10px 12px; border-bottom: 1px solid #30363d; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; }
+        td { padding: 10px 12px; border-bottom: 1px solid #21262d; white-space: nowrap; }
+        tr:hover { background: #1c2128; cursor: pointer; }
+        
+        .dir-upside { color: #3fb950; font-weight: bold; }
+        .dir-downside { color: #f85149; font-weight: bold; }
+        .dir-balanced { color: #8b949e; font-weight: bold; }
+        .readiness { font-weight: bold; color: #f0883e; }
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 12px;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-
-        .title {
-            font-size: 16px;
-            font-weight: bold;
-            color: var(--text-bright);
-        }
-
-        .tf-selector a {
-            color: var(--text-main);
-            text-decoration: none;
-            padding: 4px 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            font-size: 12px;
-            margin-left: 4px;
-        }
-
-        .tf-selector a.active {
-            background-color: var(--accent-blue);
-            color: #000;
-            font-weight: bold;
-            border-color: var(--accent-blue);
-        }
-
-        /* 7-Column Table Container with Mobile Horizontal Scroll */
-        .table-container {
-            width: 100%;
-            overflow-x: auto;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            background-color: var(--card-bg);
-            -webkit-overflow-scrolling: touch;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            white-space: nowrap;
-            font-size: 13px;
-        }
-
-        th, td {
-            padding: 10px 12px;
-            text-align: left;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        th {
-            background-color: #21262d;
-            color: var(--text-bright);
-            font-weight: 600;
-        }
-
-        /* Sticky SYMBOL Column for Mobile Scroll */
-        th:first-child, td:first-child {
-            position: sticky;
-            left: 0;
-            background-color: #161b22;
-            z-index: 2;
-            border-right: 1px solid var(--border-color);
-            font-weight: bold;
-            color: var(--accent-blue);
-        }
-
-        th:first-child {
-            background-color: #21262d;
-            z-index: 3;
-        }
-
-        tr:hover td {
-            background-color: #1c2128;
-            cursor: pointer;
-        }
-
-        /* Modal Overlay for Coin Details */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.75);
-            z-index: 100;
-            justify-content: center;
-            align-items: center;
-            padding: 16px;
-        }
-
-        .modal-content {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            width: 100%;
-            max-width: 420px;
-            padding: 16px;
-            color: var(--text-main);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 8px;
-            margin-bottom: 12px;
-        }
-
-        .modal-title {
-            font-size: 18px;
-            font-weight: bold;
-            color: var(--text-bright);
-        }
-
-        .close-btn {
-            background: none;
-            border: none;
-            color: var(--text-main);
-            font-size: 20px;
-            cursor: pointer;
-        }
-
-        .detail-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 6px 0;
-            border-bottom: 1px dashed #21262d;
-            font-size: 13px;
-        }
-
-        .detail-label { color: #8b949e; }
-        .detail-val { font-weight: 600; color: var(--text-bright); }
-
-        .evidence-box {
-            margin-top: 12px;
-            background: #0d1117;
-            padding: 10px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 11px;
-            white-space: pre-wrap;
-            border: 1px solid var(--border-color);
-        }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; padding: 16px; box-sizing: border-box; }
+        .modal-content { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; max-width: 500px; width: 100%; color: #c9d1d9; }
+        .close-btn { background: #21262d; border: 1px solid #30363d; color: #fff; padding: 6px 12px; border-radius: 4px; float: right; cursor: pointer; }
+        pre { white-space: pre-wrap; word-wrap: break-word; font-size: 0.8rem; background: #0d1117; padding: 10px; border-radius: 6px; border: 1px solid #30363d; }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <div class="title">SCANNER v1.2</div>
-        <div class="tf-selector">
+        <h1 class="title">About To Break Range</h1>
+        <div class="tf-buttons">
             {% for tf in supported_tfs %}
-                <a href="/?tf={{ tf }}" class="{% if tf == selected_tf %}active{% endif %}">{{ tf }}</a>
+                <a href="/?tf={{ tf }}" class="tf-btn {% if tf == selected_tf %}active{% endif %}">{{ tf }}</a>
             {% endfor %}
         </div>
     </div>
 
-    <!-- MAIN 7-COLUMN TABLE -->
     <div class="table-container">
         <table>
             <thead>
                 <tr>
-                    <th>SYMBOL</th>
-                    <th>TIMEFRAME</th>
-                    <th>STATUS</th>
-                    <th>BATTLE</th>
-                    <th>LOCATION</th>
-                    <th>BREAKOUT READINESS</th>
-                    <th>EVIDENCE</th>
+                    <th>Symbol</th>
+                    <th>Breakout Readiness</th>
+                    <th>Direction</th>
+                    <th>Resistance</th>
+                    <th>Support</th>
+                    <th>Distance</th>
                 </tr>
             </thead>
             <tbody>
                 {% for row in rows %}
-                <tr onclick="openDetails('{{ row.SYMBOL }}', '{{ row.CURRENT_PRICE }}', '{{ row.RES_PRICE }}', '{{ row.SUP_PRICE }}', '{{ row.RANGE_SIZE }}', '{{ row.DIST_RES }}', '{{ row.DIST_SUP }}', '{{ row.EXCHANGE }}', `{{ row.EVIDENCE }}`)">
-                    <td>{{ row.SYMBOL }}</td>
-                    <td>{{ row.TIMEFRAME }}</td>
-                    <td>{{ row.STATUS }}</td>
-                    <td>{{ row.BATTLE }}</td>
-                    <td>{{ row.LOCATION }}</td>
-                    <td style="font-weight: bold; color: var(--accent-gold);">{{ row['BREAKOUT READINESS'] }}</td>
-                    <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis;">{{ row.EVIDENCE.split('\n')[0] }}</td>
+                <tr onclick="showEvidence('{{ row.SYMBOL }}', '{{ row.EVIDENCE | replace('\n', '\\n') }}')">
+                    <td style="font-weight: bold; color: #ffffff;">{{ row.SYMBOL }}</td>
+                    <td class="readiness">{{ row.BREAKOUT_READINESS }}</td>
+                    <td class="dir-{{ row.DIRECTION | lower }}">{{ row.DIRECTION }}</td>
+                    <td style="color: #7ee787;">{{ row.RESISTANCE }}</td>
+                    <td style="color: #ff7b72;">{{ row.SUPPORT }}</td>
+                    <td>{{ row.DISTANCE }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
-    <!-- COIN DETAILS MODAL -->
-    <div id="detailsModal" class="modal-overlay" onclick="closeDetails(event)">
-        <div class="modal-content" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <div id="modalSymbol" class="modal-title">BTCUSDT</div>
-                <button class="close-btn" onclick="hideModal()">&times;</button>
-            </div>
-            
-            <div class="detail-row"><span class="detail-label">Data Source:</span><span id="mExchange" class="detail-val"></span></div>
-            <div class="detail-row"><span class="detail-label">Current Price:</span><span id="mCurrPrice" class="detail-val"></span></div>
-            <div class="detail-row"><span class="detail-label">Resistance Price:</span><span id="mResPrice" class="detail-val" style="color:#f85149;"></span></div>
-            <div class="detail-row"><span class="detail-label">Support Price:</span><span id="mSupPrice" class="detail-val" style="color:#3fb950;"></span></div>
-            <div class="detail-row"><span class="detail-label">Range Size:</span><span id="mRangeSize" class="detail-val"></span></div>
-            <div class="detail-row"><span class="detail-label">Distance to Resistance:</span><span id="mDistRes" class="detail-val"></span></div>
-            <div class="detail-row"><span class="detail-label">Distance to Support:</span><span id="mDistSup" class="detail-val"></span></div>
-
-            <div class="evidence-box" id="mEvidence"></div>
+    <div id="evidenceModal" class="modal">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal()">Close</button>
+            <h3 id="modalSymbol" style="margin-top:0; color:#58a6ff;"></h3>
+            <pre id="modalText"></pre>
         </div>
     </div>
 
     <script>
-        function openDetails(symbol, curr, res, sup, range, distRes, distSup, exchange, evidence) {
-            document.getElementById('modalSymbol').innerText = symbol + ' Details';
-            document.getElementById('mExchange').innerText = exchange + ' Futures';
-            document.getElementById('mCurrPrice').innerText = '$' + curr;
-            document.getElementById('mResPrice').innerText = '$' + res;
-            document.getElementById('mSupPrice').innerText = '$' + sup;
-            document.getElementById('mRangeSize').innerText = '$' + range;
-            document.getElementById('mDistRes').innerText = distRes;
-            document.getElementById('mDistSup').innerText = distSup;
-            document.getElementById('mEvidence').innerText = evidence;
-            
-            document.getElementById('detailsModal').style.display = 'flex';
+        function showEvidence(symbol, text) {
+            document.getElementById('modalSymbol').innerText = symbol + ' Analysis Details';
+            document.getElementById('modalText').innerText = text;
+            document.getElementById('evidenceModal').style.display = 'flex';
         }
-
-        function hideModal() {
-            document.getElementById('detailsModal').style.display = 'none';
-        }
-
-        function closeDetails(event) {
-            if (event.target.id === 'detailsModal') {
-                hideModal();
-            }
+        function closeModal() {
+            document.getElementById('evidenceModal').style.display = 'none';
         }
     </script>
 </body>
