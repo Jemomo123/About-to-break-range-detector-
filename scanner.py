@@ -18,10 +18,8 @@ from app import (
 
 def fetch_mexc_klines(symbol, timeframe="1h", limit=100):
     """
-    Placeholder/Interface for fetching OHLCV + Taker Buy Volume data from MEXC API.
-    Returns simulated/mocked arrays for testing if real API stream is offline.
+    Placeholder/Interface for fetching OHLCV + Taker Buy Volume data from API.
     """
-    # Highs, Lows, Closes, Volumes, Taker Buy Volumes
     np.random.seed(42)
     closes = np.cumsum(np.random.randn(limit)) + 100.0
     highs = closes + np.abs(np.random.randn(limit)) * 0.5
@@ -66,38 +64,51 @@ def run_scanner_pipeline(symbols, timeframe="1h"):
                 status, battle, location, readiness, val_range
             )
 
+            curr_price = float(closes[-1])
+            res_price = val_range["v_high"] if val_range else curr_price
+            sup_price = val_range["v_low"] if val_range else curr_price
+            range_size = val_range["r_height"] if val_range else 0.0
+            dist_res_val = res_price - curr_price
+            dist_sup_val = curr_price - sup_price
+            dist_res_pct = round((dist_res_val / curr_price) * 100.0, 2) if curr_price > 0 else 0.0
+            dist_sup_pct = round((dist_sup_val / curr_price) * 100.0, 2) if curr_price > 0 else 0.0
+
             results.append({
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "status_score": status["status_score"],
-                "status_label": status["status_label"],
-                "battle_score": round(battle["battle_score"], 1),
-                "battle_label": battle["battle_label"],
-                "location_score": location["location_score"],
-                "location_label": location["location_label"],
-                "position_pct": location.get("position_pct", 50.0),
-                "readiness_score": readiness["readiness_score"],
-                "readiness_label": readiness["readiness_label"],
-                "direction": readiness.get("direction", "NEUTRAL"),
-                "evidence": evidence_text
+                "SYMBOL": symbol,
+                "TIMEFRAME": timeframe,
+                "STATUS": f"{status['status_label']} ({status['status_score']}%)",
+                "BATTLE": battle['battle_label'],
+                "LOCATION": location['location_label'],
+                "BREAKOUT READINESS": f"{readiness['readiness_score']}% ({readiness['readiness_label']})",
+                "READINESS_SCORE": readiness['readiness_score'],
+                "DIRECTION": readiness.get("direction", "NEUTRAL"),
+                "EVIDENCE": evidence_text,
+                "CURRENT_PRICE": f"{curr_price:.4f}",
+                "RES_PRICE": f"{res_price:.4f}",
+                "SUP_PRICE": f"{sup_price:.4f}",
+                "RANGE_SIZE": f"{range_size:.4f}",
+                "DIST_RES": f"${dist_res_val:.4f} ({dist_res_pct}%)",
+                "DIST_SUP": f"${dist_sup_val:.4f} ({dist_sup_pct}%)"
             })
 
         except Exception as e:
-            # Safe Fallback per Symbol
             results.append({
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "status_score": 0,
-                "status_label": "ERROR",
-                "battle_score": 50.0,
-                "battle_label": "UNKNOWN",
-                "location_score": 50,
-                "location_label": "UNKNOWN",
-                "position_pct": 50.0,
-                "readiness_score": 0,
-                "readiness_label": "LOW",
-                "direction": "NEUTRAL",
-                "evidence": f"Pipeline Error: {str(e)}"
+                "SYMBOL": symbol,
+                "TIMEFRAME": timeframe,
+                "STATUS": "ERROR",
+                "BATTLE": "UNKNOWN",
+                "LOCATION": "UNKNOWN",
+                "BREAKOUT READINESS": "0% (LOW)",
+                "READINESS_SCORE": 0,
+                "DIRECTION": "NEUTRAL",
+                "EVIDENCE": f"Pipeline Error: {str(e)}",
+                "CURRENT_PRICE": "0.0000",
+                "RES_PRICE": "0.0000",
+                "SUP_PRICE": "0.0000",
+                "RANGE_SIZE": "0.0000",
+                "DIST_RES": "$0.0000 (0%)",
+                "DIST_SUP": "$0.0000 (0%)"
             })
 
+    results.sort(key=lambda x: x["READINESS_SCORE"], reverse=True)
     return results
