@@ -1,12 +1,12 @@
 # scanner.py
 # =====================================================================
-# VERSION 1.2.4 — SCANNER PIPELINE ORCHESTRATOR
-# Pure Orchestration Layer: Fetches Market Data & Invokes Engine
+# VERSION 1.2 — SCANNER PIPELINE & WATCHLIST INTEGRATION
 # =====================================================================
 
+import urllib.request
+import json
 import numpy as np
-
-# Import Single Source of Truth engines from app.py
+from config import WATCHLIST
 from app import (
     get_validated_range,
     calculate_status_engine,
@@ -16,40 +16,82 @@ from app import (
     generate_compact_evidence
 )
 
-def fetch_mexc_klines(symbol, timeframe="1h", limit=100):
-    """
-    Placeholder/Interface for fetching OHLCV + Taker Buy Volume data from API.
-    """
-    np.random.seed(42)
-    closes = np.cumsum(np.random.randn(limit)) + 100.0
-    highs = closes + np.abs(np.random.randn(limit)) * 0.5
-    lows = closes - np.abs(np.random.randn(limit)) * 0.5
-    volumes = np.random.rand(limit) * 1000.0 + 100.0
-    taker_buy_volumes = volumes * (0.45 + np.random.rand(limit) * 0.1)
+OKX_TF_MAP = {"3m": "3m", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H"}
+MEXC_TF_MAP = {"3m": "Min3", "5m": "Min5", "15m": "Min15", "1h": "Min60", "4h": "Hour4"}
 
-    return highs, lows, closes, volumes, taker_buy_volumes
+def fetch_okx_klines(symbol, interval="1h", limit=100):
+    okx_inst_id = f"{symbol.replace('USDT', '')}-USDT-SWAP"
+    bar = OKX_TF_MAP.get(interval, "1H")
+    url = f"https://www.okx.com/api/v5/market/candles?instId={okx_inst_id}&bar={bar}&limit={limit}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    
+    try:
+        with urllib.request.urlopen(req, timeout=4) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode('utf-8'))
+                if data.get("code") == "0" and data.get("data"):
+                    raw = data["data"]
+                    raw.reverse()
+                    highs = np.array([float(k[2]) for k in raw])
+                    lows = np.array([float(k[3]) for k in raw])
+                    closes = np.array([float(k[4]) for k in raw])
+                    volumes = np.array([float(k[5]) for k in raw])
+                    taker_buy_volumes = volumes * 0.5
+                    return highs, lows, closes, volumes, taker_buy_volumes
+    except Exception:
+        pass
+    return None, None, None, None, None
 
+def fetch_mexc_klines(symbol, interval="1h", limit=100):
+    mexc_symbol = f"{symbol.replace('USDT', '')}_USDT"
+    interval_param = MEXC_TF_MAP.get(interval, "Min60")
+    url = f"https://contract.mexc.com/api/v1/contract/kline/{mexc_symbol}?interval={interval_param}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    
+    try:
+        with urllib.request.urlopen(req, timeout=4) as response:
+            if response.status == 200:
+                res = json.loads(response.read().decode('utf-8'))
+                if res.get("success") and res.get("data"):
+                    data = res["data"]
+                    highs = np.array([float(x) for x in data["high"][-limit:]])
+                    lows = np.array([float(x) for x in data["low"][-limit:]])
+                    closes = np.array([float(x) for x in data["close"][-limit:]])
+                    volumes = np.array([float(x) for x in data["vol"][-limit:]])
+                    taker_buy_volumes = volumes * 0.5
+                    return highs, lows, closes, volumes, taker_buy_volumes
+    except Exception:
+        pass
+    return None, None, None, None, None
 
-def run_scanner_pipeline(symbols, timeframe="1h"):
-    """
-    Executes the multi-timeframe scanner pipeline across target symbols.
-    Calculates sub-engine scores and passes all parameters to app.py.
-    """
+def fetch_klines_with_fallback(symbol, interval="1h", limit=100):
+    highs, lows, closes, volumes, taker_buy = fetch_okx_klines(symbol, interval, limit)
+    if closes is not None and len(closes) > 0:
+        return highs, lows, closes, volumes, taker_buy
+
+    highs, lows, closes, volumes, taker_buy = fetch_mexc_klines(symbol, interval, limit)
+    if closes is not None and len(closes) > 0:
+        return highs, lows, closes, volumes, taker_buy
+
+    return None, None, None, None, None
+
+def run_scanner_pipeline(symbols=None, timeframe="1h"):
+    if symbols is None:
+        symbols = WATCHLIST
+
     results = []
 
     for symbol in symbols:
         try:
-            highs, lows, closes, volumes, taker_buy_vols = fetch_mexc_klines(symbol, timeframe=timeframe)
+            highs, lows, closes, volumes, taker_buy_vols = fetch_klines_with_fallback(symbol, interval=timeframe)
+            if closes is None:
+                continue
 
-            # 1. Validate Range Structure
             val_range = get_validated_range(highs, lows, closes, volumes)
-
-            # 2. Execute Sub-Engines
             status = calculate_status_engine(highs, lows, closes, val_range)
             battle = calculate_battle_engine(volumes, taker_buy_volumes=taker_buy_vols)
             location = calculate_location_engine(closes, val_range)
 
-            # 3. Approved Version 1.2.4 Invocation
             readiness = calculate_breakout_readiness(
                 status_score=status["status_score"],
                 battle_score=battle["battle_score"],
@@ -59,56 +101,40 @@ def run_scanner_pipeline(symbols, timeframe="1h"):
                 position_pct=location.get("position_pct", 50.0)
             )
 
-            # 4. Generate Compact Evidence Text
-            evidence_text = generate_compact_evidence(
-                status, battle, location, readiness, val_range
-            )
+            evidence_text = generate_compact_evidence(status, battle, location, readiness, val_range)
 
             curr_price = float(closes[-1])
             res_price = val_range["v_high"] if val_range else curr_price
             sup_price = val_range["v_low"] if val_range else curr_price
-            range_size = val_range["r_height"] if val_range else 0.0
-            dist_res_val = res_price - curr_price
-            dist_sup_val = curr_price - sup_price
-            dist_res_pct = round((dist_res_val / curr_price) * 100.0, 2) if curr_price > 0 else 0.0
-            dist_sup_pct = round((dist_sup_val / curr_price) * 100.0, 2) if curr_price > 0 else 0.0
+
+            dist_res_pct = ((res_price - curr_price) / curr_price) * 100.0 if curr_price > 0 else 0.0
+            dist_sup_pct = ((curr_price - sup_price) / curr_price) * 100.0 if curr_price > 0 else 0.0
+            nearest_distance_pct = min(abs(dist_res_pct), abs(dist_sup_pct))
+
+            raw_dir = readiness.get("direction", "NEUTRAL").upper()
+            if "UPSIDE" in raw_dir:
+                clean_direction = "UPSIDE"
+            elif "DOWNSIDE" in raw_dir:
+                clean_direction = "DOWNSIDE"
+            else:
+                clean_direction = "BALANCED"
 
             results.append({
                 "SYMBOL": symbol,
-                "TIMEFRAME": timeframe,
-                "STATUS": f"{status['status_label']} ({status['status_score']}%)",
-                "BATTLE": battle['battle_label'],
-                "LOCATION": location['location_label'],
-                "BREAKOUT READINESS": f"{readiness['readiness_score']}% ({readiness['readiness_label']})",
+                "BREAKOUT_READINESS": f"{readiness['readiness_score']}% ({readiness['readiness_label']})",
                 "READINESS_SCORE": readiness['readiness_score'],
-                "DIRECTION": readiness.get("direction", "NEUTRAL"),
+                "DIRECTION": clean_direction,
+                "RESISTANCE": f"{res_price:.4f}",
+                "SUPPORT": f"{sup_price:.4f}",
+                "DISTANCE": f"{nearest_distance_pct:.2f}%",
                 "EVIDENCE": evidence_text,
-                "CURRENT_PRICE": f"{curr_price:.4f}",
-                "RES_PRICE": f"{res_price:.4f}",
-                "SUP_PRICE": f"{sup_price:.4f}",
-                "RANGE_SIZE": f"{range_size:.4f}",
-                "DIST_RES": f"${dist_res_val:.4f} ({dist_res_pct}%)",
-                "DIST_SUP": f"${dist_sup_val:.4f} ({dist_sup_pct}%)"
+                "STATUS_LABEL": status['status_label'],
+                "BATTLE_LABEL": battle['battle_label'],
+                "LOCATION_LABEL": location['location_label']
             })
 
-        except Exception as e:
-            results.append({
-                "SYMBOL": symbol,
-                "TIMEFRAME": timeframe,
-                "STATUS": "ERROR",
-                "BATTLE": "UNKNOWN",
-                "LOCATION": "UNKNOWN",
-                "BREAKOUT READINESS": "0% (LOW)",
-                "READINESS_SCORE": 0,
-                "DIRECTION": "NEUTRAL",
-                "EVIDENCE": f"Pipeline Error: {str(e)}",
-                "CURRENT_PRICE": "0.0000",
-                "RES_PRICE": "0.0000",
-                "SUP_PRICE": "0.0000",
-                "RANGE_SIZE": "0.0000",
-                "DIST_RES": "$0.0000 (0%)",
-                "DIST_SUP": "$0.0000 (0%)"
-            })
+        except Exception:
+            continue
 
     results.sort(key=lambda x: x["READINESS_SCORE"], reverse=True)
     return results
