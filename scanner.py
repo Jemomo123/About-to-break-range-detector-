@@ -1,98 +1,75 @@
 # scanner.py
 # =====================================================================
-# VERSION 1.0 — ORCHESTRATION LAYER
+# VERSION 1.2.1 — BINANCE FETCH & PIPELINE EXECUTOR
 # =====================================================================
 
-from binance_data import fetch_binance_futures_klines
-from coinalyze import fetch_open_interest
+import urllib.request
+import json
+import numpy as np
 from app import (
     get_validated_range,
     calculate_status_engine,
     calculate_battle_engine,
     calculate_location_engine,
     calculate_breakout_readiness,
-    generate_compact_evidence,
-    TARGET_SYMBOLS,
-    DEFAULT_TIMEFRAME
+    generate_compact_evidence
 )
 
-def run_scanner_pipeline():
+def fetch_binance_klines(symbol, interval="1h", limit=100):
     """
-    Pure orchestration function.
-    Performs ZERO scoring, range boundary, or market control calculations.
-    Strict execution sequence:
-    Fetch Data -> Validated Range -> Status -> Battle -> Location -> Readiness -> Evidence -> Reporting Table
+    Fetches spot/futures klines from Binance API for the requested interval.
+    """
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode('utf-8'))
+                highs = np.array([float(k[2]) for k in data])
+                lows = np.array([float(k[3]) for k in data])
+                closes = np.array([float(k[4]) for k in data])
+                volumes = np.array([float(k[5]) for k in data])
+                taker_buy_volumes = np.array([float(k[9]) for k in data])
+                return highs, lows, closes, volumes, taker_buy_volumes
+    except Exception as e:
+        print(f"Error fetching {symbol} on {interval}: {e}")
+        
+    return None, None, None, None, None
+
+
+def fetch_and_process_market_data(symbols, timeframe="1h"):
+    """
+    Executes core engine pipeline for the specified timeframe parameter.
     """
     rows = []
-
-    for sym in TARGET_SYMBOLS:
-        # 1. Fetch Market Data
-        kline_data = fetch_binance_futures_klines(sym, interval=DEFAULT_TIMEFRAME, limit=100)
-        if kline_data is None:
+    
+    for symbol in symbols:
+        highs, lows, closes, volumes, taker_buy_vols = fetch_binance_klines(symbol, interval=timeframe)
+        
+        if closes is None:
             continue
 
-        oi_data = fetch_open_interest(sym)
-
-        # 2. Single Source of Truth: Validated Range (app.py)
-        val_range = get_validated_range(
-            kline_data["highs"], 
-            kline_data["lows"], 
-            kline_data["closes"], 
-            kline_data["volumes"]
-        )
-
-        # 3. Status Engine (app.py)
-        status = calculate_status_engine(
-            kline_data["highs"], 
-            kline_data["lows"], 
-            kline_data["closes"], 
-            val_range
-        )
-
-        # 4. Battle Engine (app.py)
-        battle = calculate_battle_engine(
-            volumes=kline_data["volumes"],
-            taker_buy_volumes=kline_data.get("taker_buy_volumes"),
-            open_interest=oi_data,
-            funding_rates=None
-        )
-
-        # 5. Location Engine (app.py)
-        location = calculate_location_engine(
-            kline_data["closes"], 
-            val_range
-        )
-
-        # 6. Breakout Readiness Engine (app.py)
+        val_range = get_validated_range(highs, lows, closes, volumes)
+        status = calculate_status_engine(highs, lows, closes, val_range)
+        battle = calculate_battle_engine(volumes, taker_buy_vols)
+        location = calculate_location_engine(closes, val_range)
         readiness = calculate_breakout_readiness(
-            status["status_score"], 
-            battle["battle_score"], 
-            location["location_score"], 
+            status["status_score"],
+            battle["battle_score"],
+            location["location_score"],
             val_range
         )
+        evidence = generate_compact_evidence(status, battle, location, readiness, val_range)
 
-        # 7. Evidence Engine (app.py)
-        evidence = generate_compact_evidence(
-            status, 
-            battle, 
-            location, 
-            readiness, 
-            val_range
-        )
-
-        # 8. Output Formatting (Mapped to 7-Column Layout)
         rows.append({
-            "SYMBOL": sym,
-            "TIMEFRAME": DEFAULT_TIMEFRAME,
+            "SYMBOL": symbol,
+            "TIMEFRAME": timeframe,
             "STATUS": f"{status['status_label']} ({status['status_score']})",
-            "BATTLE": f"{battle['battle_label']} ({battle['battle_score']})",
-            "LOCATION": f"{location['location_label']} ({location['position_pct']}%)",
-            "BREAKOUT READINESS": f"{readiness['readiness_score']} {readiness['readiness_label']}",
-            "EVIDENCE": evidence,
-            "_s_readiness": readiness["readiness_score"],
-            "_s_status": status["status_score"],
-            "_s_battle": battle["battle_score"]
+            "BATTLE": battle['battle_label'],
+            "LOCATION": location['location_label'],
+            "BREAKOUT READINESS": f"{readiness['readiness_score']} ({readiness['readiness_label']})",
+            "EVIDENCE": evidence
         })
 
-    # Sort Table: Primary (Breakout Readiness) -> Secondary (Status) -> Tertiary (Battle)
-    return sorted(rows, key=lambda x: (x["_s_readiness"], x["_s_status"], x["_s_battle"]), reverse=True)
+    return rows
