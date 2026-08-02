@@ -1,11 +1,12 @@
 # scanner.py
 # =====================================================================
-# VERSION 1.2 — SCANNER PIPELINE WITH REQUESTS & HEADERS
+# VERSION 1.3 — PARALLEL MULTI-THREADED SCANNER PIPELINE
 # =====================================================================
 
 import json
 import numpy as np
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from config import WATCHLIST
 from app import (
     get_validated_range,
@@ -130,10 +131,9 @@ def run_scanner_pipeline(symbols=None, timeframe="1h"):
     if symbols is None:
         symbols = WATCHLIST
 
-    results = []
-    for sym in symbols:
-        data = process_symbol_data(sym, timeframe=timeframe)
-        results.append(data)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(process_symbol_data, sym, timeframe) for sym in symbols]
+        results = [f.result() for f in futures]
 
     results.sort(key=lambda x: x["readiness_score"], reverse=True)
     return results
