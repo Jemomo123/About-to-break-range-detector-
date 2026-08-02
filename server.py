@@ -1,29 +1,30 @@
 # server.py
 # =====================================================================
-# VERSION 1.0 — FLASK SERVER & WEB ROUTING ENGINE
+# GUNICORN / RENDER ENTRY POINT (VERSION 1.2.1)
 # =====================================================================
 
-import logging
-from flask import Flask, render_template
+from flask import request, render_template
+from app import app, DEFAULT_TIMEFRAME, SUPPORTED_TIMEFRAMES, TARGET_SYMBOLS
 from scanner import run_scanner_pipeline
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-app = Flask(__name__)
 
 @app.route("/")
 def index():
-    """
-    Renders the market scanner dashboard.
-    Consumes rows directly from scanner.py pipeline.
-    """
-    try:
-        rows = run_scanner_pipeline()
-        return render_template("index.html", rows=rows)
-    except Exception as e:
-        logger.error(f"Error rendering scanner dashboard: {e}")
-        return render_template("index.html", rows=[])
+    # Capture timeframe from query parameter, defaulting to '1h'
+    selected_tf = request.args.get("tf", DEFAULT_TIMEFRAME)
+    if selected_tf not in SUPPORTED_TIMEFRAMES:
+        selected_tf = DEFAULT_TIMEFRAME
+
+    # Execute scanner pipeline with the requested timeframe
+    rows = run_scanner_pipeline(TARGET_SYMBOLS, timeframe=selected_tf)
+
+    return render_template(
+        "index.html",
+        rows=rows,
+        selected_tf=selected_tf,
+        supported_tfs=SUPPORTED_TIMEFRAMES
+    )
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000)
