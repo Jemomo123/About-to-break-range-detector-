@@ -8,11 +8,11 @@ from scanner import run_scanner_pipeline
 
 app = Flask(__name__)
 
-# Startup Verification
+# Startup Log
 print("\n==========================================", flush=True)
-print(f"Loaded Watchlist ({len(WATCHLIST)} symbols):", flush=True)
+print(f"Loaded Watchlist ({len(WATCHLIST)}):", flush=True)
 for s in WATCHLIST:
-    print(f"  - {s}", flush=True)
+    print(f"{s}", flush=True)
 print("==========================================\n", flush=True)
 
 DATA_CACHE = {tf: {"rows": [], "diagnostics": {}} for tf in SUPPORTED_TIMEFRAMES}
