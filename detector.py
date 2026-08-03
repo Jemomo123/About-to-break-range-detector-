@@ -7,39 +7,59 @@ from config import OKX_CANDLE_URL, MEXC_CANDLE_URL, OKX_TF_MAP, MEXC_TF_MAP
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 def fetch_market_candles(symbol, timeframe, limit=100):
-    # OKX Primary
+    okx_error_msg = ""
+    mexc_error_msg = ""
+
+    # 1. Primary: OKX Futures
     try:
         inst_id = f"{symbol[:-4]}-USDT-SWAP" if symbol.endswith("USDT") else f"{symbol}-SWAP"
         bar = OKX_TF_MAP.get(timeframe, "1H")
         res = requests.get(OKX_CANDLE_URL, params={"instId": inst_id, "bar": bar, "limit": limit}, headers=HEADERS, timeout=3.0)
-        if res.status_code == 200 and res.json().get("code") == "0":
-            data = list(reversed(res.json()["data"]))
-            highs = np.array([float(c[2]) for c in data])
-            lows = np.array([float(c[3]) for c in data])
-            closes = np.array([float(c[4]) for c in data])
-            volumes = np.array([float(c[5]) for c in data])
-            if len(closes) > 0:
-                return (highs, lows, closes, volumes), "OKX"
+        
+        if res.status_code == 200:
+            body = res.json()
+            if body.get("code") == "0" and body.get("data"):
+                data = list(reversed(body["data"]))
+                highs = np.array([float(c[2]) for c in data])
+                lows = np.array([float(c[3]) for c in data])
+                closes = np.array([float(c[4]) for c in data])
+                volumes = np.array([float(c[5]) for c in data])
+                if len(closes) > 0:
+                    return (highs, lows, closes, volumes), "OKX", None
+            else:
+                okx_error_msg = f"OKX API returned code={body.get('code')}, msg='{body.get('msg')}'"
+        else:
+            okx_error_msg = f"OKX HTTP {res.status_code}"
     except Exception as e:
-        logging.warning(f"[OKX FAIL] {symbol} {timeframe}: {e}")
+        okx_error_msg = f"OKX Exception: {str(e)}"
 
-    # MEXC Fallback
+    # 2. Fallback: MEXC Futures
     try:
         mexc_symbol = f"{symbol[:-4]}_USDT" if symbol.endswith("USDT") else symbol
         tf_str = MEXC_TF_MAP.get(timeframe, "Min60")
         res = requests.get(f"{MEXC_CANDLE_URL}{mexc_symbol}", params={"interval": tf_str}, headers=HEADERS, timeout=3.0)
-        if res.status_code == 200 and res.json().get("success"):
-            d = res.json()["data"]
-            highs = np.array(d["high"][-limit:], dtype=float)
-            lows = np.array(d["low"][-limit:], dtype=float)
-            closes = np.array(d["close"][-limit:], dtype=float)
-            volumes = np.array(d["vol"][-limit:], dtype=float)
-            if len(closes) > 0:
-                return (highs, lows, closes, volumes), "MEXC"
+        
+        if res.status_code == 200:
+            body = res.json()
+            if body.get("success") and body.get("data"):
+                d = body["data"]
+                highs = np.array(d["high"][-limit:], dtype=float)
+                lows = np.array(d["low"][-limit:], dtype=float)
+                closes = np.array(d["close"][-limit:], dtype=float)
+                volumes = np.array(d["vol"][-limit:], dtype=float)
+                if len(closes) > 0:
+                    return (highs, lows, closes, volumes), "MEXC", None
+            else:
+                mexc_error_msg = f"MEXC API returned code={body.get('code')}, msg='{body.get('msg')}'"
+        else:
+            mexc_error_msg = f"MEXC HTTP {res.status_code}"
     except Exception as e:
-        logging.warning(f"[MEXC FAIL] {symbol} {timeframe}: {e}")
+        mexc_error_msg = f"MEXC Exception: {str(e)}"
 
-    return None, "NONE"
+    # Print exact failure log if both exchanges fail
+    failure_reason = f"{symbol} -> OKX: {okx_error_msg} | MEXC: {mexc_error_msg}"
+    print(failure_reason, flush=True)
+    return None, "NONE", failure_reason
 
 def validate_range_structure(highs, lows, closes, lookback=50):
     if len(closes) < lookback:
