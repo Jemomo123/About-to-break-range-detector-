@@ -1,16 +1,21 @@
 # app.py
 # =====================================================================
-# VERSION 1.2 — SINGLE SOURCE OF TRUTH & FLASK APPLICATION
+# FLASK APPLICATION WITH IN-MEMORY CACHE (VERSION 1.3.0)
 # =====================================================================
 
 from flask import Flask, render_template, request
 import numpy as np
+import time
+import logging
 from config import WATCHLIST
 
 app = Flask(__name__)
 
 DEFAULT_TIMEFRAME = "1h"
 SUPPORTED_TIMEFRAMES = ["3m", "5m", "15m", "1h", "4h"]
+
+# In-memory data store for instant page loads
+DATA_CACHE = {tf: [] for tf in SUPPORTED_TIMEFRAMES}
 
 
 def get_validated_range(highs, lows, closes, volumes, lookback_window=50):
@@ -124,13 +129,6 @@ def calculate_location_engine(closes, val_range):
 
 
 def calculate_breakout_readiness(status_score, battle_score, location_score, val_range, battle_label="BALANCED", position_pct=50.0):
-    """
-    VERSION 1.2.4 — DIRECTIONAL ALIGNMENT ENGINE
-    - 50% Battle, 30% Structure, 20% Location
-    - Real market battle scores used directly
-    - 45%-55% Neutral Zone for Battle Power
-    - Multipliers: 1.12x Reward (Alignment), 0.75x Penalty (Misalignment)
-    """
     if val_range is None or val_range.get("has_already_expanded", False):
         return {"readiness_score": 0, "readiness_label": "LOW", "direction": "NEUTRAL"}
 
@@ -248,15 +246,35 @@ def generate_compact_evidence(status, battle, location, readiness, val_range):
     )
 
 
+def update_cache_job():
+    """Background worker that continuously updates OKX scan data every 20 seconds."""
+    from scanner import run_scanner_pipeline
+    while True:
+        try:
+            for tf in SUPPORTED_TIMEFRAMES:
+                results = run_scanner_pipeline(WATCHLIST, timeframe=tf)
+                if results:
+                    DATA_CACHE[tf] = results
+            time.sleep(20)
+        except Exception as e:
+            logging.error(f"Background worker error: {e}")
+            time.sleep(10)
+
+
 @app.route("/")
 def index():
     selected_tf = request.args.get("tf", DEFAULT_TIMEFRAME)
     if selected_tf not in SUPPORTED_TIMEFRAMES:
         selected_tf = DEFAULT_TIMEFRAME
 
-    from scanner import run_scanner_pipeline
+    # Serve directly from background cache
+    rows = DATA_CACHE.get(selected_tf, [])
 
-    rows = run_scanner_pipeline(WATCHLIST, timeframe=selected_tf)
+    # Fallback sync run if cache isn't warm yet
+    if not rows:
+        from scanner import run_scanner_pipeline
+        rows = run_scanner_pipeline(WATCHLIST, timeframe=selected_tf)
+        DATA_CACHE[selected_tf] = rows
 
     return render_template(
         "index.html",
