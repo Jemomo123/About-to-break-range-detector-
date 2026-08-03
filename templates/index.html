@@ -34,12 +34,11 @@
         }
         .tf-btn.active { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
 
-        /* Diagnostics Bar */
         .diag-bar {
             background: var(--card-bg); border: 1px solid var(--border-color);
             padding: 8px 12px; border-radius: 4px; font-size: 0.75rem;
             color: var(--text-sub); margin-bottom: 12px;
-            display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between;
+            display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between;
         }
         .diag-item strong { color: var(--text-main); }
 
@@ -68,12 +67,13 @@
         {% endfor %}
     </div>
 
-    <!-- Scan Diagnostics Banner -->
+    <!-- Diagnostic Banner -->
     <div class="diag-bar">
-        <span class="diag-item">Watchlist: <strong>{{ diagnostics.watchlist_total or 0 }}</strong></span>
+        <span class="diag-item">Watchlist: <strong>{{ diagnostics.watchlist_total or 25 }}</strong></span>
         <span class="diag-item">Scanned: <strong>{{ diagnostics.scanned or 0 }}</strong></span>
         <span class="diag-item">Qualified: <strong>{{ diagnostics.qualified or 0 }}</strong></span>
         <span class="diag-item">Rejected: <strong>{{ diagnostics.rejected or 0 }}</strong></span>
+        <span class="diag-item">API Failures: <strong>{{ diagnostics.api_failures or 0 }}</strong></span>
         <span class="diag-item">Exchange: <strong>{{ diagnostics.exchange or 'OKX' }}</strong></span>
     </div>
 
@@ -110,7 +110,7 @@
         {% endif %}
     </div>
 
-    <!-- Drill-Down Modal for Battle & Evidence -->
+    <!-- Drill-Down Modal -->
     <div id="detailsModal" class="modal">
         <div class="modal-content">
             <span class="close-btn" onclick="closeModal()">&times;</span>
