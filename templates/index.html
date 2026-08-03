@@ -3,90 +3,145 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About To Break Range Terminal</title>
+    <title>About To Break Range</title>
     <style>
-        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 12px; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
-        .title { font-size: 1.1rem; font-weight: bold; color: #58a6ff; margin: 0; }
-        .tf-buttons { display: flex; gap: 6px; }
-        .tf-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; }
-        .tf-btn.active { background: #238636; color: #ffffff; border-color: #2ea043; }
-        
-        .table-container { overflow-x: auto; background: #161b22; border-radius: 8px; border: 1px solid #30363d; }
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
-        th { background: #21262d; color: #8b949e; padding: 10px 12px; border-bottom: 1px solid #30363d; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; }
-        td { padding: 10px 12px; border-bottom: 1px solid #21262d; white-space: nowrap; }
-        tr:hover { background: #1c2128; cursor: pointer; }
-        
-        /* Direction styling matching engine directional outputs */
-        .dir-upside, .dir-bullish { color: #3fb950; font-weight: bold; }
-        .dir-downside, .dir-bearish { color: #f85149; font-weight: bold; }
-        .dir-rejection_risk, .dir-absorption_risk { color: #d29922; font-weight: bold; }
-        .dir-neutral, .dir-mid_range, .dir-resistance_balanced, .dir-support_balanced { color: #8b949e; font-weight: bold; }
-        
-        .readiness { font-weight: bold; color: #f0883e; }
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --text-main: #c9d1d9;
+            --accent-green: #2ea043;
+            --accent-gray: #21262d;
+        }
 
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; padding: 16px; box-sizing: border-box; }
-        .modal-content { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; max-width: 500px; width: 100%; color: #c9d1d9; }
-        .close-btn { background: #21262d; border: 1px solid #30363d; color: #fff; padding: 6px 12px; border-radius: 4px; float: right; cursor: pointer; }
-        pre { white-space: pre-wrap; word-wrap: break-word; font-size: 0.8rem; background: #0d1117; padding: 10px; border-radius: 6px; border: 1px solid #30363d; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 12px;
+        }
+
+        h1 {
+            font-size: 1.25rem;
+            color: #58a6ff;
+            margin-bottom: 12px;
+        }
+
+        .tf-container {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 16px;
+        }
+
+        .tf-btn {
+            flex: 1;
+            padding: 8px 0;
+            background-color: var(--accent-gray);
+            color: var(--text-main);
+            text-align: center;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: 1px solid var(--border-color);
+        }
+
+        .tf-btn.active {
+            background-color: var(--accent-green);
+            color: #ffffff;
+            border-color: var(--accent-green);
+        }
+
+        .table-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background-color: var(--card-bg);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            text-align: left;
+        }
+
+        th, td {
+            padding: 10px 8px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        th {
+            background-color: #1f242c;
+            color: #8b949e;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.7rem;
+        }
+
+        .score-pill {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.75rem;
+            background-color: #388bfd33;
+            color: #58a6ff;
+        }
+
+        .empty-state {
+            padding: 24px;
+            text-align: center;
+            color: #8b949e;
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
 
-    <div class="header">
-        <h1 class="title">About To Break Range</h1>
-        <div class="tf-buttons">
-            {% for tf in supported_tfs %}
-                <a href="/?tf={{ tf }}" class="tf-btn {% if tf == selected_tf %}active{% endif %}">{{ tf }}</a>
-            {% endfor %}
-        </div>
+    <h1>About To Break Range</h1>
+
+    <div class="tf-container">
+        {% for tf in supported_tfs %}
+            <a href="/?tf={{ tf }}" class="tf-btn {% if tf == selected_tf %}active{% endif %}">
+                {{ tf }}
+            </a>
+        {% endfor %}
     </div>
 
-    <div class="table-container">
+    <div class="table-wrapper">
+        {% if rows %}
         <table>
             <thead>
                 <tr>
                     <th>Symbol</th>
-                    <th>Breakout Readiness</th>
+                    <th>Readiness</th>
                     <th>Direction</th>
-                    <th>Resistance</th>
-                    <th>Support</th>
-                    <th>Distance</th>
+                    <th>Dist %</th>
+                    <th>Battle</th>
                 </tr>
             </thead>
             <tbody>
                 {% for row in rows %}
-                <tr onclick="showEvidence('{{ row.symbol | default(row.SYMBOL) }}', `{{ row.evidence | default(row.EVIDENCE) }}`)">
-                    <td style="font-weight: bold; color: #ffffff;">{{ row.symbol | default(row.SYMBOL) }}</td>
-                    <td class="readiness">{{ row.breakout_readiness | default(row.BREAKOUT_READINESS) }}</td>
-                    <td class="dir-{{ (row.direction | default(row.DIRECTION) | string | lower) }}">{{ row.direction | default(row.DIRECTION) }}</td>
-                    <td style="color: #7ee787;">{{ row.resistance | default(row.RESISTANCE) }}</td>
-                    <td style="color: #ff7b72;">{{ row.support | default(row.SUPPORT) }}</td>
-                    <td>{{ row.distance | default(row.DISTANCE) }}</td>
+                <tr>
+                    <td><strong>{{ row.symbol }}</strong></td>
+                    <td><span class="score-pill">{{ row.readiness_score }} ({{ row.readiness_label }})</span></td>
+                    <td>{{ row.direction }}</td>
+                    <td>{{ row.distance }}%</td>
+                    <td>{{ row.battle_label }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
-    </div>
-
-    <div id="evidenceModal" class="modal">
-        <div class="modal-content">
-            <button class="close-btn" onclick="closeModal()">Close</button>
-            <h3 id="modalSymbol" style="margin-top:0; color:#58a6ff;"></h3>
-            <pre id="modalText"></pre>
+        {% else %}
+        <div class="empty-state">
+            No coin ranges currently compressing on <strong>{{ selected_tf }}</strong>.
         </div>
+        {% endif %}
     </div>
 
-    <script>
-        function showEvidence(symbol, text) {
-            document.getElementById('modalSymbol').innerText = symbol + ' Analysis Details';
-            document.getElementById('modalText').innerText = text;
-            document.getElementById('evidenceModal').style.display = 'flex';
-        }
-        function closeModal() {
-            document.getElementById('evidenceModal').style.display = 'none';
-        }
-    </script>
 </body>
 </html>
