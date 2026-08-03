@@ -18,9 +18,12 @@
         td { padding: 10px 12px; border-bottom: 1px solid #21262d; white-space: nowrap; }
         tr:hover { background: #1c2128; cursor: pointer; }
         
-        .dir-upside { color: #3fb950; font-weight: bold; }
-        .dir-downside { color: #f85149; font-weight: bold; }
-        .dir-balanced { color: #8b949e; font-weight: bold; }
+        /* Direction styling matching engine directional outputs */
+        .dir-upside, .dir-bullish { color: #3fb950; font-weight: bold; }
+        .dir-downside, .dir-bearish { color: #f85149; font-weight: bold; }
+        .dir-rejection_risk, .dir-absorption_risk { color: #d29922; font-weight: bold; }
+        .dir-neutral, .dir-mid_range, .dir-resistance_balanced, .dir-support_balanced { color: #8b949e; font-weight: bold; }
+        
         .readiness { font-weight: bold; color: #f0883e; }
 
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; padding: 16px; box-sizing: border-box; }
@@ -54,13 +57,13 @@
             </thead>
             <tbody>
                 {% for row in rows %}
-                <tr onclick="showEvidence('{{ row.SYMBOL }}', '{{ row.EVIDENCE | replace('\n', '\\n') }}')">
-                    <td style="font-weight: bold; color: #ffffff;">{{ row.SYMBOL }}</td>
-                    <td class="readiness">{{ row.BREAKOUT_READINESS }}</td>
-                    <td class="dir-{{ row.DIRECTION | lower }}">{{ row.DIRECTION }}</td>
-                    <td style="color: #7ee787;">{{ row.RESISTANCE }}</td>
-                    <td style="color: #ff7b72;">{{ row.SUPPORT }}</td>
-                    <td>{{ row.DISTANCE }}</td>
+                <tr onclick="showEvidence('{{ row.symbol | default(row.SYMBOL) }}', `{{ row.evidence | default(row.EVIDENCE) }}`)">
+                    <td style="font-weight: bold; color: #ffffff;">{{ row.symbol | default(row.SYMBOL) }}</td>
+                    <td class="readiness">{{ row.breakout_readiness | default(row.BREAKOUT_READINESS) }}</td>
+                    <td class="dir-{{ (row.direction | default(row.DIRECTION) | string | lower) }}">{{ row.direction | default(row.DIRECTION) }}</td>
+                    <td style="color: #7ee787;">{{ row.resistance | default(row.RESISTANCE) }}</td>
+                    <td style="color: #ff7b72;">{{ row.support | default(row.SUPPORT) }}</td>
+                    <td>{{ row.distance | default(row.DISTANCE) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
