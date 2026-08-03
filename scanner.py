@@ -1,5 +1,6 @@
 # scanner.py
 import numpy as np
+import logging
 from detector import fetch_market_candles, validate_range_structure, analyze_order_battle
 
 def calculate_readiness_data(val_range, battle_label):
@@ -46,20 +47,40 @@ def calculate_readiness_data(val_range, battle_label):
 
 def run_scanner_pipeline(watchlist, timeframe):
     results = []
+    scanned_count = 0
+    qualified_count = 0
+    rejected_count = 0
+    used_exchange = "OKX (Fallback: MEXC)"
+
     for symbol in watchlist:
-        data = fetch_market_candles(symbol, timeframe)
+        data, exchange_used = fetch_market_candles(symbol, timeframe)
         if data is None:
+            logging.warning(f"[SCAN SKIP] {symbol}: Failed API data retrieval on both exchanges.")
             continue
 
+        scanned_count += 1
         highs, lows, closes, volumes = data
         val_range = validate_range_structure(highs, lows, closes)
+        
         if val_range is None:
+            rejected_count += 1
+            logging.info(f"[REJECTED] {symbol}: Failed range criteria (<70% containment or <2 touches).")
             continue
 
         battle_label = analyze_order_battle(volumes, closes)
         readiness = calculate_readiness_data(val_range, battle_label)
         readiness["symbol"] = symbol
         results.append(readiness)
+        qualified_count += 1
 
     results.sort(key=lambda x: x["readiness_score"], reverse=True)
-    return results
+    
+    diagnostics = {
+        "watchlist_total": len(watchlist),
+        "scanned": scanned_count,
+        "qualified": qualified_count,
+        "rejected": rejected_count,
+        "exchange": used_exchange
+    }
+
+    return results, diagnostics
