@@ -6,98 +6,56 @@
     <title>About To Break Range</title>
     <style>
         :root {
-            --bg-color: #0d1117;
-            --card-bg: #161b22;
-            --border-color: #30363d;
-            --text-main: #c9d1d9;
-            --accent-green: #2ea043;
-            --accent-gray: #21262d;
+            --bg-color: #0b0e14;
+            --card-bg: #151a21;
+            --border-color: #262c36;
+            --text-main: #e6e8ec;
+            --text-sub: #848e9c;
+            --accent-blue: #2962ff;
+            --accent-green: #0ecb81;
+            --accent-red: #f6465d;
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-main);
             margin: 0;
             padding: 12px;
         }
 
-        h1 {
-            font-size: 1.25rem;
-            color: #58a6ff;
-            margin-bottom: 12px;
-        }
+        h1 { font-size: 1.2rem; color: #fff; margin-bottom: 12px; font-weight: 700; }
 
-        .tf-container {
-            display: flex;
-            gap: 6px;
-            margin-bottom: 16px;
-        }
-
+        .tf-container { display: flex; gap: 6px; margin-bottom: 12px; }
         .tf-btn {
-            flex: 1;
-            padding: 8px 0;
-            background-color: var(--accent-gray);
-            color: var(--text-main);
-            text-align: center;
-            text-decoration: none;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            border: 1px solid var(--border-color);
+            flex: 1; padding: 8px 0; background: var(--card-bg); color: var(--text-sub);
+            text-align: center; text-decoration: none; border-radius: 4px;
+            font-size: 0.85rem; font-weight: 600; border: 1px solid var(--border-color);
         }
+        .tf-btn.active { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
 
-        .tf-btn.active {
-            background-color: var(--accent-green);
-            color: #ffffff;
-            border-color: var(--accent-green);
+        /* Diagnostics Bar */
+        .diag-bar {
+            background: var(--card-bg); border: 1px solid var(--border-color);
+            padding: 8px 12px; border-radius: 4px; font-size: 0.75rem;
+            color: var(--text-sub); margin-bottom: 12px;
+            display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between;
         }
+        .diag-item strong { color: var(--text-main); }
 
-        .table-wrapper {
-            width: 100%;
-            overflow-x: auto;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            background-color: var(--card-bg);
-        }
+        .table-wrapper { width: 100%; overflow-x: auto; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); }
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left; }
+        th, td { padding: 10px 8px; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
+        th { background: #1a202c; color: var(--text-sub); font-size: 0.7rem; text-transform: uppercase; }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.8rem;
-            text-align: left;
-        }
+        .score-pill { display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: bold; background: rgba(41, 98, 255, 0.2); color: #58a6ff; }
+        .dir-UPSIDE { color: var(--accent-green); font-weight: bold; }
+        .dir-DOWNSIDE { color: var(--accent-red); font-weight: bold; }
+        .dir-BALANCED { color: #f0b90b; font-weight: bold; }
 
-        th, td {
-            padding: 10px 8px;
-            border-bottom: 1px solid var(--border-color);
-            white-space: nowrap;
-        }
-
-        th {
-            background-color: #1f242c;
-            color: #8b949e;
-            font-weight: 600;
-            text-transform: uppercase;
-            font-size: 0.7rem;
-        }
-
-        .score-pill {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-weight: bold;
-            font-size: 0.75rem;
-            background-color: #388bfd33;
-            color: #58a6ff;
-        }
-
-        .empty-state {
-            padding: 24px;
-            text-align: center;
-            color: #8b949e;
-            font-size: 0.85rem;
-        }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; }
+        .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); padding: 20px; border-radius: 6px; width: 85%; max-width: 400px; }
+        .close-btn { float: right; cursor: pointer; color: var(--text-sub); font-size: 1.2rem; }
     </style>
 </head>
 <body>
@@ -106,10 +64,17 @@
 
     <div class="tf-container">
         {% for tf in supported_tfs %}
-            <a href="/?tf={{ tf }}" class="tf-btn {% if tf == selected_tf %}active{% endif %}">
-                {{ tf }}
-            </a>
+            <a href="/?tf={{ tf }}" class="tf-btn {% if tf == selected_tf %}active{% endif %}">{{ tf }}</a>
         {% endfor %}
+    </div>
+
+    <!-- Scan Diagnostics Banner -->
+    <div class="diag-bar">
+        <span class="diag-item">Watchlist: <strong>{{ diagnostics.watchlist_total or 0 }}</strong></span>
+        <span class="diag-item">Scanned: <strong>{{ diagnostics.scanned or 0 }}</strong></span>
+        <span class="diag-item">Qualified: <strong>{{ diagnostics.qualified or 0 }}</strong></span>
+        <span class="diag-item">Rejected: <strong>{{ diagnostics.rejected or 0 }}</strong></span>
+        <span class="diag-item">Exchange: <strong>{{ diagnostics.exchange or 'OKX' }}</strong></span>
     </div>
 
     <div class="table-wrapper">
@@ -117,31 +82,57 @@
         <table>
             <thead>
                 <tr>
-                    <th>Symbol</th>
-                    <th>Readiness</th>
-                    <th>Direction</th>
-                    <th>Dist %</th>
-                    <th>Battle</th>
+                    <th>SYMBOL</th>
+                    <th>BREAKOUT READINESS</th>
+                    <th>DIRECTION</th>
+                    <th>RESISTANCE</th>
+                    <th>SUPPORT</th>
+                    <th>DISTANCE</th>
                 </tr>
             </thead>
             <tbody>
-                {% for row in rows %}
-                <tr>
-                    <td><strong>{{ row.symbol }}</strong></td>
-                    <td><span class="score-pill">{{ row.readiness_score }} ({{ row.readiness_label }})</span></td>
-                    <td>{{ row.direction }}</td>
-                    <td>{{ row.distance }}%</td>
-                    <td>{{ row.battle_label }}</td>
+                {% for r in rows %}
+                <tr onclick="openDetails('{{ r.symbol }}', '{{ r.containment_pct }}', '{{ r.upper_touches }}', '{{ r.lower_touches }}', '{{ r.battle_label }}')">
+                    <td><strong>{{ r.symbol }}</strong></td>
+                    <td><span class="score-pill">{{ r.readiness_score }}% ({{ r.readiness_label }})</span></td>
+                    <td class="dir-{{ r.direction }}">{{ r.direction }}</td>
+                    <td>{{ "%.4f"|format(r.resistance) }}</td>
+                    <td>{{ "%.4f"|format(r.support) }}</td>
+                    <td>{{ r.distance }}%</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
         {% else %}
-        <div class="empty-state">
-            No coin ranges currently compressing on <strong>{{ selected_tf }}</strong>.
+        <div style="padding: 20px; text-align: center; color: var(--text-sub);">
+            No coins meet range criteria on {{ selected_tf }}. Check diagnostics above.
         </div>
         {% endif %}
     </div>
 
+    <!-- Drill-Down Modal for Battle & Evidence -->
+    <div id="detailsModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeModal()">&times;</span>
+            <h3 id="modalSymbol" style="margin-top:0;"></h3>
+            <hr style="border-color: var(--border-color);">
+            <p><strong>Order Flow Battle:</strong> <span id="modalBattle"></span></p>
+            <p><strong>Range Containment:</strong> <span id="modalContainment"></span>%</p>
+            <p><strong>Resistance Touches:</strong> <span id="modalUTouches"></span></p>
+            <p><strong>Support Touches:</strong> <span id="modalLTouches"></span></p>
+        </div>
+    </div>
+
+    <script>
+        function openDetails(symbol, containment, uTouches, lTouches, battle) {
+            document.getElementById('modalSymbol').innerText = symbol + " — Details";
+            document.getElementById('modalContainment').innerText = containment;
+            document.getElementById('modalUTouches').innerText = uTouches;
+            document.getElementById('modalLTouches').innerText = lTouches;
+            document.getElementById('modalBattle').innerText = battle;
+            document.getElementById('detailsModal').style.display = 'flex';
+        }
+        function closeModal() { document.getElementById('detailsModal').style.display = 'none'; }
+    </script>
 </body>
 </html>
