@@ -1,6 +1,5 @@
 # scanner.py
 import numpy as np
-import logging
 from detector import fetch_market_candles, validate_range_structure, analyze_order_battle
 
 def calculate_readiness_data(val_range, battle_label):
@@ -47,24 +46,22 @@ def calculate_readiness_data(val_range, battle_label):
 
 def run_scanner_pipeline(watchlist, timeframe):
     results = []
-    scanned_count = 0
     qualified_count = 0
     rejected_count = 0
-    used_exchange = "OKX (Fallback: MEXC)"
+    api_failures_count = 0
 
     for symbol in watchlist:
-        data, exchange_used = fetch_market_candles(symbol, timeframe)
+        data, exchange_used, failure_reason = fetch_market_candles(symbol, timeframe)
+        
         if data is None:
-            logging.warning(f"[SCAN SKIP] {symbol}: Failed API data retrieval on both exchanges.")
+            api_failures_count += 1
             continue
 
-        scanned_count += 1
         highs, lows, closes, volumes = data
         val_range = validate_range_structure(highs, lows, closes)
         
         if val_range is None:
             rejected_count += 1
-            logging.info(f"[REJECTED] {symbol}: Failed range criteria (<70% containment or <2 touches).")
             continue
 
         battle_label = analyze_order_battle(volumes, closes)
@@ -75,12 +72,23 @@ def run_scanner_pipeline(watchlist, timeframe):
 
     results.sort(key=lambda x: x["readiness_score"], reverse=True)
     
+    total_scanned = qualified_count + rejected_count
+
+    print(f"\n--- SCAN COMPLETED ({timeframe}) ---", flush=True)
+    print(f"Watchlist: {len(watchlist)}", flush=True)
+    print(f"Scanned: {total_scanned}", flush=True)
+    print(f"Qualified: {qualified_count}", flush=True)
+    print(f"Rejected: {rejected_count}", flush=True)
+    print(f"API Failures: {api_failures_count}", flush=True)
+    print("----------------------------------\n", flush=True)
+
     diagnostics = {
         "watchlist_total": len(watchlist),
-        "scanned": scanned_count,
+        "scanned": total_scanned,
         "qualified": qualified_count,
         "rejected": rejected_count,
-        "exchange": used_exchange
+        "api_failures": api_failures_count,
+        "exchange": "OKX (Fallback: MEXC)"
     }
 
     return results, diagnostics
