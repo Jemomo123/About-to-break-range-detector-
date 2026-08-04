@@ -183,7 +183,7 @@
                 </div>
 
                 <div class="price-row">
-                    <span style="font-size: 0.9rem; color: var(--text-sub);">Price: <strong style="color: #fff;">{{ "%.4f"|format(r.get('curr_close', 0.0)) }}</strong></span>
+                    <span style="font-size: 0.9rem; color: var(--text-sub);">Price: <strong style="color: #fff;">{{ r.get('curr_close', 0.0)|smart_price }}</strong></span>
                     <span class="readiness-status">{{ r.get('readiness_display', 'BUILDING PRESSURE') }}</span>
                 </div>
 
@@ -192,8 +192,8 @@
                 </div>
 
                 <div class="metrics-grid">
-                    <div>Support: <strong>{{ "%.4f"|format(r.get('support', 0.0)) }}</strong></div>
-                    <div>Resistance: <strong>{{ "%.4f"|format(r.get('resistance', 0.0)) }}</strong></div>
+                    <div>Support: <strong>{{ r.get('support', 0.0)|smart_price }}</strong></div>
+                    <div>Resistance: <strong>{{ r.get('resistance', 0.0)|smart_price }}</strong></div>
                     <div>Buyer Power: <strong>{{ r.get('buyer_power', 50) }}%</strong></div>
                     <div>Seller Power: <strong>{{ r.get('seller_power', 50) }}%</strong></div>
                 </div>
