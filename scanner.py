@@ -1,51 +1,16 @@
 # scanner.py
-import numpy as np
 from datetime import datetime, timezone
-from detector import fetch_market_candles, validate_range_structure, analyze_order_battle
-
-def calculate_readiness_data(val_range, battle_label):
-    current_close = val_range["current_close"]
-    v_high = val_range["v_high"]
-    v_low = val_range["v_low"]
-    r_height = val_range["r_height"]
-
-    position_pct = float(np.clip(((current_close - v_low) / r_height) * 100.0, 0.0, 100.0))
-    dist_to_res = ((v_high - current_close) / current_close) * 100.0
-    dist_to_sup = ((current_close - v_low) / current_close) * 100.0
-    distance = round(min(dist_to_res, dist_to_sup), 2)
-
-    if position_pct >= 75.0:
-        direction = "UPSIDE" if battle_label == "BUYERS WINNING" else ("DOWNSIDE" if battle_label == "SELLERS WINNING" else "BALANCED")
-    elif position_pct <= 25.0:
-        direction = "DOWNSIDE" if battle_label == "SELLERS WINNING" else ("UPSIDE" if battle_label == "BUYERS WINNING" else "BALANCED")
-    else:
-        direction = "BALANCED"
-
-    score = int(round((val_range["containment_pct"] * 0.3) + (max(position_pct, 100 - position_pct) * 0.4) + (30 if battle_label != "BALANCED" else 15)))
-    score = int(np.clip(score, 0, 100))
-
-    if score >= 90: label = "IMMINENT"
-    elif score >= 82: label = "VERY HIGH"
-    elif score >= 75: label = "HIGH"
-    elif score >= 68: label = "BUILDING"
-    elif score >= 60: label = "DEVELOPING"
-    elif score >= 50: label = "WATCH"
-    else: label = "LOW"
-
-    return {
-        "readiness_score": score,
-        "readiness_label": label,
-        "direction": direction,
-        "resistance": v_high,
-        "support": v_low,
-        "distance": distance,
-        "containment_pct": val_range["containment_pct"],
-        "upper_touches": val_range["upper_touches"],
-        "lower_touches": val_range["lower_touches"],
-        "battle_label": battle_label
-    }
+from detector import (
+    fetch_market_candles,
+    validate_range_structure,
+    analyze_buyer_seller_battle,
+    calculate_breakout_readiness
+)
 
 def run_scanner_pipeline(watchlist, timeframe):
+    """
+    Runs full backend processing pipeline according to Spec Version 2.0.
+    """
     results = []
     qualified_count = 0
     rejected_count = 0
@@ -53,6 +18,7 @@ def run_scanner_pipeline(watchlist, timeframe):
     scan_timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
 
     for symbol in watchlist:
+        # Step 1: Fetch OHLC Data
         data, exchange_used, failure_reason = fetch_market_candles(symbol, timeframe)
         
         if data is None:
@@ -60,28 +26,52 @@ def run_scanner_pipeline(watchlist, timeframe):
             continue
 
         highs, lows, closes, volumes = data
-        val_range = validate_range_structure(highs, lows, closes)
-        
-        if val_range is None:
+
+        # Step 1, 2 & 3: Detect & Validate Range (Reject immediately if invalid)
+        range_data = validate_range_structure(highs, lows, closes)
+        if range_data is None:
             rejected_count += 1
             continue
 
-        battle_label = analyze_order_battle(volumes, closes)
-        readiness = calculate_readiness_data(val_range, battle_label)
-        readiness["symbol"] = symbol
-        results.append(readiness)
+        # Step 4: Calculate Battle, Direction, & Readiness ONLY for valid ranges
+        battle_data = analyze_buyer_seller_battle(range_data, volumes, closes)
+        readiness_data = calculate_breakout_readiness(range_data, battle_data)
+
+        # Assemble Final Response Record
+        record = {
+            "symbol": symbol,
+            "readiness_score": readiness_data["readiness_score"],
+            "readiness_label": readiness_data["readiness_label"],
+            "readiness_display": readiness_data["readiness_display"],
+            "direction": battle_data["direction"],
+            "resistance": range_data["resistance"],
+            "support": range_data["support"],
+            "distance": readiness_data["distance_pct"],
+            
+            # Additional detail parameters for drill-down view
+            "curr_close": range_data["curr_close"],
+            "range_height": range_data["r_height"],
+            "range_height_pct": range_data["r_height_pct"],
+            "price_position": battle_data["price_position"],
+            "buyer_power": battle_data["buyer_power"],
+            "seller_power": battle_data["seller_power"],
+            "range_quality": range_data["range_quality"],
+            "interpretation": battle_data["interpretation"],
+            "exchange": exchange_used
+        }
+
+        results.append(record)
         qualified_count += 1
 
+    # Sort Dashboard Results by Breakout Readiness Score (Highest First)
     results.sort(key=lambda x: x["readiness_score"], reverse=True)
-    total_scanned = qualified_count + rejected_count
 
     diagnostics = {
         "watchlist_total": len(watchlist),
-        "scanned": total_scanned,
+        "scanned": qualified_count + rejected_count,
         "qualified": qualified_count,
         "rejected": rejected_count,
         "api_failures": api_failures_count,
-        "exchange": "OKX (Fallback: MEXC)",
         "scan_timestamp": scan_timestamp
     }
 
