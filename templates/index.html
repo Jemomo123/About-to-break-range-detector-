@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="15">
     <title>About To Break Scanner</title>
     <style>
         :root {
@@ -14,7 +13,6 @@
             --text-sub: #848e9c;
             --accent-blue: #2962ff;
             --accent-green: #0ecb81;
-            --accent-red: #f6465d;
             --accent-yellow: #f0b90b;
         }
 
@@ -29,10 +27,9 @@
         .header-title {
             text-align: center;
             font-size: 1.3rem;
-            color: #f0b90b;
+            color: var(--accent-yellow);
             font-weight: 800;
             margin: 8px 0 14px 0;
-            letter-spacing: 0.5px;
         }
 
         .tf-container {
@@ -40,6 +37,7 @@
             gap: 6px;
             margin-bottom: 14px;
         }
+
         .tf-btn {
             flex: 1;
             padding: 8px 0;
@@ -52,9 +50,10 @@
             font-weight: 700;
             border: 1px solid var(--border-color);
         }
+
         .tf-btn.active {
             background: var(--accent-blue);
-            color: #fff;
+            color: #ffffff;
             border-color: var(--accent-blue);
         }
 
@@ -87,11 +86,10 @@
         .badge-group {
             display: flex;
             gap: 4px;
-            align-items: center;
         }
 
         .tf-badge {
-            background: #2962ff;
+            background: var(--accent-blue);
             color: #ffffff;
             font-size: 0.7rem;
             font-weight: 800;
@@ -101,7 +99,7 @@
 
         .struct-badge {
             background: #262c36;
-            color: #848e9c;
+            color: var(--text-sub);
             font-size: 0.7rem;
             font-weight: 700;
             padding: 3px 6px;
@@ -115,19 +113,10 @@
             margin-bottom: 10px;
         }
 
-        .price-val {
-            font-size: 0.9rem;
-            color: var(--text-sub);
-        }
-
-        .price-val strong {
-            color: #ffffff;
-        }
-
         .readiness-status {
             font-size: 0.85rem;
             font-weight: 800;
-            color: #0ecb81;
+            color: var(--accent-green);
         }
 
         .progress-bar-bg {
@@ -141,7 +130,7 @@
 
         .progress-bar-fill {
             height: 100%;
-            background: #f0b90b;
+            background: var(--accent-yellow);
             border-radius: 4px;
         }
 
@@ -159,9 +148,12 @@
 
         .empty-msg {
             text-align: center;
-            padding: 40px 10px;
+            padding: 35px 10px;
             color: var(--text-sub);
             font-size: 0.85rem;
+            background: var(--card-bg);
+            border: 1px dashed var(--border-color);
+            border-radius: 8px;
         }
     </style>
 </head>
@@ -169,7 +161,7 @@
 
     <div class="header-title">About To Break Scanner</div>
 
-    <!-- Timeframe Navigation -->
+    <!-- Timeframe Selection Navigation -->
     <div class="tf-container">
         <a href="/?tf=ALL" class="tf-btn {% if selected_tf == 'ALL' or not selected_tf %}active{% endif %}">ALL</a>
         <a href="/?tf=5M" class="tf-btn {% if selected_tf == '5M' %}active{% endif %}">5M</a>
@@ -177,7 +169,8 @@
         <a href="/?tf=1H" class="tf-btn {% if selected_tf == '1H' %}active{% endif %}">1H</a>
     </div>
 
-    <div class="card-list">
+    <!-- Scanner Output List -->
+    <div class="card-list" id="card-list">
         {% if rows and rows|length > 0 %}
             {% for r in rows %}
             <div class="card">
@@ -190,14 +183,12 @@
                 </div>
 
                 <div class="price-row">
-                    <span class="price-val">Price: <strong>{{ "%.4f"|format(r.get('curr_close', 0.0)) }}</strong></span>
-                    <span class="readiness-status">
-                        {{ r.get('readiness_display', r.get('readiness_label', 'BUILDING PRESSURE')) }}
-                    </span>
+                    <span style="font-size: 0.9rem; color: var(--text-sub);">Price: <strong style="color: #fff;">{{ "%.4f"|format(r.get('curr_close', 0.0)) }}</strong></span>
+                    <span class="readiness-status">{{ r.get('readiness_display', 'BUILDING PRESSURE') }}</span>
                 </div>
 
                 <div class="progress-bar-bg">
-                    <div class="progress-bar-fill" style="width: {{ r.get('readiness_score', 50) }}%;"></div>
+                    <div class="progress-bar-fill" style="width: {{ r.get('readiness_score', 0) }}%;"></div>
                 </div>
 
                 <div class="metrics-grid">
@@ -209,7 +200,7 @@
             </div>
             {% endfor %}
         {% else %}
-            <div class="empty-msg">No active range structures detected across selected timeframe.</div>
+            <div class="empty-msg">No active range structures detected for selected timeframe.</div>
         {% endif %}
     </div>
 
