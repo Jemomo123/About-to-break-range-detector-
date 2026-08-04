@@ -1,35 +1,27 @@
-# =====================================================================
-# CONFIGURATION & AUTHORITATIVE WATCHLIST
-# =====================================================================
+# config.py
 
-# Authoritative 25-Symbol Watchlist (Official Scanner List)
-WATCHLIST = [
-    "BTCUSDT",
-    "ETHUSDT",
-    "SOLUSDT",
-    "PEPEUSDT",
-    "BONKUSDT",
-    "SHIBUSDT",
-    "USELESSUSDT",
-    "SPACEUSDT",
-    "MOVEUSDT",
-    "ZECUSDT",
-    "SPXUSDT",
-    "PEOPLEUSDT",
-    "PENGUUSDT",
-    "FARTCOINUSDT",
-    "LINEAUSDT",
-    "MEMEUSDT",
-    "PUMPUSDT",
-    "AIXBTUSDT",
-    "BRETTUSDT",
-    "FOGOUSDT",
-    "GOOGLUSDT",
-    "FLOKIUSDT",
-    "IWMUSDT",
-    "MOODENGUSDT",
-    "NEARUSDT"
+OKX_CANDLE_URL = "https://www.okx.com/api/v5/market/candles"
+MEXC_CANDLE_URL = "https://contract.mexc.com/api/v1/contract/kline/"
+
+# STRICT REQUIREMENT: Only 5M, 15M, and 1H
+SUPPORTED_TIMEFRAMES = ["5M", "15M", "1H"]
+
+OKX_TF_MAP = {
+    "5M": "5m",
+    "15M": "15m",
+    "1H": "1H"
+}
+
+MEXC_TF_MAP = {
+    "5M": "Min5",
+    "15M": "Min15",
+    "1H": "Min60"
+}
+
+DEFAULT_WATCHLIST = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "PENGUUSDT", "PEPEUSDT",
+    "BONKUSDT", "FOGOUSDT", "BRETTUSDT", "NEARUSDT", "IWMUSDT",
+    "FARTCOINUSDT", "MOVEUSDT", "DOGEUSDT", "SUIUSDT", "APTUSDT",
+    "AVAXUSDT", "LINKUSDT", "ARBUSDT", "OPUSDT", "INJUSDT",
+    "RENDERUSDT", "TIAUSDT", "SEIUSDT", "FETUSDT", "TAOUSDT"
 ]
-
-TIMEFRAME = "15m"
-CANDLE_LIMIT = 50
