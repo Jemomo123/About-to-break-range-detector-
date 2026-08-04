@@ -7,12 +7,19 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    selected_tf = request.args.get("tf", "ALL")
+    selected_tf = request.args.get("tf", "ALL").upper()
     if selected_tf not in SUPPORTED_TIMEFRAMES and selected_tf != "ALL":
         selected_tf = "ALL"
 
-    rows, diagnostics = run_scanner_pipeline(DEFAULT_WATCHLIST, selected_tf if selected_tf != "ALL" else None)
-    
+    try:
+        rows, diagnostics = run_scanner_pipeline(
+            DEFAULT_WATCHLIST, 
+            selected_tf if selected_tf != "ALL" else None
+        )
+    except Exception as e:
+        print(f"Pipeline Error: {e}", flush=True)
+        rows, diagnostics = [], {"scan_timestamp": "Error", "watchlist_total": 25, "scanned": 0, "qualified": 0, "rejected": 0, "api_failures": 0}
+
     return render_template(
         "index.html",
         rows=rows,
@@ -23,8 +30,18 @@ def index():
 
 @app.route("/api/scan")
 def api_scan():
-    selected_tf = request.args.get("tf", "ALL")
-    rows, diagnostics = run_scanner_pipeline(DEFAULT_WATCHLIST, selected_tf if selected_tf != "ALL" else None)
+    selected_tf = request.args.get("tf", "ALL").upper()
+    if selected_tf not in SUPPORTED_TIMEFRAMES and selected_tf != "ALL":
+        selected_tf = "ALL"
+
+    try:
+        rows, diagnostics = run_scanner_pipeline(
+            DEFAULT_WATCHLIST, 
+            selected_tf if selected_tf != "ALL" else None
+        )
+    except Exception as e:
+        rows, diagnostics = [], {"error": str(e)}
+
     return jsonify({"results": rows, "diagnostics": diagnostics})
 
 if __name__ == "__main__":
