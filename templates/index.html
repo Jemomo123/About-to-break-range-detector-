@@ -28,14 +28,14 @@
 
         .header-title {
             text-align: center;
-            font-size: 1.4rem;
+            font-size: 1.3rem;
             color: #f0b90b;
             font-weight: 800;
-            margin: 10px 0 16px 0;
+            margin: 8px 0 14px 0;
             letter-spacing: 0.5px;
         }
 
-        /* Filter Pills for 5M, 15M, 1H */
+        /* Timeframe Filter Buttons */
         .tf-container {
             display: flex;
             gap: 6px;
@@ -59,7 +59,7 @@
             border-color: var(--accent-blue);
         }
 
-        /* Card Layout */
+        /* Card List Layout */
         .card-list {
             display: flex;
             flex-direction: column;
@@ -81,7 +81,7 @@
         }
 
         .symbol-title {
-            font-size: 1.2rem;
+            font-size: 1.15rem;
             font-weight: 800;
             color: #ffffff;
         }
@@ -92,25 +92,23 @@
             align-items: center;
         }
 
-        /* Timeframe and Structure Badges */
+        /* Timeframe & Structure Badges */
         .tf-badge {
             background: #2962ff;
             color: #ffffff;
-            font-size: 0.72rem;
+            font-size: 0.7rem;
             font-weight: 800;
             padding: 3px 6px;
             border-radius: 4px;
-            text-transform: uppercase;
         }
 
         .struct-badge {
             background: #262c36;
             color: #848e9c;
-            font-size: 0.72rem;
+            font-size: 0.7rem;
             font-weight: 700;
             padding: 3px 6px;
             border-radius: 4px;
-            text-transform: uppercase;
         }
 
         .price-row {
@@ -121,7 +119,7 @@
         }
 
         .price-val {
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             color: var(--text-sub);
         }
 
@@ -130,14 +128,10 @@
         }
 
         .readiness-status {
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             font-weight: 800;
-            text-transform: uppercase;
+            color: #0ecb81;
         }
-        .status-imminent { color: #0ecb81; }
-        .status-building { color: #f6465d; }
-        .status-developing { color: #f0b90b; }
-        .status-watch { color: #2962ff; }
 
         /* Progress Bar */
         .progress-bar-bg {
@@ -159,7 +153,7 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 8px;
-            font-size: 0.82rem;
+            font-size: 0.8rem;
             color: var(--text-sub);
         }
 
@@ -171,7 +165,7 @@
             text-align: center;
             padding: 40px 10px;
             color: var(--text-sub);
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
     </style>
 </head>
@@ -179,49 +173,48 @@
 
     <div class="header-title">About To Break Scanner</div>
 
-    <!-- Timeframe Filter Navigation -->
+    <!-- Timeframe Filter Pills -->
     <div class="tf-container">
-        <a href="/?tf=ALL" class="tf-btn {% if selected_tf == 'ALL' %}active{% endif %}">ALL</a>
+        <a href="/?tf=ALL" class="tf-btn {% if selected_tf == 'ALL' or not selected_tf %}active{% endif %}">ALL</a>
         <a href="/?tf=5M" class="tf-btn {% if selected_tf == '5M' %}active{% endif %}">5M</a>
         <a href="/?tf=15M" class="tf-btn {% if selected_tf == '15M' %}active{% endif %}">15M</a>
         <a href="/?tf=1H" class="tf-btn {% if selected_tf == '1H' %}active{% endif %}">1H</a>
     </div>
 
     <div class="card-list">
-        {% if rows %}
+        {% if rows and rows|length > 0 %}
             {% for r in rows %}
             <div class="card">
                 <div class="card-header">
-                    <span class="symbol-title">{{ r.symbol }}</span>
+                    <span class="symbol-title">{{ r.get('symbol', 'N/A') }}</span>
                     <div class="badge-group">
-                        <!-- TIMEFRAME BADGE HERE -->
-                        <span class="tf-badge">{{ r.timeframe }}</span>
-                        <span class="struct-badge">{{ r.structure_type or 'HORIZONTAL' }}</span>
+                        <!-- TIMEFRAME BADGE FIXED -->
+                        <span class="tf-badge">[{{ r.get('timeframe', '5M') }}]</span>
+                        <span class="struct-badge">[{{ r.get('structure_type', 'HORIZONTAL') }}]</span>
                     </div>
                 </div>
 
                 <div class="price-row">
-                    <span class="price-val">Price: <strong>{{ r.curr_close }}</strong></span>
-                    <span class="readiness-status status-{{ (r.readiness_label or 'BUILDING') | lower }}">
-                        {{ r.readiness_display or r.readiness_label }}
+                    <span class="price-val">Price: <strong>{{ r.get('curr_close', 0) }}</strong></span>
+                    <span class="readiness-status">
+                        {{ r.get('readiness_display', r.get('readiness_label', 'BUILDING PRESSURE')) }}
                     </span>
                 </div>
 
-                <!-- Readiness Progress Bar -->
                 <div class="progress-bar-bg">
-                    <div class="progress-bar-fill" style="width: {{ r.readiness_score or 50 }}%;"></div>
+                    <div class="progress-bar-fill" style="width: {{ r.get('readiness_score', 50) }}%;"></div>
                 </div>
 
                 <div class="metrics-grid">
-                    <div>Support: <strong>{{ "%.4f"|format(r.support) if r.support else 'N/A' }}</strong></div>
-                    <div>Resistance: <strong>{{ "%.4f"|format(r.resistance) if r.resistance else 'N/A' }}</strong></div>
-                    <div>Buyer Power: <strong>{{ r.buyer_power or 50 }}%</strong></div>
-                    <div>Seller Power: <strong>{{ r.seller_power or 50 }}%</strong></div>
+                    <div>Support: <strong>{{ r.get('support', 0) }}</strong></div>
+                    <div>Resistance: <strong>{{ r.get('resistance', 0) }}</strong></div>
+                    <div>Buyer Power: <strong>{{ r.get('buyer_power', 50) }}%</strong></div>
+                    <div>Seller Power: <strong>{{ r.get('seller_power', 50) }}%</strong></div>
                 </div>
             </div>
             {% endfor %}
         {% else %}
-            <div class="empty-msg">No active range structures detected.</div>
+            <div class="empty-msg">No active range structures detected across selected timeframe.</div>
         {% endif %}
     </div>
 
