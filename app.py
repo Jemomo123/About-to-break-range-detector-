@@ -4,7 +4,6 @@ from scanner import run_scanner_pipeline
 
 app = Flask(__name__)
 
-# Default watchlist for OKX / MEXC scanning
 DEFAULT_WATCHLIST = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
     "ADAUSDT", "AVAXUSDT", "LINKUSDT", "SUIUSDT", "NEARUSDT",
@@ -13,7 +12,6 @@ DEFAULT_WATCHLIST = [
     "ARBUSDT", "OPUSDT", "INJUSDT", "TIAUSDT"
 ]
 
-# --- REGISTER JINJA2 CUSTOM FILTER ---
 @app.template_filter("smart_price")
 def smart_price(value):
     try:
@@ -38,10 +36,17 @@ def index():
         target_tf = "ALL"
 
     try:
+        # Unpack pipeline tuple output safely
         raw_rows, diagnostics = run_scanner_pipeline(DEFAULT_WATCHLIST, target_tf)
     except Exception as e:
-        print(f"[ERROR] Engine Exception: {e}", flush=True)
+        print(f"[ERROR] Engine Exception in app.py: {e}", flush=True)
         raw_rows, diagnostics = [], {"symbols_scanned": 0, "matches": 0, "rejections": {}}
+
+    # Debug Logs
+    print(f"\n[DEBUG UI PASS] Rows returned to app.py: {len(raw_rows)}", flush=True)
+    if raw_rows:
+        print(f"[DEBUG UI SAMPLE ROW 1]: {raw_rows[0]}", flush=True)
+    print("--------------------------------------------------\n", flush=True)
 
     return render_template(
         "index.html",
