@@ -1,81 +1,36 @@
-# coinalyze.py
 # =====================================================================
-# VERSION 1.0 — ORDER FLOW TELEMETRY PROVIDER
+# EXCHANGE & ORDER FLOW DATA FETCHER
 # =====================================================================
-
-import logging
 import requests
 
-logger = logging.getLogger(__name__)
-
-COINALYZE_API_KEY = ""  # Set via environment or config if required
-
-def fetch_open_interest(symbol):
-    """
-    Fetches raw Open Interest telemetry from Coinalyze API.
-    Performs ZERO scoring, evaluation, or range boundary logic.
-    """
-    if not COINALYZE_API_KEY:
-        return None
-
-    url = "https://api.coinalyze.net/v1/open-interest"
-    params = {
-        "symbols": symbol.upper(),
-        "api_key": COINALYZE_API_KEY
-    }
-
+def fetch_candles(symbol: str, timeframe: str = "15m", limit: int = 50) -> list:
+    """Fetches raw OHLCV candles from exchange."""
     try:
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code != 200:
-            logger.warning(f"Coinalyze API returned status {response.status_code} for {symbol}")
-            return None
-
-        data = response.json()
-        if isinstance(data, list) and len(data) > 0:
-            return data[0].get("value")
-        return None
-
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={timeframe}&limit={limit}"
+        res = requests.get(url, timeout=5)
+        data = res.json()
+        
+        candles = []
+        for c in data:
+            candles.append({
+                "open": float(c[1]),
+                "high": float(c[2]),
+                "low": float(c[3]),
+                "close": float(c[4]),
+                "volume": float(c[5])
+            })
+        return candles
     except Exception as e:
-        logger.error(f"Error fetching Coinalyze Open Interest for {symbol}: {e}")
-        return None
+        print(f"Error fetching candles for {symbol}: {e}")
+        return []
 
-
-def fetch_funding_rate(symbol):
-    """
-    Fetches raw Funding Rate telemetry from Coinalyze API.
-    Performs ZERO scoring or evaluation.
-    """
-    if not COINALYZE_API_KEY:
-        return None
-
-    url = "https://api.coinalyze.net/v1/predicted-funding-rate"
-    params = {
-        "symbols": symbol.upper(),
-        "api_key": COINALYZE_API_KEY
-    }
-
+def fetch_order_flow(symbol: str) -> dict:
+    """Fetches buyer and seller volume data."""
     try:
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code != 200:
-            return None
-
-        data = response.json()
-        if isinstance(data, list) and len(data) > 0:
-            return data[0].get("value")
-        return None
-
+        candles = fetch_candles(symbol, timeframe="15m", limit=10)
+        buyer_vol = sum(c["volume"] for c in candles if c["close"] >= c["open"])
+        seller_vol = sum(c["volume"] for c in candles if c["close"] < c["open"])
+        return {"buyer_volume": buyer_vol, "seller_volume": seller_vol}
     except Exception as e:
-        logger.error(f"Error fetching Coinalyze Funding Rate for {symbol}: {e}")
-        return None
-
-
-def fetch_cvd(symbol):
-    """
-    Raw telemetry stub for Cumulative Volume Delta (CVD).
-    Performs ZERO calculation, scoring, or interpretation.
-    """
-    if not COINALYZE_API_KEY:
-        return None
-
-    # Reserved for raw CVD endpoint integration
-    return None
+        print(f"Error fetching order flow for {symbol}: {e}")
+        return {"buyer_volume": 50, "seller_volume": 50}
