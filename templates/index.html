@@ -35,7 +35,6 @@
             letter-spacing: 0.5px;
         }
 
-        /* Timeframe Filter Buttons */
         .tf-container {
             display: flex;
             gap: 6px;
@@ -59,7 +58,6 @@
             border-color: var(--accent-blue);
         }
 
-        /* Card List Layout */
         .card-list {
             display: flex;
             flex-direction: column;
@@ -92,7 +90,6 @@
             align-items: center;
         }
 
-        /* Timeframe & Structure Badges */
         .tf-badge {
             background: #2962ff;
             color: #ffffff;
@@ -133,7 +130,6 @@
             color: #0ecb81;
         }
 
-        /* Progress Bar */
         .progress-bar-bg {
             width: 100%;
             height: 8px;
@@ -173,7 +169,7 @@
 
     <div class="header-title">About To Break Scanner</div>
 
-    <!-- Timeframe Filter Pills -->
+    <!-- Timeframe Navigation -->
     <div class="tf-container">
         <a href="/?tf=ALL" class="tf-btn {% if selected_tf == 'ALL' or not selected_tf %}active{% endif %}">ALL</a>
         <a href="/?tf=5M" class="tf-btn {% if selected_tf == '5M' %}active{% endif %}">5M</a>
@@ -188,14 +184,13 @@
                 <div class="card-header">
                     <span class="symbol-title">{{ r.get('symbol', 'N/A') }}</span>
                     <div class="badge-group">
-                        <!-- TIMEFRAME BADGE FIXED -->
                         <span class="tf-badge">[{{ r.get('timeframe', '5M') }}]</span>
                         <span class="struct-badge">[{{ r.get('structure_type', 'HORIZONTAL') }}]</span>
                     </div>
                 </div>
 
                 <div class="price-row">
-                    <span class="price-val">Price: <strong>{{ r.get('curr_close', 0) }}</strong></span>
+                    <span class="price-val">Price: <strong>{{ "%.4f"|format(r.get('curr_close', 0.0)) }}</strong></span>
                     <span class="readiness-status">
                         {{ r.get('readiness_display', r.get('readiness_label', 'BUILDING PRESSURE')) }}
                     </span>
@@ -206,8 +201,8 @@
                 </div>
 
                 <div class="metrics-grid">
-                    <div>Support: <strong>{{ r.get('support', 0) }}</strong></div>
-                    <div>Resistance: <strong>{{ r.get('resistance', 0) }}</strong></div>
+                    <div>Support: <strong>{{ "%.4f"|format(r.get('support', 0.0)) }}</strong></div>
+                    <div>Resistance: <strong>{{ "%.4f"|format(r.get('resistance', 0.0)) }}</strong></div>
                     <div>Buyer Power: <strong>{{ r.get('buyer_power', 50) }}%</strong></div>
                     <div>Seller Power: <strong>{{ r.get('seller_power', 50) }}%</strong></div>
                 </div>
