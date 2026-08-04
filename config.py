@@ -2,13 +2,33 @@
 # CONFIGURATION & AUTHORITATIVE WATCHLIST
 # =====================================================================
 
-# Single authoritative 25-symbol watchlist
+# Authoritative 25-Symbol Watchlist (Official Scanner List)
 WATCHLIST = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-    "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "SUIUSDT",
-    "NEARUSDT", "APTUSDT", "DOTUSDT", "LTCUSDT", "MATICUSDT",
-    "UNIUSDT", "ARBUSDT", "OPUSDT", "TIAUSDT", "INJUSDT",
-    "SEIUSDT", "FETUSDT", "RNDRUSDT", "ATOMUSDT", "FILUSDT"
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "PEPEUSDT",
+    "BONKUSDT",
+    "SHIBUSDT",
+    "USELESSUSDT",
+    "SPACEUSDT",
+    "MOVEUSDT",
+    "ZECUSDT",
+    "SPXUSDT",
+    "PEOPLEUSDT",
+    "PENGUUSDT",
+    "FARTCOINUSDT",
+    "LINEAUSDT",
+    "MEMEUSDT",
+    "PUMPUSDT",
+    "AIXBTUSDT",
+    "BRETTUSDT",
+    "FOGOUSDT",
+    "GOOGLUSDT",
+    "FLOKIUSDT",
+    "IWMUSDT",
+    "MOODENGUSDT",
+    "NEARUSDT"
 ]
 
 TIMEFRAME = "15m"
