@@ -4,7 +4,7 @@ from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
-# Safe imports without modifying core logic
+# Safe module imports
 try:
     from scanner import run_scanner_pipeline
     from config import SUPPORTED_TIMEFRAMES, DEFAULT_WATCHLIST
@@ -14,8 +14,33 @@ except ImportError:
     def run_scanner_pipeline(watchlist, tf):
         return [], {"error": "Import failed"}
 
+def format_smart_price(val):
+    """Formats price dynamically based on asset scale instead of fixed decimals."""
+    if val is None:
+        return "0.00"
+    try:
+        val = float(val)
+    except (ValueError, TypeError):
+        return "0.00"
+
+    if val == 0:
+        return "0.00"
+
+    abs_val = abs(val)
+    if abs_val >= 1000:
+        return f"{val:,.2f}"      # BTC: 64,218.61
+    elif abs_val >= 1:
+        return f"{val:.4f}"       # ETH / TAO / RENDER: 1.3510
+    elif abs_val >= 0.01:
+        return f"{val:.5f}"       # DOGE: 0.18654
+    else:
+        return f"{val:.8f}"       # PEPE / SHIB: 0.00001234
+
+# Register Jinja2 Filter
+app.jinja_env.filters['smart_price'] = format_smart_price
+
 def sanitize_scan_results(results):
-    """Guarantees every output record strictly matches expected JSON schema and has no Null values."""
+    """Ensures raw engine output contains valid non-null numerical values."""
     sanitized = []
     for item in (results or []):
         if not isinstance(item, dict):
