@@ -3,157 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="15">
-    <title>About To Break Range Terminal</title>
+    <title>Institutional Range & Breakout Scanner</title>
     <style>
-        :root {
-            --bg-color: #0b0e14;
-            --card-bg: #151a21;
-            --border-color: #262c36;
-            --text-main: #e6e8ec;
-            --text-sub: #848e9c;
-            --accent-blue: #2962ff;
-            --accent-green: #0ecb81;
-            --accent-red: #f6465d;
-            --accent-yellow: #f0b90b;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            margin: 0;
-            padding: 10px;
-        }
-
-        h1 { font-size: 1.2rem; color: #fff; margin: 0 0 10px 0; font-weight: 700; letter-spacing: 0.5px; }
-
-        .tf-container { display: flex; gap: 6px; margin-bottom: 12px; }
-        .tf-btn {
-            flex: 1; padding: 7px 0; background: var(--card-bg); color: var(--text-sub);
-            text-align: center; text-decoration: none; border-radius: 4px;
-            font-size: 0.8rem; font-weight: 600; border: 1px solid var(--border-color);
-        }
-        .tf-btn.active { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
-
-        .diag-bar {
-            background: var(--card-bg); border: 1px solid var(--border-color);
-            padding: 8px 12px; border-radius: 4px; font-size: 0.75rem;
-            color: var(--text-sub); margin-bottom: 12px;
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
-        }
-        .diag-item strong { color: var(--text-main); }
-
-        .table-wrapper { width: 100%; overflow-x: auto; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); }
-        table { width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left; }
-        th, td { padding: 9px 8px; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
-        th { background: #1a202c; color: var(--text-sub); font-size: 0.68rem; text-transform: uppercase; }
-
-        .score-pill { display: inline-block; padding: 3px 6px; border-radius: 3px; font-weight: bold; background: rgba(41, 98, 255, 0.2); color: #58a6ff; }
-        
-        .dir-UPSIDE { color: var(--accent-green); font-weight: bold; }
-        .dir-DOWNSIDE { color: var(--accent-red); font-weight: bold; }
-        .dir-REJECTION_RISK { color: #ff9800; font-weight: bold; }
-        .dir-ABSORPTION_RISK { color: #00bcd4; font-weight: bold; }
-        .dir-BALANCED { color: var(--accent-yellow); font-weight: bold; }
-
-        .empty-msg { padding: 32px 12px; text-align: center; color: var(--text-sub); font-size: 0.88rem; }
-
-        /* Modal Details View */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); justify-content: center; align-items: center; z-index: 1000; }
-        .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); padding: 18px; border-radius: 6px; width: 90%; max-width: 400px; font-size: 0.85rem; }
-        .close-btn { float: right; cursor: pointer; color: var(--text-sub); font-size: 1.2rem; }
-        .metric-row { display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #121318; color: #e1e3e6; margin: 0; padding: 15px; }
+        h1 { color: #f0b90b; font-size: 1.5rem; text-align: center; }
+        .card { background-color: #1e2026; border: 1px solid #2b2f36; border-radius: 8px; padding: 15px; margin-bottom: 12px; }
+        .flex { display: flex; justify-content: space-between; align-items: center; }
+        .symbol { font-weight: bold; font-size: 1.2rem; }
+        .badge { background: #2b2f36; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; color: #848e9c; }
+        .UPSIDE { color: #0ecb81; font-weight: bold; }
+        .DOWNSIDE { color: #f6465d; font-weight: bold; }
+        .bar-container { background: #2b2f36; height: 8px; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+        .bar-fill { background: #f0b90b; height: 100%; }
+        .text-sm { font-size: 0.85rem; color: #848e9c; }
     </style>
 </head>
 <body>
 
-    <h1>ABOUT TO BREAK RANGE</h1>
-
-    <div class="tf-container">
-        {% for tf in supported_tfs %}
-            <a href="/?tf={{ tf }}" class="tf-btn {% if tf == selected_tf %}active{% endif %}">{{ tf }}</a>
-        {% endfor %}
-    </div>
-
-    <div class="diag-bar">
-        <span class="diag-item">Watchlist: <strong>{{ diagnostics.watchlist_total or 25 }}</strong></span>
-        <span class="diag-item">Scanned: <strong>{{ diagnostics.scanned or 0 }}</strong></span>
-        <span class="diag-item">Qualified: <strong>{{ diagnostics.qualified or 0 }}</strong></span>
-        <span class="diag-item">Rejected: <strong>{{ diagnostics.rejected or 0 }}</strong></span>
-        <span class="diag-item">Failures: <strong>{{ diagnostics.api_failures or 0 }}</strong></span>
-        <span class="diag-item">Last Scan: <strong>{{ diagnostics.scan_timestamp or 'N/A' }}</strong></span>
-    </div>
-
-    <div class="table-wrapper">
-        {% if rows %}
-        <table>
-            <thead>
-                <tr>
-                    <th>SYMBOL</th>
-                    <th>BREAKOUT READINESS</th>
-                    <th>DIRECTION</th>
-                    <th>RESISTANCE</th>
-                    <th>SUPPORT</th>
-                    <th>DISTANCE</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for r in rows %}
-                <tr onclick='openDetails({{ r | tojson }})' style="cursor: pointer;">
-                    <td><strong>{{ r.symbol }}</strong></td>
-                    <td><span class="score-pill">{{ r.readiness_display }}</span></td>
-                    <td class="dir-{{ r.direction | replace(' ', '_') }}">{{ r.direction }}</td>
-                    <td>{{ "%.4f"|format(r.resistance) }}</td>
-                    <td>{{ "%.4f"|format(r.support) }}</td>
-                    <td>{{ r.distance }}%</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <div class="empty-msg">
-            No validated range structures approaching breakout.
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- Detail View Modal -->
-    <div id="detailsModal" class="modal">
-        <div class="modal-content">
-            <span class="close-btn" onclick="closeModal()">&times;</span>
-            <h3 id="mSymbol" style="margin-top:0; color:#fff;"></h3>
-            <hr style="border-color: var(--border-color); margin-bottom: 12px;">
-            
-            <div class="metric-row"><span>Resistance:</span><strong id="mRes"></strong></div>
-            <div class="metric-row"><span>Support:</span><strong id="mSup"></strong></div>
-            <div class="metric-row"><span>Range Height:</span><strong id="mHeight"></strong></div>
-            <div class="metric-row"><span>Current Price:</span><strong id="mClose"></strong></div>
-            <div class="metric-row"><span>Price Position:</span><strong id="mPos"></strong></div>
-            <div class="metric-row"><span>Buyer Power:</span><strong id="mBuyer" style="color:var(--accent-green)"></strong></div>
-            <div class="metric-row"><span>Seller Power:</span><strong id="mSeller" style="color:var(--accent-red)"></strong></div>
-            <div class="metric-row"><span>Range Quality:</span><strong id="mQuality"></strong></div>
-            
-            <p style="margin-top:12px; margin-bottom:4px; font-weight:bold; color:var(--text-sub);">INTERPRETATION:</p>
-            <div id="mInterp" style="font-size:0.8rem; background:#0b0e14; padding:8px; border-radius:4px; border:1px solid var(--border-color);"></div>
-        </div>
-    </div>
+    <h1>About To Break Scanner</h1>
+    <div id="results">Loading live market scan...</div>
 
     <script>
-        function openDetails(data) {
-            document.getElementById('mSymbol').innerText = data.symbol + " — Range Details";
-            document.getElementById('mRes').innerText = data.resistance.toFixed(4);
-            document.getElementById('mSup').innerText = data.support.toFixed(4);
-            document.getElementById('mHeight').innerText = data.range_height.toFixed(4) + " (" + data.range_height_pct + "%)";
-            document.getElementById('mClose').innerText = data.curr_close.toFixed(4);
-            document.getElementById('mPos').innerText = data.price_position + "%";
-            document.getElementById('mBuyer').innerText = data.buyer_power + "%";
-            document.getElementById('mSeller').innerText = data.seller_power + "%";
-            document.getElementById('mQuality').innerText = data.range_quality + "/100";
-            document.getElementById('mInterp').innerText = data.interpretation;
-            document.getElementById('detailsModal').style.display = 'flex';
+        async function fetchScanData() {
+            try {
+                const response = await fetch('/api/scan');
+                const result = await response.json();
+                const container = document.getElementById('results');
+                
+                if (!result.data || result.data.length === 0) {
+                    container.innerHTML = '<p style="text-align:center;">No active ranges detected.</p>';
+                    return;
+                }
+
+                container.innerHTML = '';
+                result.data.forEach(item => {
+                    container.innerHTML += `
+                        <div class="card">
+                            <div class="flex">
+                                <span class="symbol">${item.symbol}</span>
+                                <span class="badge">${item.range_type}</span>
+                            </div>
+                            <div class="flex" style="margin-top: 8px;">
+                                <span class="text-sm">Price: <strong>${item.current_price}</strong></span>
+                                <span class="${item.direction}">${item.status}</span>
+                            </div>
+                            <div class="bar-container">
+                                <div class="bar-fill" style="width: ${item.price_location_pct}%;"></div>
+                            </div>
+                            <div class="flex text-sm">
+                                <span>Support: ${item.support}</span>
+                                <span>Resistance: ${item.resistance}</span>
+                            </div>
+                            <div class="flex text-sm" style="margin-top: 6px;">
+                                <span>Buyer Power: ${item.buyer_power}%</span>
+                                <span>Seller Power: ${item.seller_power}%</span>
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch (err) {
+                document.getElementById('results').innerHTML = '<p style="text-align:center; color:#f6465d;">Failed to load data.</p>';
+            }
         }
-        function closeModal() { document.getElementById('detailsModal').style.display = 'none'; }
+
+        fetchScanData();
+        setInterval(fetchScanData, 15000); // Auto refresh every 15s
     </script>
 </body>
 </html>
