@@ -1,159 +1,260 @@
-# =====================================================================
-# STAGE 1 — STRUCTURAL RANGE GATEKEEPER
-# =====================================================================
+# detector.py - Pure Price Action Engine
+import requests
+import numpy as np
+import time
+from config import OKX_CANDLE_URL, MEXC_CANDLE_URL, OKX_TF_MAP, MEXC_TF_MAP
 
-class RangeDetectionEngine:
-    """
-    Stage 1: Pure Price Action Range Gatekeeper.
-    Returns ONLY: {is_valid, range_type, support, resistance} or None.
-    """
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache"
+}
 
-    @staticmethod
-    def detect_range(candles: list) -> dict | None:
-        if not candles or len(candles) < 30:
-            return None
+def fetch_market_candles(symbol, timeframe, limit=100):
+    """Fetches real-time uncached market data. Primary: OKX, Fallback: MEXC."""
+    okx_error_msg, mexc_error_msg = "", ""
+    timestamp_param = int(time.time() * 1000)
 
-        # 1. Detect structural pivot points
-        pivots = RangeDetectionEngine._extract_pivots(candles)
-        if len(pivots["highs"]) < 2 or len(pivots["lows"]) < 2:
-            return None
-
-        # 2. Build support & resistance boundary zones
-        zones = RangeDetectionEngine._build_reaction_zones(pivots, candles)
-        if not zones:
-            return None
+    # 1. Primary: OKX Futures
+    try:
+        inst_id = f"{symbol[:-4]}-USDT-SWAP" if symbol.endswith("USDT") else f"{symbol}-SWAP"
+        bar = OKX_TF_MAP.get(timeframe, "1H")
+        params = {"instId": inst_id, "bar": bar, "limit": limit, "_t": timestamp_param}
+        res = requests.get(OKX_CANDLE_URL, params=params, headers=HEADERS, timeout=3.0)
         
-        sup_min, sup_max = zones["support_zone"]
-        res_min, res_max = zones["resistance_zone"]
+        if res.status_code == 200:
+            body = res.json()
+            if body.get("code") == "0" and body.get("data"):
+                data = list(reversed(body["data"]))
+                highs = np.array([float(c[2]) for c in data])
+                lows = np.array([float(c[3]) for c in data])
+                closes = np.array([float(c[4]) for c in data])
+                volumes = np.array([float(c[5]) for c in data])
+                if len(closes) > 0:
+                    return (highs, lows, closes, volumes), "OKX", None
+            else:
+                okx_error_msg = f"OKX API returned code={body.get('code')}"
+        else:
+            okx_error_msg = f"OKX HTTP {res.status_code}"
+    except Exception as e:
+        okx_error_msg = f"OKX Exception: {str(e)}"
 
-        if sup_max >= res_min:
-            return None  # Boundaries overlap
+    # 2. Fallback: MEXC Futures
+    try:
+        mexc_symbol = f"{symbol[:-4]}_USDT" if symbol.endswith("USDT") else symbol
+        tf_str = MEXC_TF_MAP.get(timeframe, "Min60")
+        params = {"interval": tf_str, "_t": timestamp_param}
+        res = requests.get(f"{MEXC_CANDLE_URL}{mexc_symbol}", params=params, headers=HEADERS, timeout=3.0)
+        
+        if res.status_code == 200:
+            body = res.json()
+            if body.get("success") and body.get("data"):
+                d = body["data"]
+                highs = np.array(d["high"][-limit:], dtype=float)
+                lows = np.array(d["low"][-limit:], dtype=float)
+                closes = np.array(d["close"][-limit:], dtype=float)
+                volumes = np.array(d["vol"][-limit:], dtype=float)
+                if len(closes) > 0:
+                    return (highs, lows, closes, volumes), "MEXC", None
+            else:
+                mexc_error_msg = f"MEXC API returned code={body.get('code')}"
+        else:
+            mexc_error_msg = f"MEXC HTTP {res.status_code}"
+    except Exception as e:
+        mexc_error_msg = f"MEXC Exception: {str(e)}"
 
-        # 3. Confirm at least 2 independent touches on each boundary
-        s_touches, r_touches = RangeDetectionEngine._count_touches(
-            candles, zones["support_zone"], zones["resistance_zone"]
-        )
-        if s_touches < 2 or r_touches < 2:
-            return None
+    failure_reason = f"{symbol} -> OKX: {okx_error_msg} | MEXC: {mexc_error_msg}"
+    print(failure_reason, flush=True)
+    return None, "NONE", failure_reason
 
-        # 4. Reject if price has already broken out
-        current_close = candles[-1]["close"]
-        if current_close > res_max or current_close < sup_min:
-            return None
 
-        # 5. Reject obvious trending markets
-        if RangeDetectionEngine._is_trending(pivots):
-            return None
+def extract_swing_pivots(highs, lows, window=2):
+    """Extracts raw local swing highs and swing lows strictly from candle wicks."""
+    swing_highs = []
+    swing_lows = []
+    n = len(highs)
+    
+    for i in range(window, n - window):
+        if all(highs[i] >= highs[i - j] for j in range(1, window + 1)) and \
+           all(highs[i] >= highs[i + j] for j in range(1, window + 1)):
+            swing_highs.append((i, highs[i]))
+            
+        if all(lows[i] <= lows[i - j] for j in range(1, window + 1)) and \
+           all(lows[i] <= lows[i + j] for j in range(1, window + 1)):
+            swing_lows.append((i, lows[i]))
+            
+    return swing_highs, swing_lows
 
-        # 6. Classify structure
-        range_type = RangeDetectionEngine._classify_structure(pivots)
-        if not range_type:
-            return None
 
-        support_mid = (sup_min + sup_max) / 2
-        resistance_mid = (res_min + res_max) / 2
-
-        # Final Strict Return Schema
-        return {
-            "is_valid": True,
-            "range_type": range_type,
-            "support": round(support_mid, 6),
-            "resistance": round(resistance_mid, 6)
-        }
-
-    # -----------------------------------------------------------------
-    # STRUCTURAL ALGORITHM HELPERS
-    # -----------------------------------------------------------------
-    @staticmethod
-    def _extract_pivots(candles: list) -> dict:
-        highs, lows = [], []
-        for i in range(2, len(candles) - 2):
-            if candles[i]["high"] > candles[i-1]["high"] and candles[i]["high"] > candles[i-2]["high"] and \
-               candles[i]["high"] > candles[i+1]["high"] and candles[i]["high"] > candles[i+2]["high"]:
-                highs.append(candles[i]["high"])
-                
-            if candles[i]["low"] < candles[i-1]["low"] and candles[i]["low"] < candles[i-2]["low"] and \
-               candles[i]["low"] < candles[i+1]["low"] and candles[i]["low"] < candles[i+2]["low"]:
-                lows.append(candles[i]["low"])
-        return {"highs": highs, "lows": lows}
-
-    @staticmethod
-    def _build_reaction_zones(pivots: dict, candles: list) -> dict | None:
-        total_span = max([c["high"] for c in candles]) - min([c["low"] for c in candles])
-        if total_span <= 0:
-            return None
-
-        cluster_tolerance = total_span * 0.04
-
-        def find_best_cluster(prices: list):
-            clusters = []
-            for p in prices:
-                matched = [x for x in prices if abs(x - p) <= cluster_tolerance]
-                clusters.append({"count": len(matched), "items": matched})
-            clusters.sort(key=lambda c: c["count"], reverse=True)
-            if not clusters or clusters[0]["count"] < 2:
-                return None
-            best = clusters[0]["items"]
-            return (min(best), max(best))
-
-        res_zone = find_best_cluster(pivots["highs"])
-        sup_zone = find_best_cluster(pivots["lows"])
-
-        if not res_zone or not sup_zone:
-            return None
-
-        return {"support_zone": sup_zone, "resistance_zone": res_zone}
-
-    @staticmethod
-    def _count_touches(candles: list, sup_zone: tuple, res_zone: tuple) -> tuple[int, int]:
-        sup_min, sup_max = sup_zone
-        res_min, res_max = res_zone
-        range_span = res_max - sup_min
-
-        s_touches, r_touches = 0, 0
-        in_sup, in_res = False, False
-
-        for c in candles:
-            if c["low"] <= sup_max and c["high"] >= sup_min:
-                if not in_sup:
-                    s_touches += 1
-                    in_sup = True
-            elif c["low"] > (sup_max + range_span * 0.15):
-                in_sup = False
-
-            if c["high"] >= res_min and c["low"] <= res_max:
-                if not in_res:
-                    r_touches += 1
-                    in_res = True
-            elif c["high"] < (res_min - range_span * 0.15):
-                in_res = False
-
-        return s_touches, r_touches
-
-    @staticmethod
-    def _is_trending(pivots: dict) -> bool:
-        h, l = pivots["highs"], pivots["lows"]
-        if len(h) < 3 or len(l) < 3:
-            return False
-        is_uptrend = (h[-1] > h[-2] > h[-3]) and (l[-1] > l[-2] > l[-3])
-        is_downtrend = (h[-1] < h[-2] < h[-3]) and (l[-1] < l[-2] < l[-3])
-        return is_uptrend or is_downtrend
-
-    @staticmethod
-    def _classify_structure(pivots: dict) -> str | None:
-        h, l = pivots["highs"], pivots["lows"]
-        flat_highs = abs(h[-1] - h[-2]) / h[-2] <= 0.006
-        flat_lows = abs(l[-1] - l[-2]) / l[-2] <= 0.006
-        rising_lows = l[-1] > l[-2] * 1.004
-        falling_highs = h[-1] < h[-2] * 0.996
-
-        if flat_highs and flat_lows:
-            return "HORIZONTAL"
-        elif flat_highs and rising_lows:
-            return "ASCENDING_TRIANGLE"
-        elif flat_lows and falling_highs:
-            return "DESCENDING_TRIANGLE"
-        elif rising_lows and falling_highs:
-            return "SYMMETRICAL_TRIANGLE"
-
+def validate_range_structure(highs, lows, closes, lookback=25):
+    """
+    STAGE 1: Pure Price Action Range Detection & Structure Validation.
+    """
+    if len(closes) < lookback:
         return None
+
+    w_highs = highs[-lookback:]
+    w_lows = lows[-lookback:]
+    w_closes = closes[-lookback:]
+    curr_close = float(w_closes[-1])
+    curr_high = float(w_highs[-1])
+    curr_low = float(w_lows[-1])
+
+    s_highs, s_lows = extract_swing_pivots(w_highs, w_lows, window=2)
+    
+    if len(s_highs) < 2 or len(s_lows) < 2:
+        return None
+
+    sh_prices = [p for _, p in s_highs]
+    sl_prices = [p for _, p in s_lows]
+
+    resistance = float(np.percentile(sh_prices, 85))
+    support = float(np.percentile(sl_prices, 15))
+    
+    r_height = resistance - support
+    if r_height <= 0 or curr_close <= 0:
+        return None
+
+    range_pct = (r_height / curr_close) * 100.0
+    if range_pct < 0.6 or range_pct > 3.5:
+        return None
+
+    # Strict Breakout Guard: Drop immediately if price broke past support/resistance
+    max_allowed = resistance * 1.0015
+    min_allowed = support * 0.9985
+    if curr_close > max_allowed or curr_close < min_allowed:
+        return None
+    if curr_high > (resistance * 1.003) or curr_low < (support * 0.997):
+        return None
+
+    # Structural Classification
+    max_h, min_h = max(sh_prices), min(sh_prices)
+    max_l, min_l = max(sl_prices), min(sl_prices)
+    is_flat_top = ((max_h - min_h) / curr_close) * 100.0 <= 0.35
+    is_flat_bottom = ((max_l - min_l) / curr_close) * 100.0 <= 0.35
+
+    rising_highs = all(sh_prices[i] < sh_prices[i+1] for i in range(len(sh_prices)-1))
+    rising_lows = all(sl_prices[i] < sl_prices[i+1] for i in range(len(sl_prices)-1))
+    falling_highs = all(sh_prices[i] > sh_prices[i+1] for i in range(len(sh_prices)-1))
+    falling_lows = all(sl_prices[i] > sl_prices[i+1] for i in range(len(sl_prices)-1))
+
+    # Reject Strong Trends & Expanding Shapes
+    if (rising_highs and rising_lows) or (falling_highs and falling_lows) or (falling_lows and rising_highs):
+        return None
+
+    if is_flat_top and is_flat_bottom:
+        structure_type = "HORIZONTAL"
+    elif is_flat_top and rising_lows:
+        structure_type = "ASCENDING TRIANGLE"
+    elif is_flat_bottom and falling_highs:
+        structure_type = "DESCENDING TRIANGLE"
+    else:
+        structure_type = "HORIZONTAL"
+
+    x = np.arange(lookback)
+    slope, _ = np.polyfit(x, w_closes, 1)
+    if ((abs(slope) / curr_close) * 100.0) > 0.10:
+        return None
+
+    inside_count = np.sum((w_closes <= (resistance * 1.001)) & (w_closes >= (support * 0.999)))
+    containment = round(float((inside_count / lookback) * 100.0), 1)
+    
+    if containment < 70.0:
+        return None
+
+    touch_count = len(s_highs) + len(s_lows)
+    quality_score = min(int((containment * 0.6) + (touch_count * 8)), 100)
+
+    return {
+        "support": support,
+        "resistance": resistance,
+        "r_height": r_height,
+        "r_height_pct": round(range_pct, 2),
+        "curr_close": curr_close,
+        "upper_touches": len(s_highs),
+        "lower_touches": len(s_lows),
+        "containment_pct": containment,
+        "range_quality": quality_score,
+        "structure_type": structure_type
+    }
+
+
+def analyze_buyer_seller_battle(range_data, volumes, closes):
+    """STAGE 2: Order Flow & Direction Analysis."""
+    curr_close = range_data["curr_close"]
+    support = range_data["support"]
+    resistance = range_data["resistance"]
+    r_height = range_data["r_height"]
+
+    price_position = float(np.clip(((curr_close - support) / r_height) * 100.0, 0.0, 100.0))
+
+    recent_closes = closes[-5:]
+    bullish_candles = np.sum(np.diff(recent_closes) > 0)
+    
+    avg_vol = np.mean(volumes[:-5]) if len(volumes) > 5 else 1.0
+    recent_vol = np.mean(volumes[-5:])
+    vol_ratio = (recent_vol / avg_vol) if avg_vol > 0 else 1.0
+
+    buyer_power = int(np.clip((bullish_candles / 4.0) * 100 * (1.1 if vol_ratio > 1.05 else 0.9), 10, 95))
+    seller_power = 100 - buyer_power
+
+    if price_position >= 70.0:
+        if buyer_power >= 55:
+            direction = "UPSIDE"
+            interpretation = "Buyers dominating near resistance. High breakout likelihood."
+        else:
+            direction = "REJECTION RISK"
+            interpretation = "Price near resistance with heavy selling pressure."
+    elif price_position <= 30.0:
+        if seller_power >= 55:
+            direction = "DOWNSIDE"
+            interpretation = "Sellers dominating near support. High breakdown likelihood."
+        else:
+            direction = "ABSORPTION RISK"
+            interpretation = "Price near support, buyers absorbing sell volume."
+    else:
+        direction = "BALANCED"
+        interpretation = "Price consolidating inside range equilibrium."
+
+    return {
+        "price_position": round(price_position, 1),
+        "buyer_power": buyer_power,
+        "seller_power": seller_power,
+        "direction": direction,
+        "interpretation": interpretation
+    }
+
+
+def calculate_breakout_readiness(range_data, battle_data):
+    """STAGE 3: Scoring & Ranking Engine."""
+    curr_close = range_data["curr_close"]
+    support = range_data["support"]
+    resistance = range_data["resistance"]
+    pos = battle_data["price_position"]
+    direction = battle_data["direction"]
+    quality = range_data["range_quality"]
+
+    dist_to_res = ((resistance - curr_close) / curr_close) * 100.0
+    dist_to_sup = ((curr_close - support) / curr_close) * 100.0
+    distance_pct = round(min(abs(dist_to_res), abs(dist_to_sup)), 2)
+
+    boundary_proximity = max(pos, 100.0 - pos)
+    decisiveness = 25 if direction in ["UPSIDE", "DOWNSIDE"] else 10
+
+    raw_score = (quality * 0.25) + (boundary_proximity * 0.50) + decisiveness
+    readiness_score = int(np.clip(raw_score, 10, 98))
+
+    if readiness_score >= 90: label = "IMMINENT"
+    elif readiness_score >= 82: label = "VERY HIGH"
+    elif readiness_score >= 75: label = "HIGH"
+    elif readiness_score >= 65: label = "BUILDING"
+    elif readiness_score >= 50: label = "DEVELOPING"
+    elif readiness_score >= 35: label = "WATCH"
+    else: label = "LOW"
+
+    return {
+        "readiness_score": readiness_score,
+        "readiness_label": label,
+        "readiness_display": f"{readiness_score}% ({label})",
+        "distance_pct": distance_pct
+    }
