@@ -3,204 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About To Break Scanner</title>
+    <title>Range Breakout Scanner</title>
     <style>
         :root {
-            --bg-color: #0b0e14;
-            --card-bg: #151a21;
-            --border-color: #262c36;
-            --text-main: #e6e8ec;
-            --text-sub: #848e9c;
-            --accent-blue: #2962ff;
-            --accent-green: #0ecb81;
-            --accent-yellow: #f0b90b;
+            --bg-dark: #0d1117;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --text-main: #c9d1d9;
+            --text-sub: #8b949e;
+            --accent-green: #238636;
+            --accent-blue: #58a6ff;
+            --accent-red: #da3633;
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: var(--bg-color);
+            background-color: var(--bg-dark);
             color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
-            padding: 12px;
+            padding: 15px;
         }
 
-        .header-title {
-            text-align: center;
-            font-size: 1.3rem;
-            color: var(--accent-yellow);
-            font-weight: 800;
-            margin: 8px 0 14px 0;
-        }
-
-        .tf-container {
+        .header {
             display: flex;
-            gap: 6px;
-            margin-bottom: 14px;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header h1 {
+            font-size: 1.4rem;
+            margin: 0;
+            color: #fff;
+        }
+
+        .tf-buttons {
+            display: flex;
+            gap: 8px;
         }
 
         .tf-btn {
-            flex: 1;
-            padding: 8px 0;
             background: var(--card-bg);
-            color: var(--text-sub);
-            text-align: center;
-            text-decoration: none;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            font-weight: 700;
             border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 6px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: bold;
         }
 
         .tf-btn.active {
             background: var(--accent-blue);
-            color: #ffffff;
+            color: #fff;
             border-color: var(--accent-blue);
         }
 
-        .card-list {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
         }
 
         .card {
-            background: var(--card-bg);
+            background-color: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 14px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
         .card-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
-        }
-
-        .symbol-title {
-            font-size: 1.15rem;
-            font-weight: 800;
-            color: #ffffff;
-        }
-
-        .badge-group {
-            display: flex;
-            gap: 4px;
-        }
-
-        .tf-badge {
-            background: var(--accent-blue);
-            color: #ffffff;
-            font-size: 0.7rem;
-            font-weight: 800;
-            padding: 3px 6px;
-            border-radius: 4px;
-        }
-
-        .struct-badge {
-            background: #262c36;
-            color: var(--text-sub);
-            font-size: 0.7rem;
-            font-weight: 700;
-            padding: 3px 6px;
-            border-radius: 4px;
-        }
-
-        .price-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
             margin-bottom: 10px;
         }
 
-        .readiness-status {
-            font-size: 0.85rem;
-            font-weight: 800;
-            color: var(--accent-green);
+        .symbol {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #fff;
         }
 
-        .progress-bar-bg {
-            width: 100%;
-            height: 8px;
-            background: #262c36;
+        .badge {
+            background: rgba(88, 166, 255, 0.15);
+            color: var(--accent-blue);
+            padding: 3px 8px;
             border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        .metrics {
+            margin-top: 10px;
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .label {
+            color: var(--text-sub);
+        }
+
+        .value {
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: #21262d;
+            border-radius: 3px;
             overflow: hidden;
-            margin-bottom: 12px;
+            margin-top: 6px;
+            display: flex;
         }
 
-        .progress-bar-fill {
+        .buyer-fill {
+            background: var(--accent-green);
             height: 100%;
-            background: var(--accent-yellow);
-            border-radius: 4px;
         }
 
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            font-size: 0.8rem;
-            color: var(--text-sub);
+        .seller-fill {
+            background: var(--accent-red);
+            height: 100%;
         }
 
-        .metrics-grid strong {
-            color: #ffffff;
-        }
-
-        .empty-msg {
+        .no-results {
+            grid-column: 1 / -1;
             text-align: center;
-            padding: 35px 10px;
-            color: var(--text-sub);
-            font-size: 0.85rem;
+            padding: 40px;
             background: var(--card-bg);
-            border: 1px dashed var(--border-color);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
+            color: var(--text-sub);
         }
     </style>
 </head>
 <body>
 
-    <div class="header-title">About To Break Scanner</div>
-
-    <!-- Timeframe Selection Navigation -->
-    <div class="tf-container">
-        <a href="/?tf=ALL" class="tf-btn {% if selected_tf == 'ALL' or not selected_tf %}active{% endif %}">ALL</a>
-        <a href="/?tf=5M" class="tf-btn {% if selected_tf == '5M' %}active{% endif %}">5M</a>
-        <a href="/?tf=15M" class="tf-btn {% if selected_tf == '15M' %}active{% endif %}">15M</a>
-        <a href="/?tf=1H" class="tf-btn {% if selected_tf == '1H' %}active{% endif %}">1H</a>
+    <div class="header">
+        <h1>Consolidation Scanner</h1>
+        <div class="tf-buttons">
+            <a href="/?tf=ALL" class="tf-btn {% if selected_tf == 'ALL' %}active{% endif %}">ALL</a>
+            <a href="/?tf=5M" class="tf-btn {% if selected_tf == '5M' %}active{% endif %}">5M</a>
+            <a href="/?tf=15M" class="tf-btn {% if selected_tf == '15M' %}active{% endif %}">15M</a>
+            <a href="/?tf=1H" class="tf-btn {% if selected_tf == '1H' %}active{% endif %}">1H</a>
+        </div>
     </div>
 
-    <!-- Scanner Output List -->
-    <div class="card-list" id="card-list">
+    <div class="grid">
         {% if rows and rows|length > 0 %}
             {% for r in rows %}
-            <div class="card">
-                <div class="card-header">
-                    <span class="symbol-title">{{ r.get('symbol', 'N/A') }}</span>
-                    <div class="badge-group">
-                        <span class="tf-badge">[{{ r.get('timeframe', '5M') }}]</span>
-                        <span class="struct-badge">[{{ r.get('structure_type', 'HORIZONTAL') }}]</span>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="symbol">{{ r.get('symbol', 'UNKNOWN') }}</span>
+                        <span class="badge">{{ r.get('timeframe', '5M') }} • {{ r.get('structure_type', 'HORIZONTAL') }}</span>
+                    </div>
+
+                    <div class="metrics">
+                        <div class="metric-row">
+                            <span class="label">Price:</span>
+                            <span class="value">${{ r.get('curr_close', 0.0)|smart_price }}</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="label">Resistance:</span>
+                            <span class="value" style="color: #f85149;">${{ r.get('resistance', 0.0)|smart_price }}</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="label">Support:</span>
+                            <span class="value" style="color: #3fb950;">${{ r.get('support', 0.0)|smart_price }}</span>
+                        </div>
+                        <div class="metric-row" style="margin-top: 8px;">
+                            <span class="label">Readiness:</span>
+                            <span class="value" style="color: var(--accent-blue);">{{ r.get('readiness_display', r.get('readiness_score', 0)|string + '%') }}</span>
+                        </div>
+
+                        <!-- Buyer / Seller Battle Bar -->
+                        <div style="margin-top: 10px;">
+                            <div class="metric-row" style="font-size: 0.78rem;">
+                                <span style="color: var(--accent-green);">Bulls: {{ r.get('buyer_power', 50) }}%</span>
+                                <span style="color: var(--accent-red);">Bears: {{ r.get('seller_power', 50) }}%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="buyer-fill" style="width: {{ r.get('buyer_power', 50) }}%;"></div>
+                                <div class="seller-fill" style="width: {{ r.get('seller_power', 50) }}%;"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-
-                <div class="price-row">
-                    <span style="font-size: 0.9rem; color: var(--text-sub);">Price: <strong style="color: #fff;">{{ r.get('curr_close', 0.0)|smart_price }}</strong></span>
-                    <span class="readiness-status">{{ r.get('readiness_display', 'BUILDING PRESSURE') }}</span>
-                </div>
-
-                <div class="progress-bar-bg">
-                    <div class="progress-bar-fill" style="width: {{ r.get('readiness_score', 0) }}%;"></div>
-                </div>
-
-                <div class="metrics-grid">
-                    <div>Support: <strong>{{ r.get('support', 0.0)|smart_price }}</strong></div>
-                    <div>Resistance: <strong>{{ r.get('resistance', 0.0)|smart_price }}</strong></div>
-                    <div>Buyer Power: <strong>{{ r.get('buyer_power', 50) }}%</strong></div>
-                    <div>Seller Power: <strong>{{ r.get('seller_power', 50) }}%</strong></div>
-                </div>
-            </div>
             {% endfor %}
         {% else %}
-            <div class="empty-msg">No active range structures detected for selected timeframe.</div>
+            <div class="no-results">
+                <h3>No consolidation ranges found</h3>
+                <p>Scanned {{ diagnostics.get('symbols_scanned', 0) }} assets. Try switching timeframes.</p>
+            </div>
         {% endif %}
     </div>
 
