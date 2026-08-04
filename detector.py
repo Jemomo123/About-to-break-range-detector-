@@ -11,11 +11,10 @@ HEADERS = {
 }
 
 def fetch_market_candles(symbol, timeframe, limit=100):
-    okx_error_msg = ""
-    mexc_error_msg = ""
+    okx_error_msg, mexc_error_msg = "", ""
     timestamp_param = int(time.time() * 1000)
 
-    # 1. Primary: OKX Futures (Fresh Uncached Requests)
+    # 1. Primary: OKX Futures
     try:
         inst_id = f"{symbol[:-4]}-USDT-SWAP" if symbol.endswith("USDT") else f"{symbol}-SWAP"
         bar = OKX_TF_MAP.get(timeframe, "1H")
@@ -68,94 +67,127 @@ def fetch_market_candles(symbol, timeframe, limit=100):
     return None, "NONE", failure_reason
 
 
-def validate_range_structure(highs, lows, closes, lookback=25, breakout_threshold_pct=0.25):
+def find_swing_points(highs, lows, window=2):
+    """Identifies pivot highs and pivot lows strictly from price wicks."""
+    swing_highs = []
+    swing_lows = []
+    n = len(highs)
+    
+    for i in range(window, n - window):
+        # Local Max High
+        if all(highs[i] >= highs[i - j] for j in range(1, window + 1)) and \
+           all(highs[i] >= highs[i + j] for j in range(1, window + 1)):
+            swing_highs.append((i, highs[i]))
+            
+        # Local Min Low
+        if all(lows[i] <= lows[i - j] for j in range(1, window + 1)) and \
+           all(lows[i] <= lows[i + j] for j in range(1, window + 1)):
+            swing_lows.append((i, lows[i]))
+            
+    return swing_highs, swing_lows
+
+
+def validate_range_structure(highs, lows, closes, lookback=25):
+    """Pure Price Action Structure Validator."""
     if len(closes) < lookback:
         return None
 
     w_highs = highs[-lookback:]
     w_lows = lows[-lookback:]
     w_closes = closes[-lookback:]
+    curr_close = float(w_closes[-1])
+
+    # 1. Extract Swings
+    s_highs, s_lows = find_swing_points(w_highs, w_lows, window=2)
     
-    v_high = float(np.max(w_highs))
-    v_low = float(np.min(w_lows))
-    r_height = v_high - v_low
-    current_close = float(w_closes[-1])
-    current_high = float(w_highs[-1])
-    current_low = float(w_lows[-1])
-
-    if r_height <= 0 or current_close <= 0:
+    # Must have at least 2 distinct swing highs and 2 distinct swing lows
+    if len(s_highs) < 2 or len(s_lows) < 2:
         return None
 
-    # Requirement 4: Reject Breakouts Beyond Allowed Threshold (0.25%)
-    max_allowed_high = v_high * (1.0 + (breakout_threshold_pct / 100.0))
-    min_allowed_low = v_low * (1.0 - (breakout_threshold_pct / 100.0))
+    sh_prices = [p for _, p in s_highs]
+    sl_prices = [p for _, p in s_lows]
 
-    if current_close > max_allowed_high or current_close < min_allowed_low:
-        return None
-    if current_high > max_allowed_high or current_low < min_allowed_low:
-        return None
+    # Calculate Flatness Tolerance (within 0.3% price variance)
+    max_h, min_h = max(sh_prices), min(sh_prices)
+    max_l, min_l = max(sl_prices), min(sl_prices)
 
-    # Range Height Boundaries (Min 0.8%, Max 3.5%)
-    range_pct = (r_height / current_close) * 100.0
-    if range_pct < 0.8 or range_pct > 3.5:
-        return None
+    is_flat_top = ((max_h - min_h) / curr_close) * 100.0 <= 0.35
+    is_flat_bottom = ((max_l - min_l) / curr_close) * 100.0 <= 0.35
 
-    # Reject Trends/Channels via Slope
-    x = np.arange(lookback)
-    slope, _ = np.polyfit(x, w_closes, 1)
-    if ((abs(slope) / current_close) * 100.0) > 0.12:
-        return None
+    # Determine Swing Slopes (Progression)
+    rising_lows = all(sl_prices[i] < sl_prices[i+1] for i in range(len(sl_prices)-1))
+    falling_highs = all(sh_prices[i] > sh_prices[i+1] for i in range(len(sh_prices)-1))
+    rising_highs = all(sh_prices[i] < sh_prices[i+1] for i in range(len(sh_prices)-1))
+    falling_lows = all(sl_prices[i] > sl_prices[i+1] for i in range(len(sl_prices)-1))
 
-    # Reject V-Shapes
-    if (np.std(w_closes) / r_height) > 0.38:
+    # Reject Strong Trends (Higher Highs + Higher Lows OR Lower Highs + Lower Lows)
+    if (rising_highs and rising_lows) or (falling_highs and falling_lows):
         return None
 
-    # Distinct Touches
-    touch_buf = r_height * 0.035
-    upper_touch_indices = np.where(w_highs >= (v_high - touch_buf))[0]
-    lower_touch_indices = np.where(w_lows <= (v_low + touch_buf))[0]
-
-    def count_separated_touches(indices):
-        if len(indices) < 2: return 0
-        count, last_idx = 1, indices[0]
-        for idx in indices[1:]:
-            if idx - last_idx >= 2:
-                count += 1
-                last_idx = idx
-        return count
-
-    if count_separated_touches(upper_touch_indices) < 2 or count_separated_touches(lower_touch_indices) < 2:
+    # Reject Expanding Structures (Lower Lows + Higher Highs)
+    if falling_lows and rising_highs:
         return None
 
-    # Containment Check
-    inner_upper = v_high - (r_height * 0.05)
-    inner_lower = v_low + (r_height * 0.05)
-    inside_count = np.sum((w_closes <= inner_upper) & (w_closes >= inner_lower))
+    # Identify the 3 Specific Valid Price Action Structures
+    structure_type = None
+
+    if is_flat_top and is_flat_bottom:
+        structure_type = "HORIZONTAL_RANGE"
+        res_level = max_h
+        sup_level = min_l
+    elif is_flat_top and rising_lows:
+        structure_type = "FLAT_RESISTANCE_RISING_LOWS"
+        res_level = max_h
+        sup_level = sl_prices[-1]  # Active trendline support anchor
+    elif is_flat_bottom and falling_highs:
+        structure_type = "FLAT_SUPPORT_FALLING_HIGHS"
+        res_level = sh_prices[-1]  # Active trendline resistance anchor
+        sup_level = min_l
+    else:
+        return None  # Unstructured or noisy price action
+
+    r_height = res_level - sup_level
+    if r_height <= 0:
+        return None
+
+    # 2. Strict Breakout Guard
+    # Drop immediately if price has broken out past resistance or support (+0.1% tolerance)
+    if curr_close > (res_level * 1.001) or curr_close < (sup_level * 0.999):
+        return None
+
+    # Containment: At least 75% of candle bodies must trade inside the boundary
+    inside_count = np.sum((w_closes <= (res_level * 1.0005)) & (w_closes >= (sup_level * 0.9995)))
     containment = round(float((inside_count / lookback) * 100.0), 1)
-
-    if containment < 70.0:
+    
+    if containment < 75.0:
         return None
 
     return {
-        "v_high": v_high,
-        "v_low": v_low,
+        "v_high": res_level,
+        "v_low": sup_level,
         "r_height": r_height,
-        "upper_touches": count_separated_touches(upper_touch_indices),
-        "lower_touches": count_separated_touches(lower_touch_indices),
+        "upper_touches": len(s_highs),
+        "lower_touches": len(s_lows),
         "containment_pct": containment,
-        "current_close": current_close
+        "current_close": curr_close,
+        "structure_type": structure_type
     }
 
 
 def analyze_order_battle(volumes, closes):
+    """Pure Price Action Volume & Candle Body Battle Check."""
     if len(volumes) < 10: return "BALANCED"
-    recent_vol = volumes[-5:]
-    avg_vol = np.mean(volumes)
-    vol_ratio = np.mean(recent_vol) / avg_vol if avg_vol > 0 else 1.0
+    
+    # Check body direction of last 5 candles
     recent_closes = closes[-5:]
-    bullish_candles = np.sum(np.diff(recent_closes) > 0)
-    buy_ratio = (bullish_candles / 4.0) if len(recent_closes) >= 5 else 0.5
+    bullish_count = np.sum(np.diff(recent_closes) > 0)
+    
+    avg_vol = np.mean(volumes[:-5])
+    recent_vol = np.mean(volumes[-5:])
+    vol_building = recent_vol > avg_vol if avg_vol > 0 else False
 
-    if buy_ratio >= 0.60 and vol_ratio >= 1.05: return "BUYERS WINNING"
-    elif buy_ratio <= 0.40 and vol_ratio >= 1.05: return "SELLERS WINNING"
+    if bullish_count >= 4 and vol_building:
+        return "BUYERS WINNING"
+    elif bullish_count <= 1 and vol_building:
+        return "SELLERS WINNING"
     return "BALANCED"
