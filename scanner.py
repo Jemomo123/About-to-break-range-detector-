@@ -1,51 +1,89 @@
-# =====================================================================
-# STAGE 2 — BREAKOUT ANALYSIS ENGINE
-# =====================================================================
+# scanner.py
+from datetime import datetime, timezone
+from config import SUPPORTED_TIMEFRAMES, DEFAULT_WATCHLIST
+from detector import (
+    fetch_market_candles,
+    validate_range_structure,
+    analyze_buyer_seller_battle,
+    calculate_breakout_readiness
+)
 
-class BreakoutAnalysisEngine:
+def run_scanner_pipeline(watchlist=None, selected_tf=None):
     """
-    Stage 2: Breakout Analysis.
-    Calculates Price Location %, Buyer/Seller Power %, Direction & Readiness.
+    Scans Watchlist across 5M, 15M, and 1H.
+    If selected_tf is passed, filters results while maintaining timeframe identities.
     """
+    if watchlist is None:
+        watchlist = DEFAULT_WATCHLIST
 
-    @staticmethod
-    def analyze(symbol: str, current_price: float, range_data: dict, order_flow: dict) -> dict:
-        support = range_data["support"]
-        resistance = range_data["resistance"]
-        range_span = resistance - support
-        
-        # 1. Price Location %
-        price_location_pct = round(((current_price - support) / range_span) * 100) if range_span > 0 else 0
-        price_location_pct = max(0, min(100, price_location_pct))
-        
-        # 2. Buyer vs Seller Power
-        buyer_vol = order_flow.get("buyer_volume", 0)
-        seller_vol = order_flow.get("seller_volume", 0)
-        total_vol = buyer_vol + seller_vol
-        
-        buyer_power = round((buyer_vol / total_vol) * 100) if total_vol > 0 else 50
-        seller_power = 100 - buyer_power
+    results = []
+    qualified_count = 0
+    rejected_count = 0
+    api_failures_count = 0
+    scanned_total = 0
+    scan_timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
 
-        # 3. Direction & Breakout Status Logic
-        if price_location_pct >= 80 and buyer_power >= 60:
-            direction = "UPSIDE"
-            status = "IMMINENT BREAKOUT" if price_location_pct >= 90 else "READY FOR UPSIDE BREAKOUT"
-        elif price_location_pct <= 20 and seller_power >= 60:
-            direction = "DOWNSIDE"
-            status = "IMMINENT BREAKDOWN" if price_location_pct <= 10 else "READY FOR DOWNSIDE BREAKDOWN"
-        else:
-            direction = "UPSIDE" if buyer_power >= seller_power else "DOWNSIDE"
-            status = "BUILDING PRESSURE"
+    # Determine timeframes to process (Only 5M, 15M, 1H allowed)
+    target_tfs = [selected_tf] if selected_tf in SUPPORTED_TIMEFRAMES else SUPPORTED_TIMEFRAMES
 
-        return {
-            "symbol": symbol,
-            "range_type": range_data["range_type"],
-            "support": support,
-            "resistance": resistance,
-            "current_price": current_price,
-            "price_location_pct": price_location_pct,
-            "buyer_power": buyer_power,
-            "seller_power": seller_power,
-            "direction": direction,
-            "status": status
-        }
+    for symbol in watchlist:
+        for tf in target_tfs:
+            scanned_total += 1
+            data, exchange_used, failure_reason = fetch_market_candles(symbol, tf)
+            
+            if data is None:
+                api_failures_count += 1
+                continue
+
+            highs, lows, closes, volumes = data
+
+            # Stage 1: Range Validation
+            range_data = validate_range_structure(highs, lows, closes)
+            if range_data is None:
+                rejected_count += 1
+                continue
+
+            # Stage 2 & 3: Battle + Readiness Calculation
+            battle_data = analyze_buyer_seller_battle(range_data, volumes, closes)
+            readiness_data = calculate_breakout_readiness(range_data, battle_data)
+
+            record = {
+                "symbol": symbol,
+                "timeframe": tf,  # <--- Timeframe identity preserved through all stages
+                "structure_type": range_data["structure_type"],
+                "readiness_score": readiness_data["readiness_score"],
+                "readiness_label": readiness_data["readiness_label"],
+                "readiness_display": readiness_data["readiness_display"],
+                "direction": battle_data["direction"],
+                "resistance": range_data["resistance"],
+                "support": range_data["support"],
+                "distance": readiness_data["distance_pct"],
+                
+                # Extended details
+                "curr_close": range_data["curr_close"],
+                "range_height": range_data["r_height"],
+                "range_height_pct": range_data["r_height_pct"],
+                "price_position": battle_data["price_position"],
+                "buyer_power": battle_data["buyer_power"],
+                "seller_power": battle_data["seller_power"],
+                "range_quality": range_data["range_quality"],
+                "interpretation": battle_data["interpretation"],
+                "exchange": exchange_used
+            }
+
+            results.append(record)
+            qualified_count += 1
+
+    # Sort results by Readiness Score (Highest First)
+    results.sort(key=lambda x: x["readiness_score"], reverse=True)
+
+    diagnostics = {
+        "watchlist_total": len(watchlist),
+        "scanned": scanned_total,
+        "qualified": qualified_count,
+        "rejected": rejected_count,
+        "api_failures": api_failures_count,
+        "scan_timestamp": scan_timestamp
+    }
+
+    return results, diagnostics
