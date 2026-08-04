@@ -1,89 +1,91 @@
-# scanner.py
-from datetime import datetime, timezone
-from config import SUPPORTED_TIMEFRAMES, DEFAULT_WATCHLIST
-from detector import (
-    fetch_market_candles,
-    validate_range_structure,
-    analyze_buyer_seller_battle,
-    calculate_breakout_readiness
-)
+import sys
+import traceback
+from detector import detect_range, analyze_buyer_seller_battle, calculate_boundary_readiness
 
-def run_scanner_pipeline(watchlist=None, selected_tf=None):
-    """
-    Scans Watchlist across 5M, 15M, and 1H.
-    If selected_tf is passed, filters results while maintaining timeframe identities.
-    """
-    if watchlist is None:
-        watchlist = DEFAULT_WATCHLIST
-
+def run_scanner_pipeline(watchlist, target_tf=None):
+    timeframes_to_scan = ["5M", "15M", "1H"] if not target_tf or target_tf == "ALL" else [target_tf]
+    
     results = []
-    qualified_count = 0
-    rejected_count = 0
-    api_failures_count = 0
-    scanned_total = 0
-    scan_timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    diagnostics = {
+        "symbols_downloaded": 0,
+        "symbols_scanned": 0,
+        "rejections": {},
+        "matches": 0
+    }
 
-    # Determine timeframes to process (Only 5M, 15M, 1H allowed)
-    target_tfs = [selected_tf] if selected_tf in SUPPORTED_TIMEFRAMES else SUPPORTED_TIMEFRAMES
+    print("\n==================================================", flush=True)
+    print(f"[SCANNER START] Scanning {len(watchlist)} symbols across TFs: {timeframes_to_scan}", flush=True)
+    print("==================================================", flush=True)
 
     for symbol in watchlist:
-        for tf in target_tfs:
-            scanned_total += 1
-            data, exchange_used, failure_reason = fetch_market_candles(symbol, tf)
+        for tf in timeframes_to_scan:
+            diagnostics["symbols_scanned"] += 1
             
-            if data is None:
-                api_failures_count += 1
+            # --- STEP 1: API DATA FETCH ---
+            candles = fetch_klines(symbol, tf)  # Replace with your actual kline fetcher function
+            
+            if not candles or len(candles) < 20:
+                reason = "FETCH_FAILED_OR_EMPTY"
+                diagnostics["rejections"][reason] = diagnostics["rejections"].get(reason, 0) + 1
+                print(f"[{symbol} | {tf}] REJECTED: Fetch failed or insufficient bars (Count: {len(candles) if candles else 0})", flush=True)
                 continue
 
-            highs, lows, closes, volumes = data
+            diagnostics["symbols_downloaded"] += 1
 
-            # Stage 1: Range Validation
-            range_data = validate_range_structure(highs, lows, closes)
-            if range_data is None:
-                rejected_count += 1
+            # --- STEP 2: STAGE 1 DETECTOR ---
+            try:
+                range_result = detect_range(candles, tf)
+            except Exception as e:
+                reason = "DETECTOR_EXCEPTION"
+                diagnostics["rejections"][reason] = diagnostics["rejections"].get(reason, 0) + 1
+                print(f"[{symbol} | {tf}] REJECTED: Exception during detect_range(): {e}", flush=True)
                 continue
 
-            # Stage 2 & 3: Battle + Readiness Calculation
-            battle_data = analyze_buyer_seller_battle(range_data, volumes, closes)
-            readiness_data = calculate_breakout_readiness(range_data, battle_data)
+            if not range_result or not range_result.get("is_valid_range", False):
+                reason = range_result.get("rejection_reason", "NO_RANGE_DETECTED") if isinstance(range_result, dict) else "NO_RANGE_DETECTED"
+                diagnostics["rejections"][reason] = diagnostics["rejections"].get(reason, 0) + 1
+                print(f"[{symbol} | {tf}] REJECTED Stage 1: Reason = '{reason}'", flush=True)
+                continue
 
-            record = {
+            # --- STEP 3: STAGE 2 FILTERING & METRICS ---
+            curr_close = range_result.get("curr_close", candles[-1]["close"])
+            support = range_result.get("support")
+            resistance = range_result.get("resistance")
+
+            if support is None or resistance is None or support >= resistance:
+                reason = "INVALID_SUPPORT_RESISTANCE"
+                diagnostics["rejections"][reason] = diagnostics["rejections"].get(reason, 0) + 1
+                print(f"[{symbol} | {tf}] REJECTED Stage 2: Invalid S/R levels (Supp: {support}, Res: {resistance})", flush=True)
+                continue
+
+            # Calculate readiness & order flow
+            readiness_score, readiness_label = calculate_boundary_readiness(curr_close, support, resistance)
+            
+            # Extract volumes and closes for order flow battle
+            volumes = [c.get("volume", 0) for c in candles]
+            closes = [c.get("close", 0) for c in candles]
+            battle = analyze_buyer_seller_battle(range_result, volumes, closes)
+
+            # Match Candidate
+            match = {
                 "symbol": symbol,
-                "timeframe": tf,  # <--- Timeframe identity preserved through all stages
-                "structure_type": range_data["structure_type"],
-                "readiness_score": readiness_data["readiness_score"],
-                "readiness_label": readiness_data["readiness_label"],
-                "readiness_display": readiness_data["readiness_display"],
-                "direction": battle_data["direction"],
-                "resistance": range_data["resistance"],
-                "support": range_data["support"],
-                "distance": readiness_data["distance_pct"],
-                
-                # Extended details
-                "curr_close": range_data["curr_close"],
-                "range_height": range_data["r_height"],
-                "range_height_pct": range_data["r_height_pct"],
-                "price_position": battle_data["price_position"],
-                "buyer_power": battle_data["buyer_power"],
-                "seller_power": battle_data["seller_power"],
-                "range_quality": range_data["range_quality"],
-                "interpretation": battle_data["interpretation"],
-                "exchange": exchange_used
+                "timeframe": tf,
+                "structure_type": range_result.get("structure_type", "HORIZONTAL"),
+                "curr_close": curr_close,
+                "support": support,
+                "resistance": resistance,
+                "readiness_score": readiness_score,
+                "readiness_display": readiness_label,
+                "buyer_power": battle.get("buyer_power", 50),
+                "seller_power": battle.get("seller_power", 50)
             }
+            
+            results.append(match)
+            print(f"[{symbol} | {tf}] >>> MATCH ACCEPTED <<< (Readiness: {readiness_score}%, Structure: {match['structure_type']})", flush=True)
 
-            results.append(record)
-            qualified_count += 1
-
-    # Sort results by Readiness Score (Highest First)
-    results.sort(key=lambda x: x["readiness_score"], reverse=True)
-
-    diagnostics = {
-        "watchlist_total": len(watchlist),
-        "scanned": scanned_total,
-        "qualified": qualified_count,
-        "rejected": rejected_count,
-        "api_failures": api_failures_count,
-        "scan_timestamp": scan_timestamp
-    }
+    diagnostics["matches"] = len(results)
+    print("==================================================", flush=True)
+    print(f"[SCANNER COMPLETE] Total Matches: {len(results)} | Summary: {diagnostics['rejections']}", flush=True)
+    print("==================================================\n", flush=True)
 
     return results, diagnostics
