@@ -1,78 +1,51 @@
-# scanner.py
-from datetime import datetime, timezone
-from detector import (
-    fetch_market_candles,
-    validate_range_structure,
-    analyze_buyer_seller_battle,
-    calculate_breakout_readiness
-)
+# =====================================================================
+# STAGE 2 — BREAKOUT ANALYSIS ENGINE
+# =====================================================================
 
-def run_scanner_pipeline(watchlist, timeframe):
+class BreakoutAnalysisEngine:
     """
-    Runs full backend processing pipeline according to Spec Version 2.0.
+    Stage 2: Breakout Analysis.
+    Calculates Price Location %, Buyer/Seller Power %, Direction & Readiness.
     """
-    results = []
-    qualified_count = 0
-    rejected_count = 0
-    api_failures_count = 0
-    scan_timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
 
-    for symbol in watchlist:
-        # Step 1: Fetch OHLC Data
-        data, exchange_used, failure_reason = fetch_market_candles(symbol, timeframe)
+    @staticmethod
+    def analyze(symbol: str, current_price: float, range_data: dict, order_flow: dict) -> dict:
+        support = range_data["support"]
+        resistance = range_data["resistance"]
+        range_span = resistance - support
         
-        if data is None:
-            api_failures_count += 1
-            continue
+        # 1. Price Location %
+        price_location_pct = round(((current_price - support) / range_span) * 100) if range_span > 0 else 0
+        price_location_pct = max(0, min(100, price_location_pct))
+        
+        # 2. Buyer vs Seller Power
+        buyer_vol = order_flow.get("buyer_volume", 0)
+        seller_vol = order_flow.get("seller_volume", 0)
+        total_vol = buyer_vol + seller_vol
+        
+        buyer_power = round((buyer_vol / total_vol) * 100) if total_vol > 0 else 50
+        seller_power = 100 - buyer_power
 
-        highs, lows, closes, volumes = data
+        # 3. Direction & Breakout Status Logic
+        if price_location_pct >= 80 and buyer_power >= 60:
+            direction = "UPSIDE"
+            status = "IMMINENT BREAKOUT" if price_location_pct >= 90 else "READY FOR UPSIDE BREAKOUT"
+        elif price_location_pct <= 20 and seller_power >= 60:
+            direction = "DOWNSIDE"
+            status = "IMMINENT BREAKDOWN" if price_location_pct <= 10 else "READY FOR DOWNSIDE BREAKDOWN"
+        else:
+            direction = "UPSIDE" if buyer_power >= seller_power else "DOWNSIDE"
+            status = "BUILDING PRESSURE"
 
-        # Step 1, 2 & 3: Detect & Validate Range (Reject immediately if invalid)
-        range_data = validate_range_structure(highs, lows, closes)
-        if range_data is None:
-            rejected_count += 1
-            continue
-
-        # Step 4: Calculate Battle, Direction, & Readiness ONLY for valid ranges
-        battle_data = analyze_buyer_seller_battle(range_data, volumes, closes)
-        readiness_data = calculate_breakout_readiness(range_data, battle_data)
-
-        # Assemble Final Response Record
-        record = {
+        return {
             "symbol": symbol,
-            "readiness_score": readiness_data["readiness_score"],
-            "readiness_label": readiness_data["readiness_label"],
-            "readiness_display": readiness_data["readiness_display"],
-            "direction": battle_data["direction"],
-            "resistance": range_data["resistance"],
-            "support": range_data["support"],
-            "distance": readiness_data["distance_pct"],
-            
-            # Additional detail parameters for drill-down view
-            "curr_close": range_data["curr_close"],
-            "range_height": range_data["r_height"],
-            "range_height_pct": range_data["r_height_pct"],
-            "price_position": battle_data["price_position"],
-            "buyer_power": battle_data["buyer_power"],
-            "seller_power": battle_data["seller_power"],
-            "range_quality": range_data["range_quality"],
-            "interpretation": battle_data["interpretation"],
-            "exchange": exchange_used
+            "range_type": range_data["range_type"],
+            "support": support,
+            "resistance": resistance,
+            "current_price": current_price,
+            "price_location_pct": price_location_pct,
+            "buyer_power": buyer_power,
+            "seller_power": seller_power,
+            "direction": direction,
+            "status": status
         }
-
-        results.append(record)
-        qualified_count += 1
-
-    # Sort Dashboard Results by Breakout Readiness Score (Highest First)
-    results.sort(key=lambda x: x["readiness_score"], reverse=True)
-
-    diagnostics = {
-        "watchlist_total": len(watchlist),
-        "scanned": qualified_count + rejected_count,
-        "qualified": qualified_count,
-        "rejected": rejected_count,
-        "api_failures": api_failures_count,
-        "scan_timestamp": scan_timestamp
-    }
-
-    return results, diagnostics
