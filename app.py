@@ -9,9 +9,27 @@ DEFAULT_WATCHLIST = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
     "ADAUSDT", "AVAXUSDT", "LINKUSDT", "SUIUSDT", "NEARUSDT",
     "APTUSDT", "PEPEUSDT", "SHIBUSDT", "DOTUSDT", "LTCUSDT",
-    "BCHUSDT", "UNIUSDT", "NEARUSDT", "FETUSDT", "TAOUSDT",
-    "WIFUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "TIAUSDT"
+    "BCHUSDT", "UNIUSDT", "FETUSDT", "TAOUSDT", "WIFUSDT",
+    "ARBUSDT", "OPUSDT", "INJUSDT", "TIAUSDT"
 ]
+
+# --- REGISTER JINJA2 CUSTOM FILTER ---
+@app.template_filter("smart_price")
+def smart_price(value):
+    try:
+        value = float(value)
+    except (ValueError, TypeError):
+        return "0.00"
+
+    if value >= 100:
+        return f"{value:,.2f}"
+    elif value >= 1:
+        return f"{value:.4f}"
+    elif value >= 0.01:
+        return f"{value:.6f}"
+    else:
+        return f"{value:.8f}"
+
 
 @app.route("/", methods=["GET"])
 def index():
@@ -20,7 +38,6 @@ def index():
         target_tf = "ALL"
 
     try:
-        # Unpacks both results and diagnostics from scanner pipeline
         raw_rows, diagnostics = run_scanner_pipeline(DEFAULT_WATCHLIST, target_tf)
     except Exception as e:
         print(f"[ERROR] Engine Exception: {e}", flush=True)
