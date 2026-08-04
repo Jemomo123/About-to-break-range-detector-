@@ -3,139 +3,227 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="15">
     <title>About To Break Scanner</title>
     <style>
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-            background-color: #121318; 
-            color: #e1e3e6; 
-            margin: 0; 
-            padding: 12px; 
+        :root {
+            --bg-color: #0b0e14;
+            --card-bg: #151a21;
+            --border-color: #262c36;
+            --text-main: #e6e8ec;
+            --text-sub: #848e9c;
+            --accent-blue: #2962ff;
+            --accent-green: #0ecb81;
+            --accent-red: #f6465d;
+            --accent-yellow: #f0b90b;
         }
-        h1 { 
-            color: #f0b90b; 
-            font-size: 1.4rem; 
-            text-align: center; 
-            margin-bottom: 16px;
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 12px;
         }
-        .card { 
-            background-color: #1e2026; 
-            border: 1px solid #2b2f36; 
-            border-radius: 8px; 
-            padding: 14px; 
-            margin-bottom: 12px; 
-        }
-        .flex { 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            gap: 8px;
-        }
-        .symbol { 
-            font-weight: 700; 
-            font-size: 1.25rem; 
+
+        .header-title {
+            text-align: center;
+            font-size: 1.4rem;
+            color: #f0b90b;
+            font-weight: 800;
+            margin: 10px 0 16px 0;
             letter-spacing: 0.5px;
         }
-        .badge { 
-            background: #2b2f36; 
-            padding: 3px 8px; 
-            border-radius: 4px; 
-            font-size: 0.75rem; 
-            color: #848e9c; 
-            font-weight: 600;
+
+        /* Filter Pills for 5M, 15M, 1H */
+        .tf-container {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 14px;
         }
-        .UPSIDE { 
-            color: #0ecb81; 
-            font-weight: 700; 
-            font-size: 0.95rem;
+        .tf-btn {
+            flex: 1;
+            padding: 8px 0;
+            background: var(--card-bg);
+            color: var(--text-sub);
+            text-align: center;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            border: 1px solid var(--border-color);
         }
-        .DOWNSIDE { 
-            color: #f6465d; 
-            font-weight: 700; 
-            font-size: 0.95rem;
+        .tf-btn.active {
+            background: var(--accent-blue);
+            color: #fff;
+            border-color: var(--accent-blue);
         }
-        .bar-container { 
-            background: #2b2f36; 
-            height: 8px; 
-            border-radius: 4px; 
-            overflow: hidden; 
-            margin: 10px 0; 
+
+        /* Card Layout */
+        .card-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
         }
-        .bar-fill { 
-            background: #f0b90b; 
-            height: 100%; 
-            transition: width 0.3s ease;
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 14px;
         }
-        .text-sm { 
-            font-size: 0.85rem; 
-            color: #848e9c; 
-        }
-        .val {
-            color: #e1e3e6;
-            font-weight: 600;
-        }
-        .grid-row {
+
+        .card-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-top: 6px;
+            margin-bottom: 8px;
+        }
+
+        .symbol-title {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: #ffffff;
+        }
+
+        .badge-group {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        /* Timeframe and Structure Badges */
+        .tf-badge {
+            background: #2962ff;
+            color: #ffffff;
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 3px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .struct-badge {
+            background: #262c36;
+            color: #848e9c;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .price-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .price-val {
+            font-size: 0.95rem;
+            color: var(--text-sub);
+        }
+
+        .price-val strong {
+            color: #ffffff;
+        }
+
+        .readiness-status {
+            font-size: 0.9rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+        .status-imminent { color: #0ecb81; }
+        .status-building { color: #f6465d; }
+        .status-developing { color: #f0b90b; }
+        .status-watch { color: #2962ff; }
+
+        /* Progress Bar */
+        .progress-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: #262c36;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: #f0b90b;
+            border-radius: 4px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 0.82rem;
+            color: var(--text-sub);
+        }
+
+        .metrics-grid strong {
+            color: #ffffff;
+        }
+
+        .empty-msg {
+            text-align: center;
+            padding: 40px 10px;
+            color: var(--text-sub);
+            font-size: 0.9rem;
         }
     </style>
 </head>
 <body>
 
-    <h1>About To Break Scanner</h1>
-    <div id="results">Loading live market scan...</div>
+    <div class="header-title">About To Break Scanner</div>
 
-    <script>
-        async function fetchScanData() {
-            try {
-                const response = await fetch('/api/scan');
-                const result = await response.json();
-                const container = document.getElementById('results');
-                
-                if (!result.data || result.data.length === 0) {
-                    container.innerHTML = '<p style="text-align:center; color:#848e9c;">No active ranges detected.</p>';
-                    return;
-                }
+    <!-- Timeframe Filter Navigation -->
+    <div class="tf-container">
+        <a href="/?tf=ALL" class="tf-btn {% if selected_tf == 'ALL' %}active{% endif %}">ALL</a>
+        <a href="/?tf=5M" class="tf-btn {% if selected_tf == '5M' %}active{% endif %}">5M</a>
+        <a href="/?tf=15M" class="tf-btn {% if selected_tf == '15M' %}active{% endif %}">15M</a>
+        <a href="/?tf=1H" class="tf-btn {% if selected_tf == '1H' %}active{% endif %}">1H</a>
+    </div>
 
-                container.innerHTML = '';
-                result.data.forEach(item => {
-                    container.innerHTML += `
-                        <div class="card">
-                            <div class="flex">
-                                <span class="symbol">${item.symbol}</span>
-                                <span class="badge">${item.range_type}</span>
-                            </div>
-                            
-                            <div class="flex" style="margin-top: 8px;">
-                                <span class="text-sm">Price: <span class="val">${item.current_price}</span></span>
-                                <span class="${item.direction}">${item.status}</span>
-                            </div>
-                            
-                            <div class="bar-container">
-                                <div class="bar-fill" style="width: ${item.price_location_pct}%;"></div>
-                            </div>
-                            
-                            <div class="grid-row text-sm">
-                                <span>Support: <span class="val">${item.support}</span></span>
-                                <span>Resistance: <span class="val">${item.resistance}</span></span>
-                            </div>
-                            
-                            <div class="grid-row text-sm">
-                                <span>Buyer Power: <span class="val">${item.buyer_power}%</span></span>
-                                <span>Seller Power: <span class="val">${item.seller_power}%</span></span>
-                            </div>
-                        </div>
-                    `;
-                });
-            } catch (err) {
-                document.getElementById('results').innerHTML = '<p style="text-align:center; color:#f6465d;">Failed to load data.</p>';
-            }
-        }
+    <div class="card-list">
+        {% if rows %}
+            {% for r in rows %}
+            <div class="card">
+                <div class="card-header">
+                    <span class="symbol-title">{{ r.symbol }}</span>
+                    <div class="badge-group">
+                        <!-- TIMEFRAME BADGE HERE -->
+                        <span class="tf-badge">{{ r.timeframe }}</span>
+                        <span class="struct-badge">{{ r.structure_type or 'HORIZONTAL' }}</span>
+                    </div>
+                </div>
 
-        fetchScanData();
-        setInterval(fetchScanData, 15000); // Auto refresh every 15 seconds
-    </script>
+                <div class="price-row">
+                    <span class="price-val">Price: <strong>{{ r.curr_close }}</strong></span>
+                    <span class="readiness-status status-{{ (r.readiness_label or 'BUILDING') | lower }}">
+                        {{ r.readiness_display or r.readiness_label }}
+                    </span>
+                </div>
+
+                <!-- Readiness Progress Bar -->
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" style="width: {{ r.readiness_score or 50 }}%;"></div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div>Support: <strong>{{ "%.4f"|format(r.support) if r.support else 'N/A' }}</strong></div>
+                    <div>Resistance: <strong>{{ "%.4f"|format(r.resistance) if r.resistance else 'N/A' }}</strong></div>
+                    <div>Buyer Power: <strong>{{ r.buyer_power or 50 }}%</strong></div>
+                    <div>Seller Power: <strong>{{ r.seller_power or 50 }}%</strong></div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-msg">No active range structures detected.</div>
+        {% endif %}
+    </div>
+
 </body>
 </html>
