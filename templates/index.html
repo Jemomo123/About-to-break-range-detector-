@@ -13,8 +13,6 @@
         .badge-readiness { font-size: 0.85rem; font-weight: 600; padding: 4px 8px; border-radius: 4px; }
         .badge-bullish { background-color: #198754; color: white; }
         .badge-bearish { background-color: #dc3545; color: white; }
-        .loading-spinner { display: inline-block; width: 1.5rem; height: 1.5rem; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: #3182ce; animation: spin 1s ease-in-out infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="p-2 p-md-3">
@@ -23,9 +21,7 @@
         <!-- Header -->
         <div class="d-flex align-items-center justify-content-between mb-3">
             <h4 class="fw-bold text-primary m-0" style="font-size: 1.1rem;">ABOUT TO BREAK RANGE DETECTOR</h4>
-            <span class="badge bg-dark text-muted border border-secondary p-2 small" id="status-badge">
-                Loading Data...
-            </span>
+            <span class="badge bg-success text-white border border-success p-2 small">Live Data</span>
         </div>
 
         <!-- Timeframe Navigation -->
@@ -63,13 +59,33 @@
                             <th>ACTION</th>
                         </tr>
                     </thead>
-                    <tbody id="watchlist-body">
+                    <tbody>
+                        {% for item in watchlist_rows %}
                         <tr>
-                            <td colspan="10" class="text-center text-muted py-4">
-                                <div class="loading-spinner mb-2"></div>
-                                <div>Fetching live market prices for your 25 coins...</div>
+                            <td>
+                                <button class="btn btn-link p-0 text-decoration-none" onclick="togglePin('{{ item.symbol }}', '{{ item.timeframe }}')">
+                                    {{ '★' if item.pinned else '☆' }}
+                                </button>
+                            </td>
+                            <td class="fw-bold text-white">{{ item.symbol }}</td>
+                            <td><span class="badge bg-secondary">{{ item.timeframe }}</span></td>
+                            <td>{{ '$' ~ item.curr_close if item.curr_close != 'ERROR' else 'ERROR' }}</td>
+                            <td class="text-success">{{ '$' ~ item.support if item.support != 'N/A' else 'N/A' }}</td>
+                            <td class="text-danger">{{ '$' ~ item.resistance if item.resistance != 'N/A' else 'N/A' }}</td>
+                            <td>
+                                <span class="badge {{ 'badge-bullish' if item.break_direction == 'BULLISH' else ('badge-bearish' if item.break_direction == 'BEARISH' else 'bg-secondary') }}">
+                                    {{ item.break_symbol }} {{ item.direction_label }}
+                                </span>
+                            </td>
+                            <td><span class="badge badge-readiness bg-primary">{{ item.readiness_display }}</span></td>
+                            <td><small class="text-success">{{ item.buyer_power }}%</small> / <small class="text-danger">{{ item.seller_power }}%</small></td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeSymbol('{{ item.symbol }}', '{{ item.timeframe }}')">✕</button>
                             </td>
                         </tr>
+                        {% else %}
+                        <tr><td colspan="10" class="text-center text-muted">No coins in watchlist.</td></tr>
+                        {% endfor %}
                     </tbody>
                 </table>
             </div>
@@ -92,13 +108,25 @@
                             <th>BUYER / SELLER POWER</th>
                         </tr>
                     </thead>
-                    <tbody id="scanner-body">
+                    <tbody>
+                        {% for row in rows %}
                         <tr>
-                            <td colspan="8" class="text-center text-muted py-4">
-                                <div class="loading-spinner mb-2"></div>
-                                <div>Analyzing range structures...</div>
+                            <td class="fw-bold text-white">{{ row.symbol }}</td>
+                            <td><span class="badge bg-secondary">{{ row.timeframe }}</span></td>
+                            <td>${{ row.curr_close }}</td>
+                            <td class="text-success">${{ row.support }}</td>
+                            <td class="text-danger">${{ row.resistance }}</td>
+                            <td>
+                                <span class="badge {{ 'badge-bullish' if row.break_direction == 'BULLISH' else ('badge-bearish' if row.break_direction == 'BEARISH' else 'bg-secondary') }}">
+                                    {{ row.break_symbol }} {{ row.direction_label }}
+                                </span>
                             </td>
+                            <td><span class="badge badge-readiness bg-success">{{ row.readiness_display }}</span></td>
+                            <td><small class="text-success">{{ row.buyer_power }}%</small> / <small class="text-danger">{{ row.seller_power }}%</small></td>
                         </tr>
+                        {% else %}
+                        <tr><td colspan="8" class="text-center text-muted py-3">No active range setups detected at this time.</td></tr>
+                        {% endfor %}
                     </tbody>
                 </table>
             </div>
@@ -108,77 +136,6 @@
     <script>
         const selectedTf = "{{ selected_tf }}";
 
-        async function loadMarketData() {
-            try {
-                const res = await fetch(`/api/data?tf=${selectedTf}`);
-                const data = await res.json();
-                
-                renderWatchlist(data.watchlist);
-                renderScanner(data.scanner);
-                document.getElementById('status-badge').innerText = "Source: OKX (MEXC Failover)";
-                document.getElementById('status-badge').className = "badge bg-success text-white p-2 small";
-            } catch (err) {
-                document.getElementById('status-badge').innerText = "Error Loading Data";
-                document.getElementById('status-badge').className = "badge bg-danger text-white p-2 small";
-            }
-        }
-
-        function renderWatchlist(rows) {
-            const tbody = document.getElementById('watchlist-body');
-            if (!rows || rows.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No watchlist items.</td></tr>';
-                return;
-            }
-            tbody.innerHTML = rows.map(item => `
-                <tr>
-                    <td>
-                        <button class="btn btn-link p-0 text-decoration-none" onclick="togglePin('${item.symbol}', '${item.timeframe}')">
-                            ${item.pinned ? '★' : '☆'}
-                        </button>
-                    </td>
-                    <td class="fw-bold text-white">${item.symbol}</td>
-                    <td><span class="badge bg-secondary">${item.timeframe}</span></td>
-                    <td>${item.curr_close !== 'N/A' ? '$' + item.curr_close : 'N/A'}</td>
-                    <td class="text-success">${item.support !== 'N/A' ? '$' + item.support : 'N/A'}</td>
-                    <td class="text-danger">${item.resistance !== 'N/A' ? '$' + item.resistance : 'N/A'}</td>
-                    <td>
-                        <span class="badge ${item.break_direction === 'BULLISH' ? 'badge-bullish' : (item.break_direction === 'BEARISH' ? 'badge-bearish' : 'bg-secondary')}">
-                            ${item.break_symbol} ${item.direction_label}
-                        </span>
-                    </td>
-                    <td><span class="badge badge-readiness bg-primary">${item.readiness_display}</span></td>
-                    <td><small class="text-success">${item.buyer_power}%</small> / <small class="text-danger">${item.seller_power}%</small></td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeSymbol('${item.symbol}', '${item.timeframe}')">✕</button>
-                    </td>
-                </tr>
-            `).join('');
-        }
-
-        function renderScanner(rows) {
-            const tbody = document.getElementById('scanner-body');
-            if (!rows || rows.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No active range setups detected above threshold.</td></tr>';
-                return;
-            }
-            tbody.innerHTML = rows.map(row => `
-                <tr>
-                    <td class="fw-bold text-white">${row.symbol}</td>
-                    <td><span class="badge bg-secondary">${row.timeframe}</span></td>
-                    <td>$${row.curr_close}</td>
-                    <td class="text-success">$${row.support}</td>
-                    <td class="text-danger">$${row.resistance}</td>
-                    <td>
-                        <span class="badge ${row.break_direction === 'BULLISH' ? 'badge-bullish' : (row.break_direction === 'BEARISH' ? 'badge-bearish' : 'bg-secondary')}">
-                            ${row.break_symbol} ${row.direction_label}
-                        </span>
-                    </td>
-                    <td><span class="badge badge-readiness bg-success">${row.readiness_display}</span></td>
-                    <td><small class="text-success">${row.buyer_power}%</small> / <small class="text-danger">${row.seller_power}%</small></td>
-                </tr>
-            `).join('');
-        }
-
         async function addWatchlistSymbol() {
             let symbol = document.getElementById('add-symbol-input').value.trim();
             if (!symbol) return;
@@ -187,7 +144,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ symbol: symbol, timeframe: selectedTf !== "ALL" ? selectedTf : "15M" })
             });
-            loadMarketData();
+            window.location.reload();
         }
 
         async function removeSymbol(symbol, tf) {
@@ -196,7 +153,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ symbol: symbol, timeframe: tf })
             });
-            loadMarketData();
+            window.location.reload();
         }
 
         async function togglePin(symbol, tf) {
@@ -205,11 +162,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ symbol: symbol, timeframe: tf })
             });
-            loadMarketData();
+            window.location.reload();
         }
-
-        // Run on page load
-        loadMarketData();
     </script>
 </body>
 </html>
