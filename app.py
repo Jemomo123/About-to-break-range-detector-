@@ -17,68 +17,85 @@ DEFAULT_WATCHLIST = [
 
 WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEFAULT_WATCHLIST]
 
-# IN-MEMORY CACHE FOR INSTANT PAGE LOADS
 CACHE = {}
 CACHE_LOCK = threading.Lock()
-LAST_UPDATE = 0
 
-def update_cache():
-    global LAST_UPDATE
-    print("Background Worker: Fetching latest market data...")
-    timeframes = ["5M", "15M", "1H", "4H"]
-    tasks = [(sym, tf) for sym in DEFAULT_WATCHLIST for tf in timeframes]
-    
-    new_data = {}
+def fetch_single_safe(sym, tf):
+    try:
+        match, _ = _process_symbol_tf(sym, tf)
+        return match
+    except Exception as e:
+        print(f"Error fetching {sym} {tf}: {e}")
+        return None
+
+def bg_update_tf(tf):
+    tasks = [sym for sym in DEFAULT_WATCHLIST]
     with ThreadPoolExecutor(max_workers=10) as executor:
-        future_map = {executor.submit(_process_symbol_tf, sym, tf): (sym, tf) for sym, tf in tasks}
+        future_map = {executor.submit(fetch_single_safe, sym, tf): sym for sym in tasks}
         for future in as_completed(future_map):
-            sym, tf = future_map[future]
-            try:
-                match, _ = future.result()
-                if match:
-                    new_data[f"{sym}_{tf}"] = match
-            except Exception:
-                pass
+            sym = future_map[future]
+            res = future.result()
+            if res:
+                with CACHE_LOCK:
+                    CACHE[f"{sym}_{tf}"] = res
 
-    with CACHE_LOCK:
-        CACHE.update(new_data)
-        LAST_UPDATE = time.time()
-    print("Background Worker: Cache update complete!")
-
-def background_loop():
-    # Initial pause to let Flask initialize
-    time.sleep(2)
+def background_worker():
+    time.sleep(1)
     while True:
-        try:
-            update_cache()
-        except Exception as e:
-            print(f"Background loop error: {e}")
-        time.sleep(30)  # Refresh exchange data every 30 seconds
+        for tf in ["15M", "5M", "1H", "4H"]:
+            try:
+                bg_update_tf(tf)
+            except Exception as e:
+                print(f"BG worker loop error: {e}")
+            time.sleep(2)
+        time.sleep(20)
 
-# Start Background Fetcher Thread on Launch
-threading.Thread(target=background_loop, daemon=True).start()
+# Start background auto-refresh thread
+threading.Thread(target=background_worker, daemon=True).start()
 
 @app.route("/")
 def index():
     selected_tf = request.args.get("tf", "15M").upper()
-    
-    watchlist_rows = []
+    active_tf = "15M" if selected_tf == "ALL" else selected_tf
+
+    # Identify missing symbols in CACHE for requested TF
+    missing_symbols = []
     with CACHE_LOCK:
         for item in WATCHLIST:
-            tf = item["timeframe"] if selected_tf == "ALL" else selected_tf
-            cache_key = f"{item['symbol']}_{tf}"
+            key = f"{item['symbol']}_{active_tf}"
+            if key not in CACHE:
+                missing_symbols.append(item["symbol"])
+
+    # On-demand fast fetch for missing cache (takes ~1.5s)
+    if missing_symbols:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_map = {executor.submit(fetch_single_safe, sym, active_tf): sym for sym in missing_symbols}
+            for future in as_completed(future_map):
+                sym = future_map[future]
+                res = future.result()
+                if res:
+                    with CACHE_LOCK:
+                        CACHE[f"{sym}_{active_tf}"] = res
+
+    watchlist_rows = []
+    is_still_loading = False
+
+    with CACHE_LOCK:
+        for item in WATCHLIST:
+            cache_key = f"{item['symbol']}_{active_tf}"
             if cache_key in CACHE:
                 match = dict(CACHE[cache_key])
                 match["pinned"] = item["pinned"]
                 watchlist_rows.append(match)
             else:
+                is_still_loading = True
                 watchlist_rows.append({
                     "symbol": item["symbol"],
-                    "timeframe": tf,
-                    "curr_close": "Loading...",
-                    "support": "...",
-                    "resistance": "...",
-                    "direction_label": "Updating Market Data",
+                    "timeframe": active_tf,
+                    "curr_close": "N/A",
+                    "support": "N/A",
+                    "resistance": "N/A",
+                    "direction_label": "Fetching...",
                     "break_direction": "NEUTRAL",
                     "break_symbol": "⏳",
                     "readiness_display": "0%",
@@ -87,7 +104,11 @@ def index():
                     "pinned": item["pinned"]
                 })
 
-    # Extract scanner opportunities from cache
+    # Restore default symbol ordering
+    symbol_order = {sym: i for i, sym in enumerate(DEFAULT_WATCHLIST)}
+    watchlist_rows.sort(key=lambda x: symbol_order.get(x["symbol"], 999))
+
+    # Scanner results filtered from active candidates
     scanner_results = [
         r for r in watchlist_rows 
         if isinstance(r.get("readiness_score"), (int, float)) and r["readiness_score"] >= 40
@@ -98,7 +119,8 @@ def index():
         "index.html",
         selected_tf=selected_tf,
         watchlist_rows=watchlist_rows,
-        rows=scanner_results
+        rows=scanner_results,
+        is_still_loading=is_still_loading
     )
 
 @app.route("/api/watchlist/add", methods=["POST"])
