@@ -18,7 +18,8 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     mexc_sym = clean_sym
 
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
-    mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "60m", "4H": "4h"}
+    # MEXC V3 API uses lowercase 'h' (e.g., '1h', '4h')
+    mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
 
     okx_bar = okx_tf_map.get(timeframe, "15m")
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
@@ -106,16 +107,16 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
     highs = tail_candles['high'].values
 
     higher_lows_count = sum(1 for i in range(1, len(lows)) if lows[i] >= lows[i-1])
-    higher_lows_ratio = higher_lows_count / (len(lows) - 1)
+    higher_lows_ratio = higher_lows_count / (len(lows) - 1) if len(lows) > 1 else 0
 
     lower_highs_count = sum(1 for i in range(1, len(highs)) if highs[i] <= highs[i-1])
-    lower_highs_ratio = lower_highs_count / (len(highs) - 1)
+    lower_highs_ratio = lower_highs_count / (len(highs) - 1) if len(highs) > 1 else 0
 
     recent_min_low = float(tail_candles['low'].min())
     recent_max_high = float(tail_candles['high'].max())
 
-    res_pullback_depth = (resistance - recent_min_low) / range_height
-    sup_pullback_depth = (recent_max_high - support) / range_height
+    res_pullback_depth = (resistance - recent_min_low) / range_height if range_height > 0 else 0
+    sup_pullback_depth = (recent_max_high - support) / range_height if range_height > 0 else 0
 
     proximity_bull = max(0, (0.50 - dist_to_res_pct) / 0.50) * 40
     power_bull = max(0, (buyer_power - 30) / 70) * 30
@@ -182,7 +183,7 @@ def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
     results = []
     diagnostics = {"symbols_scanned": len(symbols), "symbols_downloaded": 0, "rejections": {}}
 
-    tfs_to_run = ["5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
+    tfs_to_run = ["5M", "15M", "1H"] if timeframe == "ALL" else [timeframe]
 
     for sym in symbols:
         for tf in tfs_to_run:
