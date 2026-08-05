@@ -69,7 +69,7 @@
                             </td>
                             <td class="fw-bold text-white">{{ item.symbol }}</td>
                             <td><span class="badge bg-secondary">{{ item.timeframe }}</span></td>
-                            <td>{{ '$' ~ item.curr_close if item.curr_close != 'ERROR' else 'ERROR' }}</td>
+                            <td>{{ '$' ~ item.curr_close if item.curr_close != 'N/A' else 'N/A' }}</td>
                             <td class="text-success">{{ '$' ~ item.support if item.support != 'N/A' else 'N/A' }}</td>
                             <td class="text-danger">{{ '$' ~ item.resistance if item.resistance != 'N/A' else 'N/A' }}</td>
                             <td>
@@ -132,6 +132,15 @@
             </div>
         </div>
     </div>
+
+    {% if is_still_loading %}
+    <script>
+        // Refresh page automatically if any price was missing
+        setTimeout(function() {
+            window.location.reload();
+        }, 2000);
+    </script>
+    {% endif %}
 
     <script>
         const selectedTf = "{{ selected_tf }}";
