@@ -15,76 +15,63 @@ DEFAULT_WATCHLIST = [
     "ARBUSDT", "OPUSDT", "INJUSDT", "TIAUSDT"
 ]
 
-# Shared Thread-Safe In-Memory Cache Store
+# Shared In-Memory Cache Store
 CACHE_STORE = {
-    "rows": {
-        "ALL": [],
-        "3M": [],
-        "5M": [],
-        "15M": [],
-        "1H": [],
-        "4H": []
-    },
-    "diagnostics": {
-        "ALL": {"symbols_scanned": 0, "matches": 0, "rejections": {}},
-        "5M": {"symbols_scanned": 0, "matches": 0, "rejections": {}},
-        "15M": {"symbols_scanned": 0, "matches": 0, "rejections": {}},
-        "1H": {"symbols_scanned": 0, "matches": 0, "rejections": {}}
-    },
+    "rows": {},
+    "diagnostics": {},
     "last_updated": 0,
     "is_scanning": False
 }
 
 cache_lock = threading.Lock()
+background_started = False
 
 
-def background_scanner_worker():
-    """Background scanner thread that updates the cache every 45s without blocking Flask."""
+def background_scanner_loop():
+    """Background engine loop that runs every 45s."""
     global CACHE_STORE
-    print("[ABOUT TO BREAK RANGE DETECTOR] Background Thread Engine Started.", flush=True)
-
-    # Initial brief pause to allow Flask/Gunicorn to fully bind to HTTP port first
-    time.sleep(2)
-
-    timeframes = ["ALL", "5M", "15M", "1H"]
+    print("[ABOUT TO BREAK RANGE DETECTOR] Background Scanner Engine Running.", flush=True)
 
     while True:
         try:
             with cache_lock:
                 CACHE_STORE["is_scanning"] = True
 
-            print("[ABOUT TO BREAK RANGE DETECTOR] Running Background Scan...", flush=True)
+            print("[ABOUT TO BREAK RANGE DETECTOR] Running Market Scan Cycle...", flush=True)
 
+            # Perform scan across timeframes
             temp_rows = {}
             temp_diag = {}
-
-            for tf in timeframes:
+            for tf in ["ALL", "5M", "15M", "1H"]:
                 rows, diag = run_scanner_pipeline(DEFAULT_WATCHLIST, tf)
                 temp_rows[tf] = rows or []
                 temp_diag[tf] = diag or {"symbols_scanned": 0, "matches": 0, "rejections": {}}
 
-            # Thread-safe atomic update
             with cache_lock:
                 CACHE_STORE["rows"] = temp_rows
                 CACHE_STORE["diagnostics"] = temp_diag
                 CACHE_STORE["last_updated"] = time.time()
                 CACHE_STORE["is_scanning"] = False
 
-            print(f"[ABOUT TO BREAK RANGE DETECTOR] Scan complete. Found {len(temp_rows.get('ALL', []))} matches.", flush=True)
+            print(f"[ABOUT TO BREAK RANGE DETECTOR] Scan complete. Matches: {len(temp_rows.get('ALL', []))}", flush=True)
 
         except Exception as e:
-            print(f"[ERROR] Exception in Background Scanner: {e}", flush=True)
+            print(f"[ERROR] Scanner Loop Error: {e}", flush=True)
             traceback.print_exc()
             with cache_lock:
                 CACHE_STORE["is_scanning"] = False
 
-        # Wait 45 seconds before next cycle
         time.sleep(45)
 
 
-# Start background worker thread
-scanner_thread = threading.Thread(target=background_scanner_worker, daemon=True)
-scanner_thread.start()
+@app.before_request
+def start_background_scanner_once():
+    """Starts the scanner thread lazily on the first incoming HTTP request from Render."""
+    global background_started
+    if not background_started:
+        background_started = True
+        t = threading.Thread(target=background_scanner_loop, daemon=True)
+        t.start()
 
 
 @app.template_filter("smart_price")
@@ -106,7 +93,6 @@ def smart_price(value):
 
 @app.route("/", methods=["GET"])
 def index():
-    """Returns HTML instantly from cache without waiting for the scanner."""
     target_tf = request.args.get("tf", "ALL").upper()
     if target_tf not in ["ALL", "3M", "5M", "15M", "1H", "4H"]:
         target_tf = "ALL"
@@ -129,20 +115,18 @@ def index():
 
 @app.route("/api/scan", methods=["GET"])
 def api_scan():
-    """Zero-flicker background endpoint for JavaScript updates."""
     target_tf = request.args.get("tf", "ALL").upper()
     if target_tf not in ["ALL", "3M", "5M", "15M", "1H", "4H"]:
         target_tf = "ALL"
 
     with cache_lock:
-        data = {
+        return jsonify({
             "success": True,
             "rows": CACHE_STORE["rows"].get(target_tf, []),
             "diagnostics": CACHE_STORE["diagnostics"].get(target_tf, {}),
             "last_updated": CACHE_STORE["last_updated"],
             "is_scanning": CACHE_STORE["is_scanning"]
-        }
-    return jsonify(data)
+        })
 
 
 @app.route("/health", methods=["GET"])
