@@ -1,240 +1,206 @@
-import time
+import math
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from detector import detect_range, analyze_buyer_seller_battle, calculate_boundary_readiness
+import pandas as pd
+import numpy as np
 
-OKX_BASE_URL = "https://www.okx.com/api/v5/market/candles"
-MEXC_BASE_URL = "https://contract.mexc.com/api/v1/contract/kline"
-
-OKX_TF_MAP = {"3M": "3m", "5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
-MEXC_TF_MAP = {"3M": "Min3", "5M": "Min5", "15M": "Min15", "1H": "Min60", "4H": "Hour4"}
-
-
-def fetch_okx_klines(symbol: str, timeframe: str, limit: int = 150):
+# MEXC/OKX OHLCV Data Fetcher (Spot/Contract REST API)
+def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
+    """Fetches pure OHLCV candle data from public REST endpoints."""
     clean_sym = symbol.replace("_", "").replace("-", "").upper()
-    inst_id = f"{clean_sym[:-4]}-USDT-SWAP" if clean_sym.endswith("USDT") else f"{clean_sym}-USDT-SWAP"
-    bar = OKX_TF_MAP.get(timeframe.upper(), "5m")
-    params = {"instId": inst_id, "bar": bar, "limit": str(limit)}
-
+    
+    tf_map_mexc = {"3M": "3m", "5M": "5m", "15M": "15m", "1H": "60m", "4H": "4h"}
+    interval = tf_map_mexc.get(timeframe, "15m")
+    
+    url = f"https://api.mexc.com/api/v3/klines?symbol={clean_sym}&interval={interval}&limit={limit}"
+    
     try:
-        res = requests.get(OKX_BASE_URL, params=params, timeout=5)
-        res.raise_for_status()
-        data = res.json()
-        if data.get("code") != "0" or "data" not in data or not data["data"]:
-            spot_inst_id = f"{clean_sym[:-4]}-USDT" if clean_sym.endswith("USDT") else clean_sym
-            params["instId"] = spot_inst_id
-            res = requests.get(OKX_BASE_URL, params=params, timeout=5)
-            data = res.json()
-
-        if data.get("code") != "0" or "data" not in data or not data["data"]:
-            return [], None
-
-        candles = []
-        for item in reversed(data["data"]):
-            candles.append({
-                "open": float(item[1]),
-                "high": float(item[2]),
-                "low": float(item[3]),
-                "close": float(item[4]),
-                "volume": float(item[5])
-            })
-        return candles, "OKX"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data, columns=[
+                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                    'close_time', 'quote_vol', 'trades', 'tb_base_vol', 'tb_quote_vol', 'ignore'
+                ])
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = df[col].astype(float)
+                return df
     except Exception:
-        return [], None
+        pass
+    
+    return pd.DataFrame()
 
 
-def fetch_mexc_klines(symbol: str, timeframe: str, limit: int = 150):
-    clean_sym = symbol.replace("_", "").replace("-", "").upper()
-    formatted_symbol = f"{clean_sym[:-4]}_USDT" if clean_sym.endswith("USDT") else clean_sym
-    interval = MEXC_TF_MAP.get(timeframe.upper(), "Min5")
-    end_time = int(time.time())
+def analyze_range_structure(df: pd.DataFrame):
+    """
+    Analyzes consolidation range structure using pure OHLCV data.
+    Evaluates both Bullish Breakout Pressure (at Resistance) and 
+    Bearish Breakdown Pressure (at Support).
+    """
+    if df.empty or len(df) < 20:
+        return None, "DATA UNAVAILABLE"
 
-    minutes = 5
-    if "3" in interval: minutes = 3
-    elif "15" in interval: minutes = 15
-    elif "60" in interval: minutes = 60
-    elif "Hour4" in interval: minutes = 240
+    # Identify horizontal Support and Resistance bounds from recent range
+    recent_df = df.tail(30).copy()
+    resistance = recent_df['high'].max()
+    support = recent_df['low'].min()
+    range_height = resistance - support
 
-    start_time = end_time - (minutes * 60 * limit)
-    url = f"{MEXC_BASE_URL}/{formatted_symbol}"
-    params = {"interval": interval, "start": start_time, "end": end_time}
+    if range_height <= 0:
+        return None, "NO RANGE STRUCTURE"
 
-    try:
-        res = requests.get(url, params=params, timeout=5)
-        res.raise_for_status()
-        data = res.json()
-        if not data.get("success", False) or "data" not in data:
-            return [], None
+    curr_close = recent_df['close'].iloc[-1]
+    
+    # Distance to boundaries (%)
+    dist_to_res_pct = (resistance - curr_close) / range_height
+    dist_to_sup_pct = (curr_close - support) / range_height
 
-        kline_data = data["data"]
-        opens, highs, lows, closes, volumes = (
-            kline_data.get("open", []), kline_data.get("high", []),
-            kline_data.get("low", []), kline_data.get("close", []), kline_data.get("vol", [])
-        )
-        length = min(len(opens), len(highs), len(lows), len(closes), len(volumes))
-        candles = []
-        for i in range(length):
-            candles.append({
-                "open": float(opens[i]), "high": float(highs[i]),
-                "low": float(lows[i]), "close": float(closes[i]), "volume": float(volumes[i])
-            })
-        return candles, "MEXC"
-    except Exception:
-        return [], None
+    # Analyze last 10 candles for structure & volume behavior
+    tail_candles = recent_df.tail(10)
 
+    # 1. Pure OHLCV Buyer vs Seller Volume Power Calculation
+    total_buyer_vol = 0.0
+    total_seller_vol = 0.0
+    total_vol = 0.0
 
-def fetch_klines(symbol: str, timeframe: str, limit: int = 150):
-    candles, source = fetch_okx_klines(symbol, timeframe, limit)
-    if candles and len(candles) >= 20:
-        return candles, source
+    for idx, row in tail_candles.iterrows():
+        c_range = row['high'] - row['low']
+        v = row['volume']
+        if c_range > 0:
+            b_ratio = (row['close'] - row['low']) / c_range
+            s_ratio = (row['high'] - row['close']) / c_range
+            total_buyer_vol += v * b_ratio
+            total_seller_vol += v * s_ratio
+        else:
+            total_buyer_vol += v * 0.5
+            total_seller_vol += v * 0.5
+        total_vol += v
 
-    candles, source = fetch_mexc_klines(symbol, timeframe, limit)
-    if candles and len(candles) >= 20:
-        return candles, source
+    buyer_power = round((total_buyer_vol / total_vol * 100), 1) if total_vol > 0 else 50.0
+    seller_power = round(100.0 - buyer_power, 1)
 
-    return [], None
+    # 2. Candle Compression & Slope Analysis
+    lows = tail_candles['low'].values
+    highs = tail_candles['high'].values
+    
+    # Higher Lows (Bullish structure check)
+    higher_lows_count = sum(1 for i in range(1, len(lows)) if lows[i] >= lows[i-1])
+    higher_lows_ratio = higher_lows_count / (len(lows) - 1)
 
+    # Lower Highs (Bearish structure check)
+    lower_highs_count = sum(1 for i in range(1, len(highs)) if highs[i] <= highs[i-1])
+    lower_highs_ratio = lower_highs_count / (len(highs) - 1)
 
-def _process_symbol_tf(symbol: str, tf: str):
-    """Helper function to process a single symbol + timeframe pair."""
-    candles, source = fetch_klines(symbol, tf)
-    if not candles or len(candles) < 20:
-        return None, "FETCH_FAILED_OR_INSUFFICIENT_BARS"
+    # 3. Pullback Depth Analysis
+    recent_min_low = tail_candles['low'].min()
+    recent_max_high = tail_candles['high'].max()
+    
+    res_pullback_depth = (resistance - recent_min_low) / range_height  # Shallow pullback = Bullish
+    sup_pullback_depth = (recent_max_high - support) / range_height     # Shallow bounce = Bearish
 
-    try:
-        range_result = detect_range(candles, tf)
-    except Exception:
-        return None, "DETECTOR_EXCEPTION"
+    # Determine Directional Bias & Calculate Readiness Score
+    # Check Bullish Setup (At Resistance)
+    is_near_res = dist_to_res_pct <= 0.35
+    is_near_sup = dist_to_sup_pct <= 0.35
 
-    if not range_result or not range_result.get("is_valid_range", False):
-        return None, range_result.get("rejection_reason", "NO_RANGE_DETECTED") if range_result else "NO_RANGE_DETECTED"
+    bullish_readiness = 0
+    bearish_readiness = 0
 
-    curr_close = range_result.get("curr_close", candles[-1]["close"])
-    support = float(range_result.get("support"))
-    resistance = float(range_result.get("resistance"))
+    # Calculate Bullish Score
+    if is_near_res:
+        proximity_score = max(0, (0.35 - dist_to_res_pct) / 0.35) * 35  # Max 35 pts
+        power_score = max(0, (buyer_power - 40) / 60) * 30                # Max 30 pts
+        structure_score = (higher_lows_ratio * 20)                        # Max 20 pts
+        depth_score = (1.0 - min(1.0, res_pullback_depth)) * 15           # Max 15 pts
+        bullish_readiness = int(proximity_score + power_score + structure_score + depth_score)
 
-    if support >= resistance:
-        return None, "INVALID_SUPPORT_RESISTANCE"
+    # Calculate Bearish Score
+    if is_near_sup:
+        proximity_score = max(0, (0.35 - dist_to_sup_pct) / 0.35) * 35  # Max 35 pts
+        power_score = max(0, (seller_power - 40) / 60) * 30               # Max 30 pts
+        structure_score = (lower_highs_ratio * 20)                        # Max 20 pts
+        depth_score = (1.0 - min(1.0, sup_pullback_depth)) * 15           # Max 15 pts
+        bearish_readiness = int(proximity_score + power_score + structure_score + depth_score)
 
-    readiness_score, readiness_label = calculate_boundary_readiness(curr_close, support, resistance)
-
-    if readiness_score < 20:
-        return None, "READINESS_BELOW_THRESHOLD"
-
-    dist_to_res_pct = round(((resistance - curr_close) / curr_close) * 100.0, 2)
-    dist_to_supp_pct = round(((curr_close - support) / curr_close) * 100.0, 2)
-
-    volumes = [c["volume"] for c in candles]
-    closes = [c["close"] for c in candles]
-    battle = analyze_buyer_seller_battle(range_result, volumes, closes)
-
-    buyer_p = battle.get("buyer_power", 50)
-    seller_p = battle.get("seller_power", 50)
-
-    if buyer_p >= 58:
+    # Evaluate Winner
+    if bullish_readiness >= bearish_readiness and bullish_readiness > 0:
         break_direction = "BULLISH"
         break_symbol = "▲"
-    elif seller_p >= 58:
+        direction_label = "Bullish Breakout Candidate"
+        readiness_score = min(99, max(0, bullish_readiness))
+        
+        if higher_lows_ratio >= 0.6 and dist_to_res_pct <= 0.15:
+            structure_type = "ASCENDING TRIANGLE"
+        elif dist_to_res_pct <= 0.1:
+            structure_type = "RESISTANCE ABSORPTION"
+        else:
+            structure_type = "BULLISH COMPRESSION"
+            
+    elif bearish_readiness > bullish_readiness:
         break_direction = "BEARISH"
         break_symbol = "▼"
+        direction_label = "Bearish Breakdown Candidate"
+        readiness_score = min(99, max(0, bearish_readiness))
+        
+        if lower_highs_ratio >= 0.6 and dist_to_sup_pct <= 0.15:
+            structure_type = "DESCENDING TRIANGLE"
+        elif dist_to_sup_pct <= 0.1:
+            structure_type = "SUPPORT ABSORPTION"
+        else:
+            structure_type = "BEARISH COMPRESSION"
+            
     else:
         break_direction = "NEUTRAL"
         break_symbol = "↔"
+        direction_label = "Consolidation"
+        readiness_score = 15
+        structure_type = "RANGE CHOP"
 
-    if readiness_score >= 85 and abs(buyer_p - seller_p) >= 20:
-        confidence = "HIGH"
-    elif readiness_score >= 60:
-        confidence = "MEDIUM"
-    else:
-        confidence = "LOW"
-
-    badge_status = None
-    if readiness_score >= 95:
-        badge_status = "IMMENSE"
-    elif readiness_score >= 80:
-        badge_status = "NEAR"
-
-    struct_type = range_result.get("structure_type", "HORIZONTAL")
-    if struct_type == "ASCENDING TRIANGLE":
-        explanation = "Higher lows pressing against horizontal resistance. Dynamic bullish pressure building for an upward breakout."
-    elif struct_type == "DESCENDING TRIANGLE":
-        explanation = "Lower highs pressing against horizontal support. Heavy sell pressure threatening a breakdown."
-    else:
-        explanation = "Tight sideways consolidation between key support and resistance boundaries. Volatility compression detected."
-
-    pattern_age = len(candles)
-    last_candle_change = round(((candles[-1]["close"] - candles[-2]["close"]) / candles[-2]["close"]) * 100, 2)
-    vol_avg = sum(volumes[-5:]) / 5.0
-    vol_trend = "EXPANDING" if volumes[-1] > vol_avg else "CONTRACTING"
-    risk_reward = round((resistance - curr_close) / max((curr_close - support), 1e-6), 2)
-
-    match = {
-        "symbol": symbol,
-        "timeframe": tf,
-        "exchange": source or "OKX",
-        "structure_type": struct_type,
+    result = {
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        "exchange": "MEXC/OKX",
         "curr_close": curr_close,
-        "support": support,
-        "resistance": resistance,
-        "dist_res_pct": dist_to_res_pct,
-        "dist_supp_pct": dist_to_supp_pct,
-        "readiness_score": readiness_score,
-        "readiness_display": readiness_label,
-        "badge_status": badge_status,
-        "buyer_power": buyer_p,
-        "seller_power": seller_p,
+        "support": round(support, 6),
+        "resistance": round(resistance, 6),
+        "structure_type": structure_type,
+        "direction_label": direction_label,
         "break_direction": break_direction,
         "break_symbol": break_symbol,
-        "confidence": confidence,
-        "explanation": explanation,
-        "pattern_age": pattern_age,
-        "last_change": last_candle_change,
-        "vol_trend": vol_trend,
-        "risk_reward": risk_reward
+        "readiness_score": readiness_score,
+        "readiness_display": f"{readiness_score}%",
+        "buyer_power": buyer_power,
+        "seller_power": seller_power
     }
-    return match, None
+
+    return result, None
 
 
-def run_scanner_pipeline(watchlist, target_tf=None):
-    if not target_tf or target_tf.upper() == "ALL":
-        timeframes_to_scan = ["5M", "15M", "1H"]
-    else:
-        timeframes_to_scan = [target_tf.upper()]
+def _process_symbol_tf(symbol: str, tf: str):
+    """Processes a single symbol and timeframe pair using OHLCV data."""
+    df = fetch_ohlcv(symbol, tf)
+    if df.empty:
+        return None, "DATA UNAVAILABLE"
+    return analyze_range_structure(df)
 
+
+def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
+    """Scans requested symbols using pure OHLCV range detection."""
     results = []
-    diagnostics = {
-        "symbols_downloaded": 0,
-        "symbols_scanned": 0,
-        "rejections": {},
-        "matches": 0
-    }
+    diagnostics = {"symbols_scanned": len(symbols), "symbols_downloaded": 0, "rejections": {}}
 
-    print("\n==================================================", flush=True)
-    print(f"[ABOUT TO BREAK RANGE DETECTOR] Scanning {len(watchlist)} symbols: {timeframes_to_scan}", flush=True)
-    print("==================================================", flush=True)
+    tfs_to_run = ["3M", "5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
 
-    tasks = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        for symbol in watchlist:
-            for tf in timeframes_to_scan:
-                diagnostics["symbols_scanned"] += 1
-                tasks.append(executor.submit(_process_symbol_tf, symbol, tf))
-
-        for future in as_completed(tasks):
-            match, rejection_reason = future.result()
+    for sym in symbols:
+        for tf in tfs_to_run:
+            match, err = _process_symbol_tf(sym, tf)
             if match:
                 diagnostics["symbols_downloaded"] += 1
-                results.append(match)
-            elif rejection_reason:
-                diagnostics["rejections"][rejection_reason] = diagnostics["rejections"].get(rejection_reason, 0) + 1
+                # Filter for candidates meeting the minimum threshold
+                if match["readiness_score"] >= 20:
+                    results.append(match)
+            else:
+                diagnostics["rejections"][err] = diagnostics["rejections"].get(err, 0) + 1
 
-    # Sort by readiness score (highest first)
-    results.sort(key=lambda x: x["readiness_score"], reverse=True)
-
-    # Assign rank numbers #1, #2, #3...
-    for index, item in enumerate(results, 1):
-        item["rank"] = f"#{index}"
-
-    diagnostics["matches"] = len(results)
-    print(f"[ABOUT TO BREAK RANGE DETECTOR] Scanner complete. Found {len(results)} ranked matches.", flush=True)
+    results.sort(key=lambda x: -x["readiness_score"])
     return results, diagnostics
