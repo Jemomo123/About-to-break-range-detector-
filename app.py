@@ -1,19 +1,71 @@
 import os
+import json
 import time
 import threading
 import traceback
 from flask import Flask, render_template, request, jsonify
 from scanner import run_scanner_pipeline, _process_symbol_tf
-from watchlist_db import (
-    get_watchlist, add_symbol_to_watchlist,
-    remove_symbol_from_watchlist, toggle_pin_watchlist
-)
 import config
 
-# ALWAYS LOCK TO EXACT 25 COINS FROM CONFIG
+# Project Name: ABOUT TO BREAK RANGE DETECTOR
+# Scanner pool is strictly locked to DEFAULT_WATCHLIST in config.py
 SCANNER_WATCHLIST = config.DEFAULT_WATCHLIST
 TIMEFRAMES = getattr(config, "TIMEFRAMES", ["3M", "5M", "15M", "1H", "4H"])
 
+WATCHLIST_FILE = "watchlist_db.json"
+file_lock = threading.Lock()
+
+# --- Embedded Persistent Watchlist Storage ---
+def get_watchlist():
+    with file_lock:
+        if not os.path.exists(WATCHLIST_FILE):
+            return []
+        try:
+            with open(WATCHLIST_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+def save_watchlist(data):
+    with file_lock:
+        try:
+            with open(WATCHLIST_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"[ERROR] Could not save watchlist: {e}")
+
+def add_symbol_to_watchlist(symbol: str, timeframe: str = "15M"):
+    clean_sym = symbol.replace("_", "").replace("-", "").strip().upper()
+    if not clean_sym.endswith("USDT") and not clean_sym.endswith("USDC"):
+        clean_sym += "USDT"
+
+    items = get_watchlist()
+    for item in items:
+        if item["symbol"] == clean_sym and item["timeframe"] == timeframe:
+            return items
+
+    items.append({"symbol": clean_sym, "timeframe": timeframe, "pinned": False})
+    save_watchlist(items)
+    return items
+
+def remove_symbol_from_watchlist(symbol: str, timeframe: str):
+    items = get_watchlist()
+    items = [i for i in items if not (i["symbol"] == symbol and i["timeframe"] == timeframe)]
+    save_watchlist(items)
+    return items
+
+def toggle_pin_watchlist(symbol: str, timeframe: str):
+    items = get_watchlist()
+    for item in items:
+        if item["symbol"] == symbol and item["timeframe"] == timeframe:
+            item["pinned"] = not item.get("pinned", False)
+            break
+    
+    items.sort(key=lambda x: (not x.get("pinned", False), x["symbol"]))
+    save_watchlist(items)
+    return items
+
+# --- Flask Web Application ---
 app = Flask(__name__)
 
 CACHE_STORE = {
@@ -29,7 +81,7 @@ start_scanner_event = threading.Event()
 
 
 def evaluate_watchlist_items():
-    """Scans personal watchlist items without removing any symbols."""
+    """Scans user personal watchlist items without removing any symbols."""
     user_watchlist = get_watchlist()
     enriched_watchlist = []
 
@@ -76,10 +128,10 @@ def background_scanner_loop():
             with cache_lock:
                 CACHE_STORE["is_scanning"] = True
 
-            # 1. Update Personal Watchlist Metrics
+            # 1. Update Persistent Watchlist Metrics
             wl_results = evaluate_watchlist_items()
 
-            # 2. Run Scanner Engine ALWAYS using the 25 mandatory coins
+            # 2. Run Scanner Engine using the mandatory 25 coins from config.py
             all_results, all_diag = run_scanner_pipeline(SCANNER_WATCHLIST, "ALL")
 
             rows_by_tf = {"ALL": all_results}
@@ -90,7 +142,7 @@ def background_scanner_loop():
             for tf_key in ["ALL"] + TIMEFRAMES:
                 matching_rows = rows_by_tf.get(tf_key, [])
                 diag_by_tf[tf_key] = {
-                    "symbols_scanned": 25,  # Strictly locked to 25
+                    "symbols_scanned": len(SCANNER_WATCHLIST),
                     "symbols_downloaded": all_diag.get("symbols_downloaded", 0),
                     "matches": len(matching_rows),
                     "rejections": all_diag.get("rejections", {})
@@ -102,8 +154,6 @@ def background_scanner_loop():
                 CACHE_STORE["diagnostics"] = diag_by_tf
                 CACHE_STORE["last_updated"] = time.time()
                 CACHE_STORE["is_scanning"] = False
-
-            print(f"[ABOUT TO BREAK RANGE DETECTOR] Scanned 25 symbols. Matches found: {len(all_results)}", flush=True)
 
         except Exception as e:
             print(f"[ERROR] Scanner Loop Error: {e}", flush=True)
