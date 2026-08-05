@@ -69,9 +69,9 @@
                             </td>
                             <td class="fw-bold text-white">{{ item.symbol }}</td>
                             <td><span class="badge bg-secondary">{{ item.timeframe }}</span></td>
-                            <td>{{ '$' ~ item.curr_close if item.curr_close != 'N/A' else 'N/A' }}</td>
-                            <td class="text-success">{{ '$' ~ item.support if item.support != 'N/A' else 'N/A' }}</td>
-                            <td class="text-danger">{{ '$' ~ item.resistance if item.resistance != 'N/A' else 'N/A' }}</td>
+                            <td>{{ '$' ~ item.curr_close if item.curr_close not in ['Loading...', 'N/A'] else item.curr_close }}</td>
+                            <td>{{ '$' ~ item.support if item.support != '...' else '...' }}</td>
+                            <td>{{ '$' ~ item.resistance if item.resistance != '...' else '...' }}</td>
                             <td>
                                 <span class="badge {{ 'badge-bullish' if item.break_direction == 'BULLISH' else ('badge-bearish' if item.break_direction == 'BEARISH' else 'bg-secondary') }}">
                                     {{ item.break_symbol }} {{ item.direction_label }}
@@ -133,12 +133,12 @@
         </div>
     </div>
 
-    {% if is_still_loading %}
+    {% if is_loading %}
     <script>
-        // Refresh page automatically if any price was missing
+        // Auto-refresh page in 3 seconds to populate live data as background thread finishes
         setTimeout(function() {
             window.location.reload();
-        }, 2000);
+        }, 3000);
     </script>
     {% endif %}
 
