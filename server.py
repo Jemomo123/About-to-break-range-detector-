@@ -1,10 +1,9 @@
 # server.py
 # =====================================================================
-# GUNICORN / RENDER ENTRY POINT WITH BACKGROUND WORKER (VERSION 1.3.0)
+# GUNICORN / RENDER ENTRY POINT (VERSION 1.0 STABLE)
 # =====================================================================
 
 import threading
-import time
 from app import app, update_cache_job
 
 # Start background scanner thread on app startup
