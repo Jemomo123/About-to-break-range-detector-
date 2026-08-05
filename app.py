@@ -27,9 +27,10 @@ def fetch_single_safe(sym, tf):
         print(f"Fetch error for {sym} {tf}: {e}")
         return None
 
-def background_worker():
+# Background worker (V1: only 5M, 15M, 1H)
+def update_cache_job():
     while True:
-        for tf in ["15M", "5M", "1H", "4H"]:
+        for tf in ["5M", "15M", "1H"]:
             tasks = [sym for sym in DEFAULT_WATCHLIST]
             with ThreadPoolExecutor(max_workers=5) as executor:
                 future_map = {executor.submit(fetch_single_safe, sym, tf): sym for sym in tasks}
@@ -43,7 +44,7 @@ def background_worker():
         time.sleep(15)
 
 # Start background worker on boot
-threading.Thread(target=background_worker, daemon=True).start()
+threading.Thread(target=update_cache_job, daemon=True).start()
 
 @app.route("/")
 def index():
@@ -53,7 +54,6 @@ def index():
     watchlist_rows = []
     is_loading = False
 
-    # STRICTLY READ FROM CACHE - ZERO NETWORK CALLS HERE (RETURNS IN 0.01s)
     with CACHE_LOCK:
         for item in WATCHLIST:
             key = f"{item['symbol']}_{active_tf}"
