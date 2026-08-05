@@ -17,14 +17,19 @@ WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEF
 
 @app.route("/")
 def index():
-    # Defaults to 15M on page load (25 API requests instead of 100)
+    # Load HTML template instantly so Render port check passes in 0.01s
+    selected_tf = request.args.get("tf", "15M").upper()
+    return render_template("index.html", selected_tf=selected_tf)
+
+@app.route("/api/data")
+def get_data():
     selected_tf = request.args.get("tf", "15M").upper()
     
-    # 1. Fetch Permanent Watchlist Rows in Parallel
+    # 1. Fetch Watchlist Rows in Parallel
     watchlist_rows = []
     tasks = [(item, item["timeframe"] if selected_tf == "ALL" else selected_tf) for item in WATCHLIST]
 
-    with ThreadPoolExecutor(max_workers=15) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         future_map = {executor.submit(_process_symbol_tf, item["symbol"], tf): (item, tf) for item, tf in tasks}
         for future in as_completed(future_map):
             item, tf = future_map[future]
@@ -39,7 +44,7 @@ def index():
                     "curr_close": "N/A",
                     "support": "N/A",
                     "resistance": "N/A",
-                    "direction_label": "Loading...",
+                    "direction_label": "No Data",
                     "break_direction": "NEUTRAL",
                     "break_symbol": "↔",
                     "readiness_display": "0%",
@@ -48,19 +53,17 @@ def index():
                     "pinned": item["pinned"]
                 })
 
-    # Restore initial list order
+    # Preserve Watchlist Order
     symbol_order = {sym: i for i, sym in enumerate(DEFAULT_WATCHLIST)}
     watchlist_rows.sort(key=lambda x: symbol_order.get(x["symbol"], 999))
 
-    # 2. Run Scanner across all 25 tickers
+    # 2. Fetch Scanner Candidates
     scanner_results, _ = run_scanner_pipeline(DEFAULT_WATCHLIST, selected_tf)
 
-    return render_template(
-        "index.html",
-        selected_tf=selected_tf,
-        watchlist_rows=watchlist_rows,
-        rows=scanner_results
-    )
+    return jsonify({
+        "watchlist": watchlist_rows,
+        "scanner": scanner_results
+    })
 
 @app.route("/api/watchlist/add", methods=["POST"])
 def add_watchlist():
