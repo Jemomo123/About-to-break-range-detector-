@@ -15,63 +15,84 @@ DEFAULT_WATCHLIST = [
     "ARBUSDT", "OPUSDT", "INJUSDT", "TIAUSDT"
 ]
 
-# Shared In-Memory Cache Store
 CACHE_STORE = {
-    "rows": {},
-    "diagnostics": {},
+    "rows": {"ALL": [], "3M": [], "5M": [], "15M": [], "1H": [], "4H": []},
+    "diagnostics": {"ALL": {}, "3M": {}, "5M": {}, "15M": {}, "1H": {}, "4H": {}},
     "last_updated": 0,
     "is_scanning": False
 }
 
 cache_lock = threading.Lock()
-background_started = False
+start_scanner_event = threading.Event()
 
 
 def background_scanner_loop():
-    """Background engine loop that runs every 45s."""
+    """Background scanner thread."""
     global CACHE_STORE
-    print("[ABOUT TO BREAK RANGE DETECTOR] Background Scanner Engine Running.", flush=True)
+    
+    # Block background scanner until Render binds to port 10000
+    print("[ABOUT TO BREAK RANGE DETECTOR] Engine waiting for HTTP port binding...", flush=True)
+    start_scanner_event.wait()
+    
+    # 5-second initial delay after port bind to guarantee Render detects the open port
+    time.sleep(5)
+    print("[ABOUT TO BREAK RANGE DETECTOR] Port verified open. Starting scanner loop...", flush=True)
 
     while True:
         try:
             with cache_lock:
                 CACHE_STORE["is_scanning"] = True
 
-            print("[ABOUT TO BREAK RANGE DETECTOR] Running Market Scan Cycle...", flush=True)
+            # Single scanner execution pass for ALL timeframes
+            all_results, all_diag = run_scanner_pipeline(DEFAULT_WATCHLIST, "ALL")
 
-            # Perform scan across timeframes
-            temp_rows = {}
-            temp_diag = {}
-            for tf in ["ALL", "5M", "15M", "1H"]:
-                rows, diag = run_scanner_pipeline(DEFAULT_WATCHLIST, tf)
-                temp_rows[tf] = rows or []
-                temp_diag[tf] = diag or {"symbols_scanned": 0, "matches": 0, "rejections": {}}
+            # Slice matches into individual timeframe buckets for fast filtering
+            rows_by_tf = {
+                "ALL": all_results,
+                "5M": [r for r in all_results if r.get("timeframe") == "5M"],
+                "15M": [r for r in all_results if r.get("timeframe") == "15M"],
+                "1H": [r for r in all_results if r.get("timeframe") == "1H"],
+                "3M": [r for r in all_results if r.get("timeframe") == "3M"],
+                "4H": [r for r in all_results if r.get("timeframe") == "4H"]
+            }
+
+            diag_by_tf = {
+                "ALL": all_diag,
+                "5M": {**all_diag, "matches": len(rows_by_tf["5M"])},
+                "15M": {**all_diag, "matches": len(rows_by_tf["15M"])},
+                "1H": {**all_diag, "matches": len(rows_by_tf["1H"])},
+                "3M": {**all_diag, "matches": len(rows_by_tf["3M"])},
+                "4H": {**all_diag, "matches": len(rows_by_tf["4H"])}
+            }
 
             with cache_lock:
-                CACHE_STORE["rows"] = temp_rows
-                CACHE_STORE["diagnostics"] = temp_diag
+                CACHE_STORE["rows"] = rows_by_tf
+                CACHE_STORE["diagnostics"] = diag_by_tf
                 CACHE_STORE["last_updated"] = time.time()
                 CACHE_STORE["is_scanning"] = False
 
-            print(f"[ABOUT TO BREAK RANGE DETECTOR] Scan complete. Matches: {len(temp_rows.get('ALL', []))}", flush=True)
+            print(f"[ABOUT TO BREAK RANGE DETECTOR] Scan complete. Updated cache with {len(all_results)} matches.", flush=True)
 
         except Exception as e:
-            print(f"[ERROR] Scanner Loop Error: {e}", flush=True)
+            print(f"[ERROR] Background Scanner Loop Error: {e}", flush=True)
             traceback.print_exc()
             with cache_lock:
                 CACHE_STORE["is_scanning"] = False
 
+        # Sleep 45s between background scans
         time.sleep(45)
 
 
+# Spawn background worker daemon
+scanner_thread = threading.Thread(target=background_scanner_loop, daemon=True)
+scanner_thread.start()
+
+
 @app.before_request
-def start_background_scanner_once():
-    """Starts the scanner thread lazily on the first incoming HTTP request from Render."""
-    global background_started
-    if not background_started:
-        background_started = True
-        t = threading.Thread(target=background_scanner_loop, daemon=True)
-        t.start()
+def signal_port_ready():
+    """Unblocks the background scanner when Render sends its first HTTP health ping."""
+    if not start_scanner_event.is_set():
+        start_scanner_event.set()
 
 
 @app.template_filter("smart_price")
