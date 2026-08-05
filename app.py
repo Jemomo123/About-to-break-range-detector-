@@ -17,23 +17,25 @@ WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEF
 
 @app.route("/")
 def index():
-    # Load HTML template instantly so Render port check passes in 0.01s
-    selected_tf = request.args.get("tf", "15M").upper()
-    return render_template("index.html", selected_tf=selected_tf)
-
-@app.route("/api/data")
-def get_data():
+    # Default to 15M to prevent Render timeout and API rate limits
     selected_tf = request.args.get("tf", "15M").upper()
     
-    # 1. Fetch Watchlist Rows in Parallel
     watchlist_rows = []
     tasks = [(item, item["timeframe"] if selected_tf == "ALL" else selected_tf) for item in WATCHLIST]
 
+    # Fetch Watchlist Data safely
     with ThreadPoolExecutor(max_workers=10) as executor:
         future_map = {executor.submit(_process_symbol_tf, item["symbol"], tf): (item, tf) for item, tf in tasks}
+        
         for future in as_completed(future_map):
             item, tf = future_map[future]
-            match, _ = future.result()
+            try:
+                # If an exchange fails, catch the error so it doesn't crash the app
+                match, _ = future.result()
+            except Exception as e:
+                print(f"Exchange error for {item['symbol']}: {e}")
+                match = None
+
             if match:
                 match["pinned"] = item["pinned"]
                 watchlist_rows.append(match)
@@ -41,29 +43,35 @@ def get_data():
                 watchlist_rows.append({
                     "symbol": item["symbol"],
                     "timeframe": tf,
-                    "curr_close": "N/A",
+                    "curr_close": "ERROR",
                     "support": "N/A",
                     "resistance": "N/A",
-                    "direction_label": "No Data",
+                    "direction_label": "API Blocked",
                     "break_direction": "NEUTRAL",
-                    "break_symbol": "↔",
+                    "break_symbol": "⚠️",
                     "readiness_display": "0%",
                     "buyer_power": 50.0,
                     "seller_power": 50.0,
                     "pinned": item["pinned"]
                 })
 
-    # Preserve Watchlist Order
+    # Restore correct watchlist order
     symbol_order = {sym: i for i, sym in enumerate(DEFAULT_WATCHLIST)}
     watchlist_rows.sort(key=lambda x: symbol_order.get(x["symbol"], 999))
 
-    # 2. Fetch Scanner Candidates
-    scanner_results, _ = run_scanner_pipeline(DEFAULT_WATCHLIST, selected_tf)
+    # Safely fetch scanner data
+    try:
+        scanner_results, _ = run_scanner_pipeline(DEFAULT_WATCHLIST, selected_tf)
+    except Exception as e:
+        print(f"Scanner crash caught: {e}")
+        scanner_results = []
 
-    return jsonify({
-        "watchlist": watchlist_rows,
-        "scanner": scanner_results
-    })
+    return render_template(
+        "index.html",
+        selected_tf=selected_tf,
+        watchlist_rows=watchlist_rows,
+        rows=scanner_results
+    )
 
 @app.route("/api/watchlist/add", methods=["POST"])
 def add_watchlist():
