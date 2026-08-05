@@ -1,27 +1,41 @@
-# config.py
+# ABOUT TO BREAK RANGE DETECTOR - CONFIGURATION
 
-OKX_CANDLE_URL = "https://www.okx.com/api/v5/market/candles"
-MEXC_CANDLE_URL = "https://contract.mexc.com/api/v1/contract/kline/"
-
-# STRICT REQUIREMENT: Only 5M, 15M, and 1H
-SUPPORTED_TIMEFRAMES = ["5M", "15M", "1H"]
-
-OKX_TF_MAP = {
-    "5M": "5m",
-    "15M": "15m",
-    "1H": "1H"
-}
-
-MEXC_TF_MAP = {
-    "5M": "Min5",
-    "15M": "Min15",
-    "1H": "Min60"
-}
-
+# PERMANENT MANDATED 25-COIN WATCHLIST
+# DO NOT ADD, REMOVE, SUBSTITUTE, OR ALPHABETIZE
 DEFAULT_WATCHLIST = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "PENGUUSDT", "PEPEUSDT",
-    "BONKUSDT", "FOGOUSDT", "BRETTUSDT", "NEARUSDT", "IWMUSDT",
-    "FARTCOINUSDT", "MOVEUSDT", "DOGEUSDT", "SUIUSDT", "APTUSDT",
-    "AVAXUSDT", "LINKUSDT", "ARBUSDT", "OPUSDT", "INJUSDT",
-    "RENDERUSDT", "TIAUSDT", "SEIUSDT", "FETUSDT", "TAOUSDT"
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "PEPEUSDT",
+    "BONKUSDT",
+    "SHIBUSDT",
+    "USELESSUSDT",
+    "SPACEUSDT",
+    "MOVEUSDT",
+    "ZECUSDT",
+    "SPXUSDT",
+    "PEOPLEUSDT",
+    "PENGUUSDT",
+    "FARTCOINUSDT",
+    "LINEAUSDT",
+    "MEMEUSDT",
+    "PUMPUSDT",
+    "AIXBTUSDT",
+    "BRETTUSDT",
+    "FOGOUSDT",
+    "GOOGLUSDT",
+    "FLOKIUSDT",
+    "IWMUSDT",
+    "MOODENGUSDT",
+    "NEARUSDT"
 ]
+
+WATCHLIST = DEFAULT_WATCHLIST
+
+# Preferred monitoring timeframes
+TIMEFRAMES = ["3M", "5M", "15M", "1H", "4H"]
+
+# Detector Parameters
+SMA_FAST = 20
+SMA_SLOW = 200
+READINESS_THRESHOLD = 20
