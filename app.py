@@ -19,22 +19,20 @@ WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEF
 CACHE = {}
 CACHE_LOCK = threading.Lock()
 _worker_thread_started = False
+SCAN_READY = False   # <-- NEW: becomes True after first full scan cycle
 
 def fetch_single_safe(sym, tf):
     try:
         match, _ = _process_symbol_tf(sym, tf)
-        if match:
-            return match
-        else:
-            # Log that we scanned but got nothing
-            print(f"[{sym}][{tf}] No data available (empty response)")
-            return None
+        return match
     except Exception as e:
         print(f"Fetch error for {sym} {tf}: {e}")
         return None
 
 def update_cache_job():
+    global SCAN_READY
     print(">>> Background cache worker started in this process.")
+    first_cycle_done = False
     while True:
         for tf in ["5M", "15M", "1H", "4H"]:
             print(f">>> Scanning batch: {tf}")
@@ -50,6 +48,12 @@ def update_cache_job():
                             print(f"[CACHE] Stored {sym} {tf} (Score: {res.get('readiness_score')})")
             print(f">>> Finished batch: {tf}. Sleeping 2s...")
             time.sleep(2)
+        
+        # After finishing all timeframes in this cycle, mark SCAN_READY = True
+        if not first_cycle_done:
+            SCAN_READY = True
+            first_cycle_done = True
+            print(">>> FIRST SCAN CYCLE COMPLETE. Scanner is now READY.")
         print(">>> Full cycle complete. Sleeping 15s...")
         time.sleep(15)
 
@@ -75,11 +79,13 @@ def sort_results(items):
 
 @app.route("/")
 def index():
+    global SCAN_READY
     selected_tf = request.args.get("tf", "15M").upper()
     active_tf = "15M" if selected_tf == "ALL" else selected_tf
 
     watchlist_rows = []
-    is_loading = False
+    # is_loading = not SCAN_READY   # <-- NEW: only show loading spinner until first scan completes
+    is_loading = not SCAN_READY
 
     with CACHE_LOCK:
         for item in WATCHLIST:
@@ -89,7 +95,8 @@ def index():
                 match["pinned"] = item["pinned"]
                 watchlist_rows.append(match)
             else:
-                is_loading = True
+                # If cache missing but SCAN_READY is True, we still show "Loading..." text
+                # but the page won't show the skeleton loader (is_loading False)
                 watchlist_rows.append({
                     "symbol": item["symbol"],
                     "timeframe": active_tf,
