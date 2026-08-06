@@ -27,7 +27,8 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     # 1. PRIMARY: OKX
     okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
     try:
-        resp = requests.get(okx_url, headers=HEADERS, timeout=4)
+        print(f"[DEBUG][{symbol}][{timeframe}] Attempting OKX: {okx_url}")
+        resp = requests.get(okx_url, headers=HEADERS, timeout=6)
         if resp.status_code == 200:
             res_json = resp.json()
             data = res_json.get("data", [])
@@ -39,14 +40,20 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
                 df = df.iloc[::-1].reset_index(drop=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
+                print(f"[{symbol}][{timeframe}] Downloaded {len(df)} candles (Source: OKX)")
                 return df
-    except Exception:
-        pass
+            else:
+                print(f"[OKX][{symbol}] Returned empty data array. Code: {res_json.get('code')}")
+        else:
+            print(f"[OKX][{symbol}] HTTP {resp.status_code}")
+    except Exception as e:
+        print(f"[OKX][{symbol}] Exception: {e}")
 
     # 2. FAILOVER: MEXC
     mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={mexc_sym}&interval={mexc_bar}&limit={limit}"
     try:
-        resp = requests.get(mexc_url, headers=HEADERS, timeout=4)
+        print(f"[DEBUG][{symbol}][{timeframe}] Attempting MEXC: {mexc_url}")
+        resp = requests.get(mexc_url, headers=HEADERS, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
@@ -56,10 +63,16 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
                 ])
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
+                print(f"[{symbol}][{timeframe}] Downloaded {len(df)} candles (Source: MEXC)")
                 return df
-    except Exception:
-        pass
+            else:
+                print(f"[MEXC][{symbol}] Returned empty data.")
+        else:
+            print(f"[MEXC][{symbol}] HTTP {resp.status_code}")
+    except Exception as e:
+        print(f"[MEXC][{symbol}] Exception: {e}")
 
+    print(f"[{symbol}][{timeframe}] FAILED - Both sources returned no data.")
     return pd.DataFrame()
 
 
@@ -81,7 +94,6 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
     dist_to_res_pct = (resistance - curr_close) / range_height if range_height > 0 else 0
     dist_to_sup_pct = (curr_close - support) / range_height if range_height > 0 else 0
 
-    # Distance to levels (as percentage of price)
     dist_to_res_price_pct = ((resistance - curr_close) / curr_close) * 100
     dist_to_sup_price_pct = ((curr_close - support) / curr_close) * 100
 
@@ -107,7 +119,6 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
     buyer_power = round((total_buyer_vol / total_vol * 100), 1) if total_vol > 0 else 50.0
     seller_power = round(100.0 - buyer_power, 1)
 
-    # Volume Trend: Compare last 5 candles vs previous 5
     volumes = df['volume'].values
     if len(volumes) >= 10:
         recent_avg = sum(volumes[-5:]) / 5
