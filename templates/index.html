@@ -4,144 +4,112 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ABOUT TO BREAK RANGE DETECTOR</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
     <style>
-        /* --- RESET & BASE --- */
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background: #0a0e17;
             color: #d1d9e6;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, monospace;
-            padding: 12px 16px;
-            margin: 0;
-            min-height: 100vh;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            padding: 10px 12px;
             font-size: 13px;
-            line-height: 1.5;
+            line-height: 1.4;
+            min-height: 100vh;
         }
-        .container-fluid { max-width: 1600px; margin: 0 auto; padding: 0; }
+        .container { max-width: 1600px; margin: 0 auto; }
 
         /* --- HEADER --- */
         .header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 8px 0 12px 0;
-            border-bottom: 1px solid #1e293b;
-            margin-bottom: 16px;
             flex-wrap: wrap;
             gap: 8px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #1e293b;
+            margin-bottom: 12px;
         }
         .header-title {
             font-weight: 800;
-            font-size: 1.1rem;
+            font-size: 1rem;
             letter-spacing: -0.02em;
             background: linear-gradient(135deg, #60a5fa, #a78bfa);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin: 0;
-            white-space: nowrap;
         }
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
+        .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .live-badge {
-            background: #052e16;
-            color: #4ade80;
+            background: #052e16; color: #4ade80;
             border: 1px solid #166534;
             border-radius: 100px;
-            padding: 2px 12px;
-            font-size: 0.6rem;
+            padding: 2px 10px;
+            font-size: 0.55rem;
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.06em;
         }
         .tf-pills {
             display: flex;
-            gap: 4px;
+            gap: 3px;
             background: #111927;
             padding: 3px;
-            border-radius: 8px;
+            border-radius: 6px;
             border: 1px solid #1e293b;
         }
         .tf-pill {
             background: transparent;
             border: none;
             color: #64748b;
-            padding: 3px 12px;
-            border-radius: 6px;
-            font-size: 0.7rem;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 0.65rem;
             font-weight: 600;
             text-decoration: none;
             transition: 0.15s;
         }
         .tf-pill:hover { color: #e2e8f0; background: #1e293b; }
-        .tf-pill.active {
-            background: #2563eb;
-            color: #fff;
-            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
-        }
+        .tf-pill.active { background: #2563eb; color: #fff; }
 
-        /* --- WATCHLIST BAR (COMPACT) --- */
+        /* --- WATCHLIST BAR (Compact) --- */
         .watchlist-wrapper {
             background: #0f172a;
             border: 1px solid #1e293b;
-            border-radius: 10px;
-            padding: 8px 12px;
-            margin-bottom: 16px;
+            border-radius: 8px;
+            padding: 6px 10px;
+            margin-bottom: 12px;
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 8px 16px;
+            gap: 4px 12px;
         }
-        .watchlist-label {
-            font-size: 0.6rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: #fbbf24;
-            margin-right: 4px;
-            white-space: nowrap;
-        }
-        .watchlist-items {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px 12px;
-            flex: 1;
-        }
-        .watchlist-item {
+        .wl-label { font-size: 0.55rem; font-weight: 700; color: #fbbf24; text-transform: uppercase; letter-spacing: 0.06em; }
+        .wl-items { display: flex; flex-wrap: wrap; gap: 4px 8px; flex: 1; }
+        .wl-item {
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 3px;
             background: #1a2332;
-            padding: 2px 8px 2px 6px;
-            border-radius: 6px;
-            font-size: 0.7rem;
+            padding: 1px 6px 1px 4px;
+            border-radius: 4px;
+            font-size: 0.6rem;
             font-weight: 600;
-            border: 1px solid transparent;
-            transition: 0.15s;
         }
-        .watchlist-item:hover { border-color: #334155; }
-        .wl-symbol { color: #e2e8f0; }
-        .wl-tf { color: #64748b; font-weight: 400; font-size: 0.55rem; }
+        .wl-sym { color: #e2e8f0; }
+        .wl-tf { color: #64748b; font-weight: 400; font-size: 0.5rem; }
         .wl-price { color: #94a3b8; font-weight: 500; margin-left: 2px; }
-        .wl-pin { background: none; border: none; color: #64748b; padding: 0 2px; font-size: 0.7rem; cursor: pointer; }
+        .wl-pin { background: none; border: none; color: #64748b; padding: 0 2px; font-size: 0.6rem; cursor: pointer; }
         .wl-pin:hover { color: #fbbf24; }
         .wl-pin.active { color: #fbbf24; }
-        .wl-remove { background: none; border: none; color: #475569; padding: 0 2px; font-size: 0.6rem; cursor: pointer; }
+        .wl-remove { background: none; border: none; color: #475569; padding: 0 2px; font-size: 0.5rem; cursor: pointer; }
         .wl-remove:hover { color: #f87171; }
         .wl-add-input {
             background: #1e293b;
             border: 1px solid #334155;
-            border-radius: 6px;
-            padding: 2px 8px;
+            border-radius: 4px;
+            padding: 1px 6px;
             color: #e2e8f0;
-            font-size: 0.7rem;
-            width: 100px;
+            font-size: 0.6rem;
+            width: 80px;
         }
         .wl-add-input:focus { outline: none; border-color: #2563eb; }
         .wl-add-btn {
@@ -149,167 +117,183 @@
             border: none;
             color: #fff;
             font-weight: 600;
-            padding: 2px 12px;
-            border-radius: 6px;
-            font-size: 0.7rem;
-            transition: 0.15s;
+            padding: 1px 10px;
+            border-radius: 4px;
+            font-size: 0.6rem;
+            cursor: pointer;
         }
         .wl-add-btn:hover { background: #3b82f6; }
 
-        /* --- MAIN SCANNER TABLE (THE PRODUCT) --- */
-        .scanner-card {
+        /* --- CARD GRID --- */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+            gap: 10px;
+        }
+
+        /* --- INDIVIDUAL CARD (PROFESSIONAL) --- */
+        .scan-card {
             background: #0f172a;
             border: 1px solid #1e293b;
-            border-radius: 12px;
-            overflow: hidden;
-        }
-        .scanner-header {
+            border-radius: 8px;
+            padding: 10px 12px;
+            transition: all 0.2s ease;
             display: flex;
-            justify-content: space-between;
+            flex-direction: column;
+            gap: 4px;
+            position: relative;
+        }
+        /* Directional Accent Borders */
+        .scan-card.card-bullish { border-left: 4px solid #00c897; }
+        .scan-card.card-bearish { border-left: 4px solid #f23645; }
+        .scan-card.card-neutral { border-left: 4px solid #334155; }
+        .scan-card:hover { border-color: #475569; background: #131d2e; }
+
+        .card-row { display: flex; justify-content: space-between; align-items: center; }
+        .card-row-center { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
+
+        .card-symbol { font-weight: 700; font-size: 0.95rem; color: #f1f5f9; }
+        .card-tf {
+            background: #1e293b; color: #94a3b8;
+            padding: 1px 6px; border-radius: 4px;
+            font-size: 0.55rem; font-weight: 600;
+            margin-left: 6px;
+        }
+        .card-updated { font-size: 0.5rem; color: #475569; font-weight: 400; }
+
+        .price-group {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .price-main { font-weight: 700; font-size: 1rem; color: #e2e8f0; }
+        .price-label { font-size: 0.5rem; color: #64748b; font-weight: 600; text-transform: uppercase; }
+        .price-value { font-weight: 600; font-size: 0.75rem; }
+        .price-value.sup { color: #4ade80; }
+        .price-value.res { color: #f87171; }
+        .price-value.dist { font-size: 0.6rem; color: #94a3b8; }
+
+        .badge-structure {
+            background: #1e293b; color: #94a3b8;
+            padding: 1px 8px; border-radius: 4px;
+            font-size: 0.6rem; font-weight: 600;
+        }
+        .direction-bull { color: #00c897; font-weight: 700; font-size: 0.75rem; }
+        .direction-bear { color: #f23645; font-weight: 700; font-size: 0.75rem; }
+        .direction-neutral { color: #64748b; font-weight: 600; font-size: 0.75rem; }
+        
+        .volume-trend { font-size: 0.6rem; font-weight: 600; }
+        .vol-up { color: #4ade80; }
+        .vol-down { color: #f87171; }
+        .vol-neutral { color: #94a3b8; }
+
+        .readiness-block {
+            display: flex;
             align-items: center;
-            padding: 10px 16px;
-            background: #0b111e;
-            border-bottom: 1px solid #1e293b;
+            gap: 8px;
+            flex-wrap: wrap;
         }
-        .scanner-title {
-            font-weight: 700;
-            font-size: 0.8rem;
-            color: #60a5fa;
-            margin: 0;
-            letter-spacing: 0.02em;
-        }
-        .scanner-title span { margin-right: 6px; }
-        .scanner-stats {
-            font-size: 0.65rem;
-            color: #64748b;
-        }
-
-        .table-wrap {
-            overflow-x: auto;
-            padding: 0 4px 4px 4px;
-        }
-        table.scanner-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.75rem;
-            min-width: 640px;
-        }
-        table.scanner-table th {
-            text-align: left;
-            padding: 8px 6px;
-            color: #64748b;
-            font-weight: 600;
-            text-transform: uppercase;
-            font-size: 0.55rem;
-            letter-spacing: 0.05em;
-            border-bottom: 1px solid #1e293b;
-            position: sticky;
-            top: 0;
-            background: #0f172a;
-            z-index: 2;
-        }
-        table.scanner-table td {
-            padding: 6px 6px;
-            border-bottom: 1px solid #1a2332;
-            vertical-align: middle;
-            white-space: nowrap;
-        }
-        table.scanner-table tr:hover td { background: #162033; }
-
-        .sym { font-weight: 700; color: #f1f5f9; }
-        .tf-badge { background: #1e293b; color: #94a3b8; padding: 1px 6px; border-radius: 4px; font-size: 0.55rem; font-weight: 600; }
-        .price { font-weight: 500; color: #e2e8f0; font-feature-settings: "tnum"; }
-        .s-r { font-weight: 500; font-size: 0.7rem; }
-        .s-r .sup { color: #4ade80; }
-        .s-r .res { color: #f87171; }
-
-        .direction-bull { color: #00c897; font-weight: 700; }
-        .direction-bear { color: #f23645; font-weight: 700; }
-        .direction-icon { font-size: 0.6rem; margin-right: 2px; }
-
         .readiness-score {
             font-weight: 800;
-            font-size: 0.85rem;
+            font-size: 1.2rem;
+            min-width: 40px;
+        }
+        .readiness-label {
+            font-size: 0.6rem;
+            font-weight: 700;
             padding: 2px 8px;
-            border-radius: 6px;
-            display: inline-block;
-            min-width: 36px;
-            text-align: center;
+            border-radius: 100px;
         }
-        .rs-high { background: #064e3b; color: #34d399; }
-        .rs-mid { background: #78350f; color: #fbbf24; }
-        .rs-low { background: #1e293b; color: #64748b; }
+        .rl-imminent { background: #064e3b; color: #34d399; }
+        .rl-developing { background: #78350f; color: #fbbf24; }
+        .rl-forming { background: #451a03; color: #fb923c; }
+        .rl-early { background: #1e293b; color: #64748b; }
 
-        .power-cell {
+        .pressure-bar-wrap {
+            width: 100%;
+            height: 6px;
+            background: #1e293b;
+            border-radius: 4px;
+            overflow: hidden;
             display: flex;
-            align-items: center;
-            gap: 4px;
-            font-size: 0.65rem;
-            font-weight: 600;
+            margin-top: 2px;
         }
-        .power-cell .b { color: #4ade80; }
-        .power-cell .s { color: #f87171; }
-        .power-cell .sep { color: #334155; }
+        .pressure-bar-buyer {
+            height: 100%;
+            background: linear-gradient(90deg, #166534, #4ade80);
+            transition: width 0.3s;
+        }
+        .pressure-bar-seller {
+            height: 100%;
+            background: linear-gradient(90deg, #f87171, #7f1d1d);
+            transition: width 0.3s;
+        }
+        .pressure-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.55rem;
+            font-weight: 600;
+            margin-top: 1px;
+        }
+        .pressure-labels .b { color: #4ade80; }
+        .pressure-labels .s { color: #f87171; }
 
-        /* --- LOADING STATE (CLEAN SKELETON) --- */
-        .skeleton-row td {
-            height: 32px;
-            background: linear-gradient(90deg, #1a2332 25%, #243044 50%, #1a2332 75%);
+        /* --- LOADING --- */
+        .skeleton-card {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 10px;
+            padding: 10px 12px;
+            height: 120px;
+            background-image: linear-gradient(90deg, #1a2332 25%, #243044 50%, #1a2332 75%);
             background-size: 200% 100%;
             animation: shimmer 1.5s infinite;
         }
-        @keyframes shimmer {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
-        }
-        .loading-placeholder {
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .loading-text {
             text-align: center;
             padding: 30px 0;
             color: #475569;
             font-size: 0.8rem;
+            grid-column: 1/-1;
         }
-        .loading-placeholder .spinner {
+        .spin {
             display: inline-block;
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             border: 2px solid #1e293b;
             border-top-color: #60a5fa;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
-            margin-right: 10px;
             vertical-align: middle;
+            margin-right: 8px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* --- MOBILE FIRST ADJUSTMENTS --- */
-        @media (max-width: 768px) {
-            body { padding: 8px; font-size: 11px; }
+        /* --- MOBILE FIRST --- */
+        @media (max-width: 600px) {
+            body { padding: 6px; font-size: 12px; }
             .header-title { font-size: 0.85rem; }
-            .watchlist-wrapper { padding: 6px 8px; flex-direction: column; align-items: stretch; }
-            .watchlist-items { gap: 4px 8px; }
-            .wl-add-input { width: 80px; }
-            table.scanner-table { font-size: 0.65rem; min-width: 480px; }
-            table.scanner-table th { font-size: 0.5rem; padding: 4px 4px; }
-            table.scanner-table td { padding: 4px 4px; }
-            .readiness-score { font-size: 0.7rem; padding: 1px 4px; min-width: 28px; }
-            .hide-mobile { display: none; }
-            .s-r { font-size: 0.6rem; }
-        }
-        @media (max-width: 480px) {
-            .header { flex-direction: column; align-items: flex-start; }
             .tf-pills { width: 100%; justify-content: space-between; }
-            .tf-pill { flex: 1; text-align: center; padding: 3px 4px; font-size: 0.6rem; }
-            .watchlist-item { font-size: 0.6rem; }
+            .tf-pill { flex: 1; text-align: center; padding: 2px 4px; font-size: 0.6rem; }
+            .card-grid { grid-template-columns: 1fr; gap: 8px; }
+            .scan-card { padding: 8px 10px; }
+            .price-main { font-size: 0.9rem; }
+            .wl-add-input { width: 70px; }
+            .watchlist-wrapper { padding: 4px 6px; }
+            .card-symbol { font-size: 0.85rem; }
+            .readiness-score { font-size: 1.1rem; }
+            .price-group { gap: 4px; }
         }
     </style>
 </head>
 <body>
-
-<div class="container-fluid">
+<div class="container">
 
     <!-- HEADER -->
     <div class="header">
-        <h1 class="header-title">⟡ ABOUT TO BREAK RANGE DETECTOR</h1>
+        <span class="header-title">⟡ ABOUT TO BREAK RANGE DETECTOR</span>
         <div class="header-right">
             <span class="live-badge">● LIVE</span>
             <div class="tf-pills">
@@ -317,18 +301,19 @@
                 <a href="/?tf=5M" class="tf-pill {{ 'active' if selected_tf == '5M' else '' }}">5M</a>
                 <a href="/?tf=15M" class="tf-pill {{ 'active' if selected_tf == '15M' else '' }}">15M</a>
                 <a href="/?tf=1H" class="tf-pill {{ 'active' if selected_tf == '1H' else '' }}">1H</a>
+                <a href="/?tf=4H" class="tf-pill {{ 'active' if selected_tf == '4H' else '' }}">4H</a>
             </div>
         </div>
     </div>
 
-    <!-- WATCHLIST (COMPACT BAR) -->
+    <!-- WATCHLIST BAR -->
     <div class="watchlist-wrapper">
-        <span class="watchlist-label">★ Watchlist</span>
-        <div class="watchlist-items" id="watchlistContainer">
+        <span class="wl-label">★ Watchlist</span>
+        <div class="wl-items" id="watchlistContainer">
             {% for item in watchlist_rows %}
-            <div class="watchlist-item" data-sym="{{ item.symbol }}" data-tf="{{ item.timeframe }}">
+            <div class="wl-item">
                 <button class="wl-pin {{ 'active' if item.pinned else '' }}" onclick="togglePin('{{ item.symbol }}', '{{ item.timeframe }}')">★</button>
-                <span class="wl-symbol">{{ item.symbol }}</span>
+                <span class="wl-sym">{{ item.symbol }}</span>
                 <span class="wl-tf">{{ item.timeframe }}</span>
                 <span class="wl-price">
                     {% if item.curr_close not in ['Loading...', 'N/A'] %}
@@ -340,97 +325,121 @@
                 <button class="wl-remove" onclick="removeSymbol('{{ item.symbol }}', '{{ item.timeframe }}')">✕</button>
             </div>
             {% else %}
-            <span style="color:#475569; font-size:0.7rem;">No coins. Add one below.</span>
+            <span style="color:#475569; font-size:0.6rem;">No coins.</span>
             {% endfor %}
         </div>
-        <div style="display:flex; gap:4px; align-items:center; flex-wrap:nowrap;">
-            <input type="text" id="add-symbol-input" class="wl-add-input" placeholder="Add Symbol">
+        <div style="display:flex; gap:3px; align-items:center;">
+            <input type="text" id="add-symbol-input" class="wl-add-input" placeholder="Add">
             <button class="wl-add-btn" onclick="addWatchlistSymbol()">+</button>
         </div>
     </div>
 
-    <!-- SCANNER RESULTS (MAIN PRODUCT) -->
-    <div class="scanner-card">
-        <div class="scanner-header">
-            <div class="scanner-title"><span>⚡</span> BREAKOUT / BREAKDOWN CANDIDATES</div>
-            <div class="scanner-stats">{{ rows|length }} setups · sorted by readiness</div>
-        </div>
-        <div class="table-wrap">
-            <table class="scanner-table">
-                <thead>
-                    <tr>
-                        <th>Symbol</th>
-                        <th>TF</th>
-                        <th>Price</th>
-                        <th class="hide-mobile">Support</th>
-                        <th class="hide-mobile">Resistance</th>
-                        <th>Direction</th>
-                        <th>Readiness</th>
-                        <th>Power (B/S)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% if is_loading %}
-                        <!-- Clean skeleton loader: 5 rows -->
-                        {% for _ in range(5) %}
-                        <tr class="skeleton-row"><td colspan="8"></td></tr>
-                        {% endfor %}
-                        <tr><td colspan="8" class="loading-placeholder">
-                            <span class="spinner"></span> Initializing scanner cache...
-                        </td></tr>
-                    {% elif rows|length == 0 %}
-                        <tr><td colspan="8" class="loading-placeholder" style="padding:20px 0;">
-                            No active range setups detected. Waiting for data...
-                        </td></tr>
-                    {% else %}
-                        {% for row in rows %}
-                        <tr>
-                            <td class="sym">{{ row.symbol }}</td>
-                            <td><span class="tf-badge">{{ row.timeframe }}</span></td>
-                            <td class="price">${{ row.curr_close }}</td>
-                            <td class="s-r hide-mobile"><span class="sup">${{ row.support }}</span></td>
-                            <td class="s-r hide-mobile"><span class="res">${{ row.resistance }}</span></td>
-                            <td>
-                                {% if row.break_direction == 'BULLISH' %}
-                                    <span class="direction-bull"><span class="direction-icon">▲</span> Bullish</span>
-                                {% else %}
-                                    <span class="direction-bear"><span class="direction-icon">▼</span> Bearish</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% set score = row.readiness_score|default(0) %}
-                                {% if score >= 70 %}
-                                    <span class="readiness-score rs-high">{{ score }}%</span>
-                                {% elif score >= 40 %}
-                                    <span class="readiness-score rs-mid">{{ score }}%</span>
-                                {% else %}
-                                    <span class="readiness-score rs-low">{{ score }}%</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <div class="power-cell">
-                                    <span class="b">{{ row.buyer_power }}%</span>
-                                    <span class="sep">/</span>
-                                    <span class="s">{{ row.seller_power }}%</span>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
+    <!-- CARD GRID -->
+    <div class="card-grid">
+        {% if is_loading %}
+            {% for _ in range(6) %}
+            <div class="skeleton-card"></div>
+            {% endfor %}
+            <div class="loading-text">
+                <span class="spin"></span> Initializing scanner cache...
+            </div>
+        {% elif rows|length == 0 %}
+            <div class="loading-text">No active range setups detected. Waiting for data...</div>
+        {% else %}
+            {% for row in rows %}
+            <div class="scan-card 
+                {% if row.break_direction == 'BULLISH' %}card-bullish
+                {% elif row.break_direction == 'BEARISH' %}card-bearish
+                {% else %}card-neutral{% endif %}">
+                
+                <!-- Row 1: Symbol + TF + Updated -->
+                <div class="card-row">
+                    <div>
+                        <span class="card-symbol">{{ row.symbol }}</span>
+                        <span class="card-tf">{{ row.timeframe }}</span>
+                    </div>
+                    <span class="card-updated">{{ row.last_updated }}</span>
+                </div>
+
+                <!-- Row 2: Price, Support, Resistance -->
+                <div class="card-row">
+                    <div class="price-group">
+                        <span class="price-main">${{ row.curr_close }}</span>
+                        <span><span class="price-label">Sup</span> <span class="price-value sup">${{ row.support }}</span></span>
+                        <span><span class="price-label">Res</span> <span class="price-value res">${{ row.resistance }}</span></span>
+                    </div>
+                </div>
+
+                <!-- Row 3: Distances + Structure + Direction + Volume -->
+                <div class="card-row-center">
+                    <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                        <span class="price-value dist">📏 Res: {{ row.distance_to_resistance }}%</span>
+                        <span class="price-value dist">Sup: {{ row.distance_to_support }}%</span>
+                        <span class="badge-structure">{{ row.structure_type }}</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:4px;">
+                        {% if row.break_direction == 'BULLISH' %}
+                            <span class="direction-bull">▲ Bullish</span>
+                        {% elif row.break_direction == 'BEARISH' %}
+                            <span class="direction-bear">▼ Bearish</span>
+                        {% else %}
+                            <span class="direction-neutral">● Neutral</span>
+                        {% endif %}
+                        <span class="volume-trend 
+                            {% if row.volume_trend == 'Increasing' %}vol-up{% elif row.volume_trend == 'Decreasing' %}vol-down{% else %}vol-neutral{% endif %}">
+                            Vol: {{ row.volume_trend }}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Row 4: Readiness Score + Label -->
+                <div class="card-row">
+                    <div class="readiness-block">
+                        <span class="readiness-score" style="color: 
+                            {% if row.readiness_score >= 80 %}#34d399
+                            {% elif row.readiness_score >= 60 %}#fbbf24
+                            {% elif row.readiness_score >= 40 %}#fb923c
+                            {% else %}#64748b{% endif %}">
+                            {{ row.readiness_score }}%
+                        </span>
+                        <span class="readiness-label 
+                            {% if row.readiness_score >= 80 %}rl-imminent
+                            {% elif row.readiness_score >= 60 %}rl-developing
+                            {% elif row.readiness_score >= 40 %}rl-forming
+                            {% else %}rl-early{% endif %}">
+                            {% if row.readiness_score >= 80 %}🟢 IMMINENT
+                            {% elif row.readiness_score >= 60 %}🟡 DEVELOPING
+                            {% elif row.readiness_score >= 40 %}🟠 FORMING
+                            {% else %}🔴 EARLY{% endif %}
+                        </span>
+                    </div>
+                    <div style="font-size:0.6rem; color:#475569;">
+                        #{{ loop.index }}
+                    </div>
+                </div>
+
+                <!-- Row 5: Pressure Bar (Exactly as requested) -->
+                <div>
+                    <div class="pressure-bar-wrap">
+                        <div class="pressure-bar-buyer" style="width: {{ row.buyer_power }}%;"></div>
+                        <div class="pressure-bar-seller" style="width: {{ row.seller_power }}%;"></div>
+                    </div>
+                    <div class="pressure-labels">
+                        <span class="b">B {{ row.buyer_power }}%</span>
+                        <span class="s">S {{ row.seller_power }}%</span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% endif %}
     </div>
 
 </div>
 
-<!-- Auto-refresh if loading (only once, not endless) -->
+<!-- Auto-refresh if loading -->
 {% if is_loading %}
 <script>
-    // Refresh once after 5 seconds to show populated data
-    setTimeout(function() {
-        window.location.reload();
-    }, 5000);
+    setTimeout(function() { window.location.reload(); }, 5000);
 </script>
 {% endif %}
 
@@ -467,7 +476,6 @@
         window.location.reload();
     }
 
-    // Allow Enter key on add input
     document.getElementById('add-symbol-input').addEventListener('keypress', function(e) {
         if (e.key === 'Enter') addWatchlistSymbol();
     });
