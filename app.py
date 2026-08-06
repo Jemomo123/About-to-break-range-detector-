@@ -19,6 +19,9 @@ WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEF
 CACHE = {}
 CACHE_LOCK = threading.Lock()
 
+# Flag to ensure we only start ONE thread per worker
+_worker_thread_started = False
+
 def fetch_single_safe(sym, tf):
     try:
         match, _ = _process_symbol_tf(sym, tf)
@@ -27,8 +30,8 @@ def fetch_single_safe(sym, tf):
         print(f"Fetch error for {sym} {tf}: {e}")
         return None
 
-# Background worker (V1: only 5M, 15M, 1H)
 def update_cache_job():
+    print(">>> Background cache worker started in this process.")
     while True:
         for tf in ["5M", "15M", "1H"]:
             tasks = [sym for sym in DEFAULT_WATCHLIST]
@@ -40,11 +43,21 @@ def update_cache_job():
                     if res:
                         with CACHE_LOCK:
                             CACHE[f"{sym}_{tf}"] = res
+            # Short sleep between timeframe batches to avoid rate limits
             time.sleep(2)
+        # Longer sleep between full cycles
         time.sleep(15)
 
-# Start background worker on boot
-threading.Thread(target=update_cache_job, daemon=True).start()
+# CRITICAL FIX: Start the background thread on the FIRST web request
+# This ensures it runs inside the Gunicorn worker process (pid 75), not the master.
+@app.before_request
+def start_background_worker():
+    global _worker_thread_started
+    if not _worker_thread_started:
+        thread = threading.Thread(target=update_cache_job, daemon=True)
+        thread.start()
+        _worker_thread_started = True
+        print(">>> Background worker thread launched by web request.")
 
 @app.route("/")
 def index():
