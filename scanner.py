@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+from datetime import datetime, timezone
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -18,7 +19,6 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     mexc_sym = clean_sym
 
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
-    # MEXC V3 API uses lowercase 'h' (e.g., '1h', '4h')
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
 
     okx_bar = okx_tf_map.get(timeframe, "15m")
@@ -78,8 +78,12 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
 
     curr_close = float(recent_df['close'].iloc[-1])
 
-    dist_to_res_pct = (resistance - curr_close) / range_height
-    dist_to_sup_pct = (curr_close - support) / range_height
+    dist_to_res_pct = (resistance - curr_close) / range_height if range_height > 0 else 0
+    dist_to_sup_pct = (curr_close - support) / range_height if range_height > 0 else 0
+
+    # Distance to levels (as percentage of price)
+    dist_to_res_price_pct = ((resistance - curr_close) / curr_close) * 100
+    dist_to_sup_price_pct = ((curr_close - support) / curr_close) * 100
 
     tail_candles = recent_df.tail(10)
 
@@ -102,6 +106,20 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
 
     buyer_power = round((total_buyer_vol / total_vol * 100), 1) if total_vol > 0 else 50.0
     seller_power = round(100.0 - buyer_power, 1)
+
+    # Volume Trend: Compare last 5 candles vs previous 5
+    volumes = df['volume'].values
+    if len(volumes) >= 10:
+        recent_avg = sum(volumes[-5:]) / 5
+        prev_avg = sum(volumes[-10:-5]) / 5
+        if recent_avg > prev_avg * 1.05:
+            volume_trend = "Increasing"
+        elif recent_avg < prev_avg * 0.95:
+            volume_trend = "Decreasing"
+        else:
+            volume_trend = "Neutral"
+    else:
+        volume_trend = "Neutral"
 
     lows = tail_candles['low'].values
     highs = tail_candles['high'].values
@@ -131,6 +149,7 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
     bearish_readiness = int(proximity_bear + power_bear + struct_bear + depth_bear)
 
     clean_display = symbol.replace("-", "").replace("_", "").upper()
+    last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
 
     if bullish_readiness >= bearish_readiness:
         break_direction = "BULLISH"
@@ -168,7 +187,11 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
         "readiness_score": readiness_score,
         "readiness_display": f"{readiness_score}%",
         "buyer_power": buyer_power,
-        "seller_power": seller_power
+        "seller_power": seller_power,
+        "distance_to_resistance": round(dist_to_res_price_pct, 2),
+        "distance_to_support": round(dist_to_sup_price_pct, 2),
+        "volume_trend": volume_trend,
+        "last_updated": last_updated
     }, None
 
 
@@ -183,7 +206,7 @@ def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
     results = []
     diagnostics = {"symbols_scanned": len(symbols), "symbols_downloaded": 0, "rejections": {}}
 
-    tfs_to_run = ["5M", "15M", "1H"] if timeframe == "ALL" else [timeframe]
+    tfs_to_run = ["5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
 
     for sym in symbols:
         for tf in tfs_to_run:
