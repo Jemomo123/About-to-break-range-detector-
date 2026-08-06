@@ -23,7 +23,12 @@ _worker_thread_started = False
 def fetch_single_safe(sym, tf):
     try:
         match, _ = _process_symbol_tf(sym, tf)
-        return match
+        if match:
+            return match
+        else:
+            # Log that we scanned but got nothing
+            print(f"[{sym}][{tf}] No data available (empty response)")
+            return None
     except Exception as e:
         print(f"Fetch error for {sym} {tf}: {e}")
         return None
@@ -32,6 +37,7 @@ def update_cache_job():
     print(">>> Background cache worker started in this process.")
     while True:
         for tf in ["5M", "15M", "1H", "4H"]:
+            print(f">>> Scanning batch: {tf}")
             tasks = [sym for sym in DEFAULT_WATCHLIST]
             with ThreadPoolExecutor(max_workers=5) as executor:
                 future_map = {executor.submit(fetch_single_safe, sym, tf): sym for sym in tasks}
@@ -41,7 +47,10 @@ def update_cache_job():
                     if res:
                         with CACHE_LOCK:
                             CACHE[f"{sym}_{tf}"] = res
+                            print(f"[CACHE] Stored {sym} {tf} (Score: {res.get('readiness_score')})")
+            print(f">>> Finished batch: {tf}. Sleeping 2s...")
             time.sleep(2)
+        print(">>> Full cycle complete. Sleeping 15s...")
         time.sleep(15)
 
 @app.before_request
