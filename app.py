@@ -18,8 +18,6 @@ WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEF
 
 CACHE = {}
 CACHE_LOCK = threading.Lock()
-
-# Flag to ensure we only start ONE thread per worker
 _worker_thread_started = False
 
 def fetch_single_safe(sym, tf):
@@ -33,7 +31,7 @@ def fetch_single_safe(sym, tf):
 def update_cache_job():
     print(">>> Background cache worker started in this process.")
     while True:
-        for tf in ["5M", "15M", "1H"]:
+        for tf in ["5M", "15M", "1H", "4H"]:
             tasks = [sym for sym in DEFAULT_WATCHLIST]
             with ThreadPoolExecutor(max_workers=5) as executor:
                 future_map = {executor.submit(fetch_single_safe, sym, tf): sym for sym in tasks}
@@ -43,13 +41,9 @@ def update_cache_job():
                     if res:
                         with CACHE_LOCK:
                             CACHE[f"{sym}_{tf}"] = res
-            # Short sleep between timeframe batches to avoid rate limits
             time.sleep(2)
-        # Longer sleep between full cycles
         time.sleep(15)
 
-# CRITICAL FIX: Start the background thread on the FIRST web request
-# This ensures it runs inside the Gunicorn worker process (pid 75), not the master.
 @app.before_request
 def start_background_worker():
     global _worker_thread_started
@@ -58,6 +52,17 @@ def start_background_worker():
         thread.start()
         _worker_thread_started = True
         print(">>> Background worker thread launched by web request.")
+
+def sort_results(items):
+    """Sort by: Readiness DESC, then Timeframe priority (5M > 15M > 1H > 4H)."""
+    tf_priority = {"5M": 0, "15M": 1, "1H": 2, "4H": 3}
+    def sort_key(item):
+        readiness = item.get("readiness_score", 0)
+        tf = item.get("timeframe", "15M")
+        if readiness is None or not isinstance(readiness, (int, float)):
+            readiness = -1
+        return (-readiness, tf_priority.get(tf, 99))
+    return sorted(items, key=sort_key)
 
 @app.route("/")
 def index():
@@ -85,20 +90,24 @@ def index():
                     "direction_label": "Fetching...",
                     "break_direction": "NEUTRAL",
                     "break_symbol": "⏳",
+                    "readiness_score": 0,
                     "readiness_display": "0%",
                     "buyer_power": 50.0,
                     "seller_power": 50.0,
-                    "pinned": item["pinned"]
+                    "pinned": item["pinned"],
+                    "distance_to_resistance": 0.0,
+                    "distance_to_support": 0.0,
+                    "volume_trend": "Neutral",
+                    "last_updated": "--:--:-- UTC"
                 })
 
-    symbol_order = {sym: i for i, sym in enumerate(DEFAULT_WATCHLIST)}
-    watchlist_rows.sort(key=lambda x: symbol_order.get(x["symbol"], 999))
+    watchlist_rows = sort_results(watchlist_rows)
 
     scanner_results = [
         r for r in watchlist_rows 
         if isinstance(r.get("readiness_score"), (int, float)) and r["readiness_score"] >= 40
     ]
-    scanner_results.sort(key=lambda x: -x.get("readiness_score", 0))
+    scanner_results = sort_results(scanner_results)
 
     return render_template(
         "index.html",
