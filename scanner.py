@@ -15,12 +15,11 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     if not clean_sym.endswith("USDT"):
         clean_sym += "USDT"
 
-    # OKX expects BTC-USDT (without -SWAP) for public candles
     okx_sym = f"{clean_sym[:-4]}-USDT"
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
     okx_bar = okx_tf_map.get(timeframe, "15m")
 
-    # 1. PRIMARY: OKX (correct endpoint)
+    # 1. PRIMARY: OKX
     okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
     try:
         print(f"[OKX][{symbol}][{timeframe}] Fetching...")
@@ -80,28 +79,44 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
 
 
 def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
-    """Analyzes range structure using pure OHLCV price & volume dynamics."""
+    """
+    Analyzes range structure using pure OHLCV price & volume dynamics.
+    LOGGING: Every step is logged so we can see exactly where symbols are filtered.
+    """
+    print(f"[DEBUG][{symbol}][{timeframe}] === STARTING ANALYSIS ===")
+    
+    # Step 1: Check if we have enough data
     if df.empty or len(df) < 20:
+        print(f"[DEBUG][{symbol}][{timeframe}] ❌ REJECTED: Insufficient candles (got {len(df) if not df.empty else 0})")
         return None, "DATA UNAVAILABLE"
+    print(f"[DEBUG][{symbol}][{timeframe}] ✓ Data available: {len(df)} candles")
 
+    # Step 2: Calculate range boundaries
     recent_df = df.tail(30).copy()
     resistance = float(recent_df['high'].max())
     support = float(recent_df['low'].min())
     range_height = resistance - support
-
-    if range_height <= 0:
-        return None, "NO RANGE STRUCTURE"
-
     curr_close = float(recent_df['close'].iloc[-1])
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Range: Support=${support:.6f}, Resistance=${resistance:.6f}, Height=${range_height:.6f}")
+    print(f"[DEBUG][{symbol}][{timeframe}] Current Close: ${curr_close:.6f}")
 
+    # Step 3: Validate range height
+    if range_height <= 0:
+        print(f"[DEBUG][{symbol}][{timeframe}] ❌ REJECTED: Invalid range (height <= 0)")
+        return None, "NO RANGE STRUCTURE"
+    
+    # Step 4: Calculate distance to boundaries
     dist_to_res_pct = (resistance - curr_close) / range_height if range_height > 0 else 0
     dist_to_sup_pct = (curr_close - support) / range_height if range_height > 0 else 0
-
     dist_to_res_price_pct = ((resistance - curr_close) / curr_close) * 100
     dist_to_sup_price_pct = ((curr_close - support) / curr_close) * 100
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Distance to Resistance: {dist_to_res_pct:.2%} of range, {dist_to_res_price_pct:.2f}%")
+    print(f"[DEBUG][{symbol}][{timeframe}] Distance to Support: {dist_to_sup_pct:.2%} of range, {dist_to_sup_price_pct:.2f}%")
 
+    # Step 5: Volume analysis (Buyer/Seller Power)
     tail_candles = recent_df.tail(10)
-
     total_buyer_vol = 0.0
     total_seller_vol = 0.0
     total_vol = 0.0
@@ -121,7 +136,10 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
 
     buyer_power = round((total_buyer_vol / total_vol * 100), 1) if total_vol > 0 else 50.0
     seller_power = round(100.0 - buyer_power, 1)
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Buyer Power: {buyer_power}%, Seller Power: {seller_power}%")
 
+    # Step 6: Volume Trend
     volumes = df['volume'].values
     if len(volumes) >= 10:
         recent_avg = sum(volumes[-5:]) / 5
@@ -134,7 +152,10 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
             volume_trend = "Neutral"
     else:
         volume_trend = "Neutral"
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Volume Trend: {volume_trend}")
 
+    # Step 7: Candle structure analysis (higher lows / lower highs)
     lows = tail_candles['low'].values
     highs = tail_candles['high'].values
 
@@ -143,25 +164,38 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
 
     lower_highs_count = sum(1 for i in range(1, len(highs)) if highs[i] <= highs[i-1])
     lower_highs_ratio = lower_highs_count / (len(highs) - 1) if len(highs) > 1 else 0
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Higher Lows Ratio: {higher_lows_ratio:.2f}, Lower Highs Ratio: {lower_highs_ratio:.2f}")
 
+    # Step 8: Pullback depth
     recent_min_low = float(tail_candles['low'].min())
     recent_max_high = float(tail_candles['high'].max())
 
     res_pullback_depth = (resistance - recent_min_low) / range_height if range_height > 0 else 0
     sup_pullback_depth = (recent_max_high - support) / range_height if range_height > 0 else 0
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Resistance Pullback: {res_pullback_depth:.2f}, Support Pullback: {sup_pullback_depth:.2f}")
 
+    # Step 9: Calculate Readiness (Bullish)
     proximity_bull = max(0, (0.50 - dist_to_res_pct) / 0.50) * 40
     power_bull = max(0, (buyer_power - 30) / 70) * 30
     struct_bull = higher_lows_ratio * 15
     depth_bull = (1.0 - min(1.0, res_pullback_depth)) * 15
     bullish_readiness = int(proximity_bull + power_bull + struct_bull + depth_bull)
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Bullish Components: Proximity={proximity_bull:.1f}, Power={power_bull:.1f}, Structure={struct_bull:.1f}, Depth={depth_bull:.1f}")
+    print(f"[DEBUG][{symbol}][{timeframe}] Bullish Readiness: {bullish_readiness}")
 
+    # Step 10: Calculate Readiness (Bearish)
     proximity_bear = max(0, (0.50 - dist_to_sup_pct) / 0.50) * 40
     power_bear = max(0, (seller_power - 30) / 70) * 30
     struct_bear = lower_highs_ratio * 15
     depth_bear = (1.0 - min(1.0, sup_pullback_depth)) * 15
     bearish_readiness = int(proximity_bear + power_bear + struct_bear + depth_bear)
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Bearish Readiness: {bearish_readiness}")
 
+    # Step 11: Determine direction and final score
     clean_display = symbol.replace("-", "").replace("_", "").upper()
     last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
 
@@ -187,6 +221,9 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
             structure_type = "SUPPORT ABSORPTION"
         else:
             structure_type = "BEARISH COMPRESSION"
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] ✅ FINAL: Direction={break_direction}, Readiness={readiness_score}%, Structure={structure_type}")
+    print(f"[DEBUG][{symbol}][{timeframe}] === ANALYSIS COMPLETE ===")
 
     return {
         "symbol": clean_display,
@@ -210,10 +247,17 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
 
 
 def _process_symbol_tf(symbol: str, tf: str):
+    print(f"[DEBUG][{symbol}][{tf}] >>> Starting scan")
     df = fetch_ohlcv(symbol, tf)
     if df.empty:
+        print(f"[DEBUG][{symbol}][{tf}] ❌ No data from fetch")
         return None, "DATA UNAVAILABLE"
-    return analyze_range_structure(df, symbol, tf)
+    result, err = analyze_range_structure(df, symbol, tf)
+    if result:
+        print(f"[DEBUG][{symbol}][{tf}] ✅ PASSED - Readiness: {result['readiness_score']}%")
+    else:
+        print(f"[DEBUG][{symbol}][{tf}] ❌ FAILED - {err}")
+    return result, err
 
 
 def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
