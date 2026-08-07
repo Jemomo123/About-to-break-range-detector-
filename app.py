@@ -3,6 +3,7 @@ import threading
 from flask import Flask, render_template, request, jsonify
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from scanner import _process_symbol_tf
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 
@@ -66,8 +67,8 @@ def fetch_single_safe(sym, tf):
 def update_cache_job():
     global SCAN_READY, scan_status
     print(">>> BACKGROUND SCANNER STARTED")
-    cycle_completed = False
     scan_status["state"] = "SCANNING"
+    first_data_received = False
     
     while True:
         try:
@@ -86,15 +87,16 @@ def update_cache_job():
                                 scan_status["symbols_scanned"] += 1
                                 scan_status["current_symbol"] = sym
                                 scan_status["last_update"] = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-                                print(f"[{sym}][{tf}] Cached")
+                                print(f"[CACHE] Stored {sym} {tf}")
+                                
+                                # CRITICAL FIX: Set SCAN_READY = True on first successful cache
+                                if not first_data_received:
+                                    first_data_received = True
+                                    SCAN_READY = True
+                                    scan_status["state"] = "LIVE"
+                                    print(">>> SCAN_READY = True (first data received)")
                 print(f">>> Completed {tf}")
                 time.sleep(2)
-            
-            if not cycle_completed:
-                cycle_completed = True
-                SCAN_READY = True
-                scan_status["state"] = "LIVE"
-                print(">>> SCANNER READY - LIVE")
             
             print(">>> Cycle complete. Sleeping 15s...")
             time.sleep(15)
@@ -140,10 +142,10 @@ def index():
                 watchlist_rows.append({
                     "symbol": item["symbol"],
                     "timeframe": active_tf,
-                    "curr_close": "Loading...",
+                    "curr_close": "Loading..." if not SCAN_READY else "Unavailable",
                     "support": "...",
                     "resistance": "...",
-                    "direction_label": "Fetching...",
+                    "direction_label": "Fetching..." if not SCAN_READY else "Unavailable",
                     "break_direction": "NEUTRAL",
                     "break_symbol": "⏳",
                     "readiness_score": 0,
