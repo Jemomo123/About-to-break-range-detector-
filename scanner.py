@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+import numpy as np
 from datetime import datetime, timezone
 
 HEADERS = {
@@ -8,8 +9,8 @@ HEADERS = {
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     """
-    PRIMARY: OKX REST API (Your watchlist is built for OKX)
-    FALLBACK: MEXC REST API (Only if OKX fails)
+    PRIMARY: OKX REST API
+    FALLBACK: MEXC REST API
     """
     clean_sym = symbol.replace("_", "").replace("-", "").upper()
     if not clean_sym.endswith("USDT"):
@@ -19,7 +20,6 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
     okx_bar = okx_tf_map.get(timeframe, "15m")
 
-    # 1. PRIMARY: OKX
     okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
     try:
         print(f"[OKX][{symbol}][{timeframe}] Fetching...")
@@ -41,12 +41,10 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
                 print(f"[OKX][{symbol}] Empty data. Code: {res_json.get('code')}")
         else:
             print(f"[OKX][{symbol}] HTTP {resp.status_code}")
-    except requests.exceptions.Timeout:
-        print(f"[OKX][{symbol}] TIMEOUT - Request took >10s")
     except Exception as e:
         print(f"[OKX][{symbol}] Exception: {e}")
 
-    # 2. FALLBACK: MEXC
+    # FALLBACK: MEXC
     mexc_sym = clean_sym
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
@@ -69,179 +67,271 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
                 print(f"[MEXC][{symbol}] Empty data.")
         else:
             print(f"[MEXC][{symbol}] HTTP {resp.status_code}")
-    except requests.exceptions.Timeout:
-        print(f"[MEXC][{symbol}] TIMEOUT - Request took >10s")
     except Exception as e:
         print(f"[MEXC][{symbol}] Exception: {e}")
 
-    print(f"[{symbol}][{timeframe}] ✗ FAILED (OKX + MEXC)")
+    print(f"[{symbol}][{timeframe}] ✗ FAILED")
     return pd.DataFrame()
 
 
 def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
     """
-    Analyzes range structure using pure OHLCV price & volume dynamics.
-    LOGGING: Every step is logged so we can see exactly where symbols are filtered.
+    Advanced range/breakout detection with weighted readiness score.
+    Returns comprehensive breakout metrics.
     """
     print(f"[DEBUG][{symbol}][{timeframe}] === STARTING ANALYSIS ===")
     
-    # Step 1: Check if we have enough data
-    if df.empty or len(df) < 20:
-        print(f"[DEBUG][{symbol}][{timeframe}] ❌ REJECTED: Insufficient candles (got {len(df) if not df.empty else 0})")
+    # --- DATA VALIDATION ---
+    if df.empty or len(df) < 30:
+        print(f"[DEBUG][{symbol}][{timeframe}] ❌ Insufficient candles")
         return None, "DATA UNAVAILABLE"
-    print(f"[DEBUG][{symbol}][{timeframe}] ✓ Data available: {len(df)} candles")
-
-    # Step 2: Calculate range boundaries
-    recent_df = df.tail(30).copy()
-    resistance = float(recent_df['high'].max())
-    support = float(recent_df['low'].min())
-    range_height = resistance - support
-    curr_close = float(recent_df['close'].iloc[-1])
     
-    print(f"[DEBUG][{symbol}][{timeframe}] Range: Support=${support:.6f}, Resistance=${resistance:.6f}, Height=${range_height:.6f}")
-    print(f"[DEBUG][{symbol}][{timeframe}] Current Close: ${curr_close:.6f}")
-
-    # Step 3: Validate range height
-    if range_height <= 0:
-        print(f"[DEBUG][{symbol}][{timeframe}] ❌ REJECTED: Invalid range (height <= 0)")
-        return None, "NO RANGE STRUCTURE"
-    
-    # Step 4: Calculate distance to boundaries
-    dist_to_res_pct = (resistance - curr_close) / range_height if range_height > 0 else 0
-    dist_to_sup_pct = (curr_close - support) / range_height if range_height > 0 else 0
-    dist_to_res_price_pct = ((resistance - curr_close) / curr_close) * 100
-    dist_to_sup_price_pct = ((curr_close - support) / curr_close) * 100
-    
-    print(f"[DEBUG][{symbol}][{timeframe}] Distance to Resistance: {dist_to_res_pct:.2%} of range, {dist_to_res_price_pct:.2f}%")
-    print(f"[DEBUG][{symbol}][{timeframe}] Distance to Support: {dist_to_sup_pct:.2%} of range, {dist_to_sup_price_pct:.2f}%")
-
-    # Step 5: Volume analysis (Buyer/Seller Power)
-    tail_candles = recent_df.tail(10)
-    total_buyer_vol = 0.0
-    total_seller_vol = 0.0
-    total_vol = 0.0
-
-    for idx, row in tail_candles.iterrows():
-        c_range = row['high'] - row['low']
-        v = row['volume']
-        if c_range > 0:
-            b_ratio = (row['close'] - row['low']) / c_range
-            s_ratio = (row['high'] - row['close']) / c_range
-            total_buyer_vol += v * b_ratio
-            total_seller_vol += v * s_ratio
-        else:
-            total_buyer_vol += v * 0.5
-            total_seller_vol += v * 0.5
-        total_vol += v
-
-    buyer_power = round((total_buyer_vol / total_vol * 100), 1) if total_vol > 0 else 50.0
-    seller_power = round(100.0 - buyer_power, 1)
-    
-    print(f"[DEBUG][{symbol}][{timeframe}] Buyer Power: {buyer_power}%, Seller Power: {seller_power}%")
-
-    # Step 6: Volume Trend
+    # --- EXTRACT PRICE DATA ---
+    closes = df['close'].values
+    highs = df['high'].values
+    lows = df['low'].values
     volumes = df['volume'].values
-    if len(volumes) >= 10:
-        recent_avg = sum(volumes[-5:]) / 5
-        prev_avg = sum(volumes[-10:-5]) / 5
-        if recent_avg > prev_avg * 1.05:
-            volume_trend = "Increasing"
-        elif recent_avg < prev_avg * 0.95:
-            volume_trend = "Decreasing"
-        else:
-            volume_trend = "Neutral"
+    
+    curr_close = float(closes[-1])
+    curr_high = float(highs[-1])
+    curr_low = float(lows[-1])
+    
+    # --- DETECT RANGE (LOOKBACK 30 CANDLES) ---
+    lookback = min(30, len(df))
+    recent_highs = highs[-lookback:]
+    recent_lows = lows[-lookback:]
+    
+    resistance = float(np.max(recent_highs))
+    support = float(np.min(recent_lows))
+    range_height = resistance - support
+    range_mid = (resistance + support) / 2
+    range_width_pct = (range_height / range_mid) * 100
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Range: S={support:.6f}, R={resistance:.6f}, Width={range_width_pct:.2f}%")
+    print(f"[DEBUG][{symbol}][{timeframe}] Current Close: {curr_close:.6f}")
+    
+    # --- VALIDATE RANGE ---
+    if range_height <= 0:
+        print(f"[DEBUG][{symbol}][{timeframe}] ❌ Invalid range")
+        return None, "NO RANGE"
+    
+    if range_width_pct > 20:
+        print(f"[DEBUG][{symbol}][{timeframe}] ❌ Range too wide: {range_width_pct:.2f}%")
+        return None, "RANGE TOO WIDE"
+    
+    # --- DISTANCE TO BOUNDARIES ---
+    dist_to_resistance_pct = ((resistance - curr_close) / curr_close) * 100
+    dist_to_support_pct = ((curr_close - support) / curr_close) * 100
+    dist_to_resistance_range = (resistance - curr_close) / range_height
+    dist_to_support_range = (curr_close - support) / range_height
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Dist to R: {dist_to_resistance_pct:.2f}%, Dist to S: {dist_to_support_pct:.2f}%")
+    
+    # Determine primary breakout direction
+    if dist_to_resistance_range < dist_to_support_range:
+        primary_direction = "BULLISH"
+        distance_to_breakout = dist_to_resistance_pct
+        breakout_level = resistance
     else:
-        volume_trend = "Neutral"
+        primary_direction = "BEARISH"
+        distance_to_breakout = dist_to_support_pct
+        breakout_level = support
     
-    print(f"[DEBUG][{symbol}][{timeframe}] Volume Trend: {volume_trend}")
-
-    # Step 7: Candle structure analysis (higher lows / lower highs)
-    lows = tail_candles['low'].values
-    highs = tail_candles['high'].values
-
-    higher_lows_count = sum(1 for i in range(1, len(lows)) if lows[i] >= lows[i-1])
-    higher_lows_ratio = higher_lows_count / (len(lows) - 1) if len(lows) > 1 else 0
-
-    lower_highs_count = sum(1 for i in range(1, len(highs)) if highs[i] <= highs[i-1])
-    lower_highs_ratio = lower_highs_count / (len(highs) - 1) if len(highs) > 1 else 0
+    print(f"[DEBUG][{symbol}][{timeframe}] Primary direction: {primary_direction}, Distance: {distance_to_breakout:.2f}%")
     
-    print(f"[DEBUG][{symbol}][{timeframe}] Higher Lows Ratio: {higher_lows_ratio:.2f}, Lower Highs Ratio: {lower_highs_ratio:.2f}")
-
-    # Step 8: Pullback depth
-    recent_min_low = float(tail_candles['low'].min())
-    recent_max_high = float(tail_candles['high'].max())
-
-    res_pullback_depth = (resistance - recent_min_low) / range_height if range_height > 0 else 0
-    sup_pullback_depth = (recent_max_high - support) / range_height if range_height > 0 else 0
+    # --- 1. PROXIMITY SCORE (0-25) ---
+    # Closer to breakout = higher score
+    max_distance = 5.0  # 5% away is the max we care about
+    proximity_score = max(0, min(25, 25 * (1 - min(distance_to_breakout, max_distance) / max_distance)))
+    print(f"[DEBUG][{symbol}][{timeframe}] Proximity Score: {proximity_score:.1f}/25")
     
-    print(f"[DEBUG][{symbol}][{timeframe}] Resistance Pullback: {res_pullback_depth:.2f}, Support Pullback: {sup_pullback_depth:.2f}")
-
-    # Step 9: Calculate Readiness (Bullish)
-    proximity_bull = max(0, (0.50 - dist_to_res_pct) / 0.50) * 40
-    power_bull = max(0, (buyer_power - 30) / 70) * 30
-    struct_bull = higher_lows_ratio * 15
-    depth_bull = (1.0 - min(1.0, res_pullback_depth)) * 15
-    bullish_readiness = int(proximity_bull + power_bull + struct_bull + depth_bull)
+    # --- 2. PATTERN MATURITY (0-20) ---
+    # How many times has price tested the breakout level?
+    # Look back 20 candles for touches within 0.5% of the level
+    tolerance = 0.005  # 0.5%
+    touches = 0
+    for i in range(max(0, len(closes)-30), len(closes)-1):
+        test_price = closes[i]
+        if primary_direction == "BULLISH":
+            if (breakout_level - test_price) / breakout_level < tolerance:
+                touches += 1
+        else:
+            if (test_price - breakout_level) / breakout_level < tolerance:
+                touches += 1
     
-    print(f"[DEBUG][{symbol}][{timeframe}] Bullish Components: Proximity={proximity_bull:.1f}, Power={power_bull:.1f}, Structure={struct_bull:.1f}, Depth={depth_bull:.1f}")
-    print(f"[DEBUG][{symbol}][{timeframe}] Bullish Readiness: {bullish_readiness}")
-
-    # Step 10: Calculate Readiness (Bearish)
-    proximity_bear = max(0, (0.50 - dist_to_sup_pct) / 0.50) * 40
-    power_bear = max(0, (seller_power - 30) / 70) * 30
-    struct_bear = lower_highs_ratio * 15
-    depth_bear = (1.0 - min(1.0, sup_pullback_depth)) * 15
-    bearish_readiness = int(proximity_bear + power_bear + struct_bear + depth_bear)
+    pattern_maturity = min(20, touches * 4)  # Each touch = 4 points, max 20
+    print(f"[DEBUG][{symbol}][{timeframe}] Pattern Maturity: {pattern_maturity:.1f}/20 ({touches} touches)")
     
-    print(f"[DEBUG][{symbol}][{timeframe}] Bearish Readiness: {bearish_readiness}")
-
-    # Step 11: Determine direction and final score
-    clean_display = symbol.replace("-", "").replace("_", "").upper()
+    # --- 3. RANGE WIDTH SCORE (0-15) ---
+    # Narrower ranges = higher breakout probability
+    if range_width_pct < 1.0:
+        width_score = 15
+    elif range_width_pct < 2.0:
+        width_score = 12
+    elif range_width_pct < 3.0:
+        width_score = 8
+    elif range_width_pct < 5.0:
+        width_score = 5
+    else:
+        width_score = 0
+    print(f"[DEBUG][{symbol}][{timeframe}] Width Score: {width_score:.1f}/15")
+    
+    # --- 4. VOLUME ANALYSIS (0-20) ---
+    # Volume drying up = higher score (breakout building)
+    last_20_vol = volumes[-20:]
+    last_5_vol = volumes[-5:]
+    vol_avg_20 = np.mean(last_20_vol) if len(last_20_vol) > 0 else 0
+    vol_avg_5 = np.mean(last_5_vol) if len(last_5_vol) > 0 else 0
+    
+    if vol_avg_20 > 0:
+        vol_ratio = vol_avg_5 / vol_avg_20
+    else:
+        vol_ratio = 1.0
+    
+    # Volume drying up = ratio < 0.8 = higher score
+    if vol_ratio < 0.6:
+        volume_score = 20
+        volume_label = "Drying Up"
+    elif vol_ratio < 0.8:
+        volume_score = 15
+        volume_label = "Drying Up"
+    elif vol_ratio < 0.9:
+        volume_score = 10
+        volume_label = "Picking Up"
+    elif vol_ratio < 1.2:
+        volume_score = 5
+        volume_label = "Picking Up"
+    elif vol_ratio < 1.5:
+        volume_score = 8
+        volume_label = "Expanding"
+    else:
+        volume_score = 3
+        volume_label = "Exploding"
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Volume Score: {volume_score:.1f}/20 ({volume_label}, ratio={vol_ratio:.2f})")
+    
+    # --- 5. CANDLE BEHAVIOR (0-20) ---
+    # Look at the last 5 candles near the boundary
+    candle_score = 0
+    for i in range(max(0, len(closes)-6), len(closes)-1):
+        candle_high = highs[i]
+        candle_low = lows[i]
+        if primary_direction == "BULLISH":
+            # Bullish candles: closing near high, wicks rejecting the level
+            body_high = max(closes[i], closes[i+1] if i+1 < len(closes) else closes[i])
+            body_low = min(closes[i], closes[i+1] if i+1 < len(closes) else closes[i])
+            candle_range = candle_high - candle_low
+            if candle_range > 0:
+                close_position = (closes[i] - candle_low) / candle_range
+                if close_position > 0.7:
+                    candle_score += 4  # Bullish close
+                if (candle_high - max(closes[i], closes[i+1] if i+1 < len(closes) else closes[i])) / candle_range > 0.3:
+                    candle_score += 2  # Wick rejection
+        else:
+            # Bearish candles: closing near low, wicks rejecting support
+            body_high = max(closes[i], closes[i+1] if i+1 < len(closes) else closes[i])
+            body_low = min(closes[i], closes[i+1] if i+1 < len(closes) else closes[i])
+            candle_range = candle_high - candle_low
+            if candle_range > 0:
+                close_position = (closes[i] - candle_low) / candle_range
+                if close_position < 0.3:
+                    candle_score += 4  # Bearish close
+                if (min(closes[i], closes[i+1] if i+1 < len(closes) else closes[i]) - candle_low) / candle_range > 0.3:
+                    candle_score += 2  # Wick rejection
+    
+    candle_score = min(20, candle_score)
+    print(f"[DEBUG][{symbol}][{timeframe}] Candle Score: {candle_score:.1f}/20")
+    
+    # --- CALCULATE TOTAL READINESS SCORE (0-100) ---
+    readiness_score = int(round(proximity_score + pattern_maturity + width_score + volume_score + candle_score))
+    readiness_score = max(0, min(100, readiness_score))
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Total Readiness: {readiness_score}%")
+    
+    # --- DETERMINE PATTERN TYPE ---
+    # Check for ascending/descending triangle based on HL/LL patterns
+    last_10_lows = lows[-10:]
+    last_10_highs = highs[-10:]
+    
+    higher_lows = all(last_10_lows[i] >= last_10_lows[i-1] for i in range(1, len(last_10_lows)))
+    lower_highs = all(last_10_highs[i] <= last_10_highs[i-1] for i in range(1, len(last_10_highs)))
+    
+    if higher_lows and primary_direction == "BULLISH":
+        pattern_type = "ASCENDING TRIANGLE"
+    elif lower_highs and primary_direction == "BEARISH":
+        pattern_type = "DESCENDING TRIANGLE"
+    elif range_width_pct < 2.0:
+        pattern_type = "RECTANGLE"
+    else:
+        pattern_type = "CONSOLIDATION"
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Pattern: {pattern_type}")
+    
+    # --- DETERMINE CONFIDENCE LEVEL ---
+    # Based on readiness and pattern quality
+    if readiness_score >= 80 and pattern_type in ["ASCENDING TRIANGLE", "RECTANGLE"]:
+        confidence = "Very High"
+    elif readiness_score >= 65:
+        confidence = "High"
+    elif readiness_score >= 45:
+        confidence = "Medium"
+    elif readiness_score >= 25:
+        confidence = "Low"
+    else:
+        confidence = "Very Low"
+    
+    # --- STATUS LABEL ---
+    if readiness_score >= 80:
+        status_label = "Almost Ready"
+    elif readiness_score >= 65:
+        status_label = "Building"
+    elif readiness_score >= 45:
+        status_label = "Developing"
+    elif readiness_score >= 25:
+        status_label = "Early"
+    else:
+        status_label = "Waiting"
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] Confidence: {confidence}, Status: {status_label}")
+    
+    # --- MULTI-TIMEFRAME ALIGNMENT ---
+    # We'll calculate this in the frontend by looking at all timeframes
+    # For now, store the readiness for each timeframe
+    # The frontend will handle the alignment display
+    
     last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-
-    if bullish_readiness >= bearish_readiness:
-        break_direction = "BULLISH"
-        break_symbol = "▲"
-        direction_label = "Bullish Breakout Candidate"
-        readiness_score = min(99, max(10, bullish_readiness))
-        if higher_lows_ratio >= 0.6 and dist_to_res_pct <= 0.15:
-            structure_type = "ASCENDING TRIANGLE"
-        elif dist_to_res_pct <= 0.10:
-            structure_type = "RESISTANCE ABSORPTION"
-        else:
-            structure_type = "BULLISH COMPRESSION"
-    else:
-        break_direction = "BEARISH"
-        break_symbol = "▼"
-        direction_label = "Bearish Breakdown Candidate"
-        readiness_score = min(99, max(10, bearish_readiness))
-        if lower_highs_ratio >= 0.6 and dist_to_sup_pct <= 0.15:
-            structure_type = "DESCENDING TRIANGLE"
-        elif dist_to_sup_pct <= 0.10:
-            structure_type = "SUPPORT ABSORPTION"
-        else:
-            structure_type = "BEARISH COMPRESSION"
+    clean_display = symbol.replace("-", "").replace("_", "").upper()
     
-    print(f"[DEBUG][{symbol}][{timeframe}] ✅ FINAL: Direction={break_direction}, Readiness={readiness_score}%, Structure={structure_type}")
+    # Determine direction label
+    if primary_direction == "BULLISH":
+        direction_label = "Bullish Breakout Candidate"
+        break_symbol = "▲"
+    else:
+        direction_label = "Bearish Breakdown Candidate"
+        break_symbol = "▼"
+    
+    print(f"[DEBUG][{symbol}][{timeframe}] ✅ FINAL: {primary_direction} {readiness_score}%")
     print(f"[DEBUG][{symbol}][{timeframe}] === ANALYSIS COMPLETE ===")
-
+    
     return {
         "symbol": clean_display,
         "timeframe": timeframe,
-        "curr_close": curr_close,
+        "curr_close": round(curr_close, 6),
         "support": round(support, 6),
         "resistance": round(resistance, 6),
-        "structure_type": structure_type,
+        "range_width": round(range_width_pct, 2),
+        "pattern_type": pattern_type,
         "direction_label": direction_label,
-        "break_direction": break_direction,
+        "break_direction": primary_direction,
         "break_symbol": break_symbol,
         "readiness_score": readiness_score,
         "readiness_display": f"{readiness_score}%",
-        "buyer_power": buyer_power,
-        "seller_power": seller_power,
-        "distance_to_resistance": round(dist_to_res_price_pct, 2),
-        "distance_to_support": round(dist_to_sup_price_pct, 2),
-        "volume_trend": volume_trend,
+        "distance_to_resistance": round(dist_to_resistance_pct, 2),
+        "distance_to_support": round(dist_to_support_pct, 2),
+        "volume_label": volume_label,
+        "confidence": confidence,
+        "status_label": status_label,
+        "touches": touches,
         "last_updated": last_updated
     }, None
 
