@@ -20,23 +20,34 @@ CACHE = {}
 CACHE_LOCK = threading.Lock()
 _worker_thread_started = False
 SCAN_READY = False
-SCAN_READY_TIMESTAMP = 0
+
+# Live status tracking
+scan_status = {
+    "state": "INITIALIZING",
+    "current_symbol": "",
+    "current_timeframe": "",
+    "last_update": "",
+    "symbols_scanned": 0,
+    "total_symbols": len(DEFAULT_WATCHLIST)
+}
 
 def fetch_single_safe(sym, tf):
+    global scan_status
     try:
+        scan_status["current_symbol"] = sym
+        scan_status["current_timeframe"] = tf
         match, err = _process_symbol_tf(sym, tf)
         if match:
             return match
         else:
-            # Store placeholder for unavailable symbol
             return {
                 "symbol": sym,
                 "timeframe": tf,
-                "curr_close": "Unavailable",
+                "curr_close": "Unsupported",
                 "support": "N/A",
                 "resistance": "N/A",
                 "structure_type": "N/A",
-                "direction_label": "Unavailable",
+                "direction_label": "Unsupported",
                 "break_direction": "NEUTRAL",
                 "break_symbol": "⏳",
                 "readiness_score": 0,
@@ -53,14 +64,16 @@ def fetch_single_safe(sym, tf):
         return None
 
 def update_cache_job():
-    global SCAN_READY, SCAN_READY_TIMESTAMP
-    print(">>> Background cache worker started.")
+    global SCAN_READY, scan_status
+    print(">>> BACKGROUND SCANNER STARTED")
     cycle_completed = False
+    scan_status["state"] = "SCANNING"
     
     while True:
         try:
             for tf in ["5M", "15M", "1H", "4H"]:
-                print(f">>> Scanning batch: {tf}")
+                print(f">>> Scanning {tf}...")
+                scan_status["current_timeframe"] = tf
                 tasks = [sym for sym in DEFAULT_WATCHLIST]
                 with ThreadPoolExecutor(max_workers=5) as executor:
                     future_map = {executor.submit(fetch_single_safe, sym, tf): sym for sym in tasks}
@@ -70,41 +83,33 @@ def update_cache_job():
                         if res:
                             with CACHE_LOCK:
                                 CACHE[f"{sym}_{tf}"] = res
-                                print(f"[CACHE] Stored {sym} {tf} (Score: {res.get('readiness_score')})")
-                print(f">>> Finished batch: {tf}. Sleeping 2s...")
+                                scan_status["symbols_scanned"] += 1
+                                scan_status["current_symbol"] = sym
+                                scan_status["last_update"] = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+                                print(f"[{sym}][{tf}] Cached")
+                print(f">>> Completed {tf}")
                 time.sleep(2)
             
-            # Mark first cycle complete
             if not cycle_completed:
                 cycle_completed = True
                 SCAN_READY = True
-                SCAN_READY_TIMESTAMP = time.time()
-                print(">>> FIRST SCAN CYCLE COMPLETE. Scanner is now READY.")
+                scan_status["state"] = "LIVE"
+                print(">>> SCANNER READY - LIVE")
             
-            print(">>> Full cycle complete. Sleeping 15s...")
+            print(">>> Cycle complete. Sleeping 15s...")
             time.sleep(15)
         except Exception as e:
             print(f"!!! Worker exception: {e}")
-            # If worker crashes, restart it by continuing the loop
             time.sleep(5)
 
 @app.before_request
 def start_background_worker():
-    global _worker_thread_started, SCAN_READY
+    global _worker_thread_started
     if not _worker_thread_started:
         thread = threading.Thread(target=update_cache_job, daemon=True)
         thread.start()
         _worker_thread_started = True
         print(">>> Background worker thread launched.")
-        # Set a safety timeout: if SCAN_READY isn't true after 30 seconds, force it
-        def safety_timer():
-            global SCAN_READY
-            time.sleep(30)
-            if not SCAN_READY:
-                SCAN_READY = True
-                print(">>> SAFETY TIMEOUT: SCAN_READY forced to True.")
-        timer_thread = threading.Thread(target=safety_timer, daemon=True)
-        timer_thread.start()
 
 def sort_results(items):
     tf_priority = {"5M": 0, "15M": 1, "1H": 2, "4H": 3}
@@ -132,14 +137,13 @@ def index():
                 match["pinned"] = item["pinned"]
                 watchlist_rows.append(match)
             else:
-                # If SCAN_READY is True but symbol missing, show as loading
                 watchlist_rows.append({
                     "symbol": item["symbol"],
                     "timeframe": active_tf,
-                    "curr_close": "Loading..." if not SCAN_READY else "Unavailable",
+                    "curr_close": "Loading...",
                     "support": "...",
                     "resistance": "...",
-                    "direction_label": "Fetching..." if not SCAN_READY else "Unavailable",
+                    "direction_label": "Fetching...",
                     "break_direction": "NEUTRAL",
                     "break_symbol": "⏳",
                     "readiness_score": 0,
@@ -166,7 +170,8 @@ def index():
         selected_tf=selected_tf,
         watchlist_rows=watchlist_rows,
         rows=scanner_results,
-        is_loading=is_loading
+        is_loading=is_loading,
+        scan_status=scan_status
     )
 
 @app.route("/api/watchlist/add", methods=["POST"])
