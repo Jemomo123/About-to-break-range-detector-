@@ -164,14 +164,12 @@
         }
         .wl-add-btn:hover { background: #3b82f6; }
 
-        /* CARD GRID */
         .card-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
             gap: 10px;
         }
 
-        /* SCANNER CARD */
         .scan-card {
             background: #0f172a;
             border: 1px solid #1e293b;
@@ -215,6 +213,7 @@
         .price-value { font-weight: 600; font-size: 0.75rem; }
         .price-value.sup { color: #4ade80; }
         .price-value.res { color: #f87171; }
+        .price-value.unsupported { color: #64748b; font-style: italic; }
 
         .readiness-score {
             font-weight: 800;
@@ -233,16 +232,6 @@
 
         .metric-label { font-size: 0.5rem; color: #64748b; text-transform: uppercase; }
         .metric-value { font-size: 0.7rem; font-weight: 600; color: #e2e8f0; }
-
-        .alignment-dots {
-            display: flex;
-            gap: 4px;
-            align-items: center;
-        }
-        .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-        .dot-bullish { background: #00c897; }
-        .dot-bearish { background: #f23645; }
-        .dot-neutral { background: #475569; }
 
         .confidence-badge {
             font-size: 0.6rem;
@@ -293,6 +282,32 @@
         }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
+        .scanner-summary {
+            margin-top: 16px;
+            padding: 8px 12px;
+            background: #0f172a;
+            border-radius: 8px;
+            border: 1px solid #1e293b;
+            font-size: 0.65rem;
+            color: #94a3b8;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .scanner-summary .stat { 
+            display: flex; 
+            align-items: center; 
+            gap: 4px; 
+        }
+        .scanner-summary .stat .num { 
+            color: #e2e8f0; 
+            font-weight: 600; 
+        }
+        .scanner-summary .stat .label { 
+            color: #64748b; 
+        }
+
         @media (max-width: 600px) {
             body { padding: 6px; font-size: 12px; }
             .header-title { font-size: 0.85rem; }
@@ -301,12 +316,14 @@
             .card-grid { grid-template-columns: 1fr; gap: 8px; }
             .scan-card { padding: 10px 12px; }
             .status-detail { font-size: 0.5rem; gap: 6px; }
+            .scanner-summary { font-size: 0.55rem; gap: 8px; }
         }
     </style>
 </head>
 <body>
 <div class="container">
 
+    <!-- HEADER -->
     <div class="header">
         <span class="header-title">⟡ ABOUT TO BREAK RANGE DETECTOR</span>
         <div class="header-right">
@@ -328,6 +345,7 @@
         </div>
     </div>
 
+    <!-- WATCHLIST (COLLAPSIBLE) -->
     <details class="watchlist-drawer">
         <summary>
             <span class="wl-icon">★</span> Watchlist
@@ -340,6 +358,15 @@
                 <button class="wl-pin {{ 'active' if item.pinned else '' }}" onclick="togglePin('{{ item.symbol }}', '{{ item.timeframe }}')">★</button>
                 <span class="wl-sym">{{ item.symbol }}</span>
                 <span class="wl-tf">{{ item.timeframe }}</span>
+                <span class="wl-price" style="color:{% if item.curr_close == 'Unsupported' %}#64748b{% else %}#94a3b8{% endif %};">
+                    {% if item.curr_close == 'Unsupported' %}
+                        Unsupported
+                    {% elif item.curr_close == 'Loading...' %}
+                        ...
+                    {% else %}
+                        ${{ item.curr_close }}
+                    {% endif %}
+                </span>
                 <button class="wl-remove" onclick="removeSymbol('{{ item.symbol }}', '{{ item.timeframe }}')">✕</button>
             </div>
             {% endfor %}
@@ -350,6 +377,7 @@
         </div>
     </details>
 
+    <!-- SCANNER RESULTS (CARD GRID) -->
     <div class="card-grid">
         {% if is_loading %}
             {% for _ in range(6) %}
@@ -446,38 +474,34 @@
                     <span><span class="metric-label">Resistance:</span> <span class="price-value res">${{ row.resistance }}</span></span>
                 </div>
 
-                <!-- Row 6: Multi-Timeframe Alignment -->
-                <div class="card-row" style="border-top:1px solid #1e293b; padding-top:4px; margin-top:2px;">
-                    <div class="alignment-dots">
-                        <span style="font-size:0.5rem; color:#64748b; margin-right:4px;">Alignment:</span>
-                        {% set tfs = ['5M', '15M', '1H'] %}
-                        {% for tf in tfs %}
-                            {% if tf in row.tf_data %}
-                                {% if row.tf_data[tf].direction == 'BULLISH' %}
-                                    <span class="dot dot-bullish" title="{{ tf }} Bullish"></span>
-                                {% elif row.tf_data[tf].direction == 'BEARISH' %}
-                                    <span class="dot dot-bearish" title="{{ tf }} Bearish"></span>
-                                {% else %}
-                                    <span class="dot dot-neutral" title="{{ tf }} Neutral"></span>
-                                {% endif %}
-                            {% else %}
-                                <span class="dot dot-neutral" title="{{ tf }} N/A"></span>
-                            {% endif %}
+                <!-- Row 6: Multi-Timeframe Alignment Explanation -->
+                <div class="card-row" style="border-top:1px solid #1e293b; padding-top:6px; margin-top:4px; flex-direction:column; align-items:stretch;">
+                    <div style="display:flex; flex-direction:column; gap:2px; width:100%;">
+                        {% set lines = row.alignment_explanation.split('\n') %}
+                        {% for line in lines %}
+                            <div style="font-size:0.6rem; 
+                                {% if 'BULLISH' in line %}color:#4ade80;
+                                {% elif 'BEARISH' in line %}color:#f87171;
+                                {% elif 'MIXED' in line %}color:#fbbf24;
+                                {% else %}color:#94a3b8;{% endif %}">
+                                {{ line }}
+                            </div>
                         {% endfor %}
                     </div>
-                    <span style="font-size:0.6rem; color:#64748b;">
-                        {% if row.alignment_direction == 'BULLISH' %}
-                            <span style="color:#4ade80;">▲ {{ row.alignment_count }}</span>
-                        {% elif row.alignment_direction == 'BEARISH' %}
-                            <span style="color:#f87171;">▼ {{ row.alignment_count }}</span>
-                        {% else %}
-                            <span>● {{ row.alignment_count }}</span>
-                        {% endif %}
-                    </span>
                 </div>
             </div>
             {% endfor %}
         {% endif %}
+    </div>
+
+    <!-- SCANNER SUMMARY -->
+    <div class="scanner-summary">
+        <span class="stat"><span class="label">Scanned:</span> <span class="num">{{ diagnostics.total_symbols * diagnostics.timeframes }}</span></span>
+        <span class="stat"><span class="label">Passed:</span> <span class="num">{{ diagnostics.passed }}</span></span>
+        <span class="stat"><span class="label">Unsupported:</span> <span class="num">{{ diagnostics.unsupported }}</span></span>
+        <span class="stat"><span class="label">Failed:</span> <span class="num">{{ diagnostics.failed_logic }}</span></span>
+        <span class="stat"><span class="label">Displayed:</span> <span class="num">{{ diagnostics.displayed }}</span></span>
+        <span class="stat"><span class="label">Cache:</span> <span class="num">{{ diagnostics.cache_size }}</span></span>
     </div>
 
 </div>
