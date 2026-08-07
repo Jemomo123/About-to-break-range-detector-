@@ -1,303 +1,364 @@
-import time
-import threading
-from flask import Flask, render_template, request, jsonify
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from scanner import _process_symbol_tf
+import requests
+import pandas as pd
+import numpy as np
 from datetime import datetime, timezone
-from collections import defaultdict
+import threading
 
-app = Flask(__name__)
+# ===== CONFIGURATION =====
+DEBUG = False  # Set to True for detailed scoring logs
+# =========================
 
-DEFAULT_WATCHLIST = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", 
-    "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", 
-    "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", 
-    "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", 
-    "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"
-]
-
-WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEFAULT_WATCHLIST]
-
-CACHE = {}
-CACHE_LOCK = threading.Lock()
-_worker_thread_started = False
-SCAN_READY = False
-
-scan_status = {
-    "state": "INITIALIZING",
-    "current_symbol": "",
-    "current_timeframe": "",
-    "last_update": "",
-    "symbols_scanned": 0,
-    "total_symbols": len(DEFAULT_WATCHLIST),
-    "recently_scanned": [],
-    "cache_size": 0
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
-def fetch_single_safe(sym, tf):
-    global scan_status
+# Unsupported symbol cache (thread-safe)
+UNSUPPORTED_SYMBOLS = set()
+UNSUPPORTED_LOCK = threading.Lock()
+
+def is_unsupported(symbol):
+    with UNSUPPORTED_LOCK:
+        return symbol in UNSUPPORTED_SYMBOLS
+
+def mark_unsupported(symbol):
+    with UNSUPPORTED_LOCK:
+        UNSUPPORTED_SYMBOLS.add(symbol)
+        print(f"[UNSUPPORTED] {symbol} added to unsupported cache")
+
+
+def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
+    """
+    PRIMARY: OKX REST API
+    FALLBACK: MEXC REST API
+    """
+    if is_unsupported(symbol):
+        print(f"[SKIP] {symbol} {timeframe} - unsupported")
+        return pd.DataFrame()
+
+    clean_sym = symbol.replace("_", "").replace("-", "").upper()
+    if not clean_sym.endswith("USDT"):
+        clean_sym += "USDT"
+
+    okx_sym = f"{clean_sym[:-4]}-USDT"
+    okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
+    okx_bar = okx_tf_map.get(timeframe, "15m")
+
+    # 1. OKX
+    okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
     try:
-        scan_status["current_symbol"] = sym
-        scan_status["current_timeframe"] = tf
-        match, err = _process_symbol_tf(sym, tf)
-        if match:
-            print(f"[CACHE] ✅ {sym} {tf} - Score: {match.get('readiness_score')}%")
-            return match
-        else:
-            print(f"[CACHE] ❌ {sym} {tf} - Unsupported ({err})")
-            return {
-                "symbol": sym,
-                "timeframe": tf,
-                "curr_close": "Unsupported",
-                "support": "N/A",
-                "resistance": "N/A",
-                "range_width": 0.0,
-                "pattern_type": "N/A",
-                "direction_label": "Unsupported",
-                "break_direction": "NEUTRAL",
-                "break_symbol": "⏳",
-                "readiness_score": 0,
-                "readiness_display": "0%",
-                "distance_to_resistance": 0.0,
-                "distance_to_support": 0.0,
-                "volume_label": "N/A",
-                "confidence": "N/A",
-                "status_label": "N/A",
-                "touches": 0,
-                "last_updated": "--:--:-- UTC"
-            }
-    except Exception as e:
-        print(f"[CACHE] ⚠️ {sym} {tf} - Exception: {e}")
-        return None
-
-def update_cache_job():
-    global SCAN_READY, scan_status
-    print(">>> BACKGROUND SCANNER STARTED")
-    scan_status["state"] = "SCANNING"
-    first_data_received = False
-    scanned_in_cycle = []
-    
-    while True:
-        try:
-            for tf in ["5M", "15M", "1H", "4H"]:
-                print(f">>> Scanning {tf}...")
-                scan_status["current_timeframe"] = tf
-                tasks = [sym for sym in DEFAULT_WATCHLIST]
-                with ThreadPoolExecutor(max_workers=10) as executor:
-                    future_map = {executor.submit(fetch_single_safe, sym, tf): sym for sym in tasks}
-                    for future in as_completed(future_map):
-                        sym = future_map[future]
-                        res = future.result()
-                        if res:
-                            with CACHE_LOCK:
-                                CACHE[f"{sym}_{tf}"] = res
-                                scan_status["symbols_scanned"] += 1
-                                scan_status["current_symbol"] = sym
-                                scan_status["last_update"] = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-                                scan_status["cache_size"] = len(CACHE)
-                                
-                                scanned_in_cycle.append(sym)
-                                if len(scanned_in_cycle) > 10:
-                                    scanned_in_cycle.pop(0)
-                                scan_status["recently_scanned"] = scanned_in_cycle.copy()
-                                
-                                if not first_data_received:
-                                    first_data_received = True
-                                    SCAN_READY = True
-                                    scan_status["state"] = "LIVE"
-                                    print(f">>> SCAN_READY = True (first data: {sym} {tf})")
-                                print(f"[CACHE] Stored {sym} {tf} (Cache size: {len(CACHE)})")
-                print(f">>> Completed {tf}")
-                time.sleep(1)  # faster cycle
-            
-            print(">>> Cycle complete. Sleeping 15s...")
-            time.sleep(15)
-        except Exception as e:
-            print(f"!!! Worker exception: {e}")
-            time.sleep(5)
-
-@app.before_request
-def start_background_worker():
-    global _worker_thread_started
-    if not _worker_thread_started:
-        thread = threading.Thread(target=update_cache_job, daemon=True)
-        thread.start()
-        _worker_thread_started = True
-        print(">>> Background worker thread launched.")
-
-def sort_results(items):
-    tf_priority = {"5M": 0, "15M": 1, "1H": 2, "4H": 3}
-    def sort_key(item):
-        readiness = item.get("readiness_score", 0)
-        tf = item.get("timeframe", "15M")
-        if readiness is None or not isinstance(readiness, (int, float)):
-            readiness = -1
-        return (-readiness, tf_priority.get(tf, 99))
-    return sorted(items, key=sort_key)
-
-def generate_alignment_explanation(symbol, active_tf):
-    # (unchanged from previous version – kept for completeness)
-    tf_scores = {}
-    for tf in ["5M", "15M", "1H"]:
-        key = f"{symbol}_{tf}"
-        if key in CACHE:
-            cached = CACHE[key]
-            if cached.get("break_direction") in ["BULLISH", "BEARISH"]:
-                tf_scores[tf] = {
-                    "direction": cached["break_direction"],
-                    "readiness": cached.get("readiness_score", 0)
-                }
-    if len(tf_scores) < 2:
-        return "Insufficient data for alignment analysis."
-    directions = [v["direction"] for v in tf_scores.values() if v["direction"] in ["BULLISH", "BEARISH"]]
-    bullish_count = directions.count("BULLISH")
-    bearish_count = directions.count("BEARISH")
-    total_tfs = len(tf_scores)
-    if bullish_count > bearish_count:
-        primary = "▲ BULLISH"
-        reasons = ["✓ Trend is Up"]
-        key = f"{symbol}_{active_tf}"
-        if key in CACHE and CACHE[key].get("distance_to_resistance", 100) < 3.0:
-            reasons.append("✓ Price is Near Resistance")
-        if "1H" in tf_scores and tf_scores["1H"]["direction"] == "BULLISH":
-            reasons.append("✓ Momentum is Bullish")
-        elif "15M" in tf_scores and tf_scores["15M"]["direction"] == "BULLISH":
-            reasons.append("✓ Momentum is Bullish")
-        else:
-            reasons.append("○ Momentum is Building")
-    elif bearish_count > bullish_count:
-        primary = "▼ BEARISH"
-        reasons = ["✓ Trend is Down"]
-        key = f"{symbol}_{active_tf}"
-        if key in CACHE and CACHE[key].get("distance_to_support", 100) < 3.0:
-            reasons.append("✓ Price is Near Support")
-        if "1H" in tf_scores and tf_scores["1H"]["direction"] == "BEARISH":
-            reasons.append("✓ Momentum is Bearish")
-        elif "15M" in tf_scores and tf_scores["15M"]["direction"] == "BEARISH":
-            reasons.append("✓ Momentum is Bearish")
-        else:
-            reasons.append("○ Momentum is Building")
-    else:
-        primary = "● MIXED"
-        reasons = []
-        if bullish_count > 0:
-            reasons.append(f"✓ {bullish_count} timeframe(s) Bullish")
-        if bearish_count > 0:
-            reasons.append(f"✓ {bearish_count} timeframe(s) Bearish")
-        key = f"{symbol}_{active_tf}"
-        if key in CACHE:
-            if CACHE[key].get("distance_to_resistance", 100) < 3.0:
-                reasons.append("✓ Price is Near Resistance")
-            if CACHE[key].get("distance_to_support", 100) < 3.0:
-                reasons.append("✓ Price is Near Support")
-    summary = f"Alignment: {bullish_count}/{total_tfs} Bullish, {bearish_count}/{total_tfs} Bearish"
-    display_lines = [primary] + reasons + [summary]
-    return "\n".join(display_lines)
-
-@app.route("/")
-def index():
-    selected_tf = request.args.get("tf", "15M").upper()
-    active_tf = "15M" if selected_tf == "ALL" else selected_tf
-
-    print(f"[ROUTE] Selected TF: {selected_tf}, Active TF: {active_tf}")
-    print(f"[ROUTE] SCAN_READY: {SCAN_READY}, CACHE size: {len(CACHE)}")
-
-    watchlist_rows = []
-    is_loading = not SCAN_READY
-
-    with CACHE_LOCK:
-        # --- Build watchlist rows for the active timeframe (for watchlist display) ---
-        for item in WATCHLIST:
-            key = f"{item['symbol']}_{active_tf}"
-            if key in CACHE:
-                match = dict(CACHE[key])
-                match["pinned"] = item["pinned"]
-                match["alignment_explanation"] = generate_alignment_explanation(item["symbol"], active_tf)
-                watchlist_rows.append(match)
+        resp = requests.get(okx_url, headers=HEADERS, timeout=10)
+        if resp.status_code == 200:
+            res_json = resp.json()
+            code = res_json.get("code")
+            data = res_json.get("data", [])
+            if code == "0" and isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data, columns=[
+                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                    'volCcy', 'volCcyQuote', 'confirm'
+                ])
+                df = df.iloc[::-1].reset_index(drop=True)
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = df[col].astype(float)
+                print(f"[OKX][{symbol}][{timeframe}] ✓ Downloaded {len(df)} candles")
+                return df
+            elif code == "51001":
+                print(f"[OKX][{symbol}] Unsupported instrument (51001)")
+                mark_unsupported(symbol)
+                return pd.DataFrame()
             else:
-                watchlist_rows.append({
-                    "symbol": item["symbol"],
-                    "timeframe": active_tf,
-                    "curr_close": "Loading..." if not SCAN_READY else "Unavailable",
-                    "support": "...",
-                    "resistance": "...",
-                    "range_width": 0.0,
-                    "pattern_type": "N/A",
-                    "direction_label": "Fetching..." if not SCAN_READY else "Unavailable",
-                    "break_direction": "NEUTRAL",
-                    "break_symbol": "⏳",
-                    "readiness_score": 0,
-                    "readiness_display": "0%",
-                    "distance_to_resistance": 0.0,
-                    "distance_to_support": 0.0,
-                    "volume_label": "N/A",
-                    "confidence": "N/A",
-                    "status_label": "N/A",
-                    "touches": 0,
-                    "pinned": item["pinned"],
-                    "last_updated": "--:--:-- UTC",
-                    "alignment_explanation": "Waiting for data..."
-                })
+                print(f"[OKX][{symbol}] Empty data. Code: {code}")
+        else:
+            print(f"[OKX][{symbol}] HTTP {resp.status_code}")
+    except Exception as e:
+        print(f"[OKX][{symbol}] Exception: {e}")
 
-    watchlist_rows = sort_results(watchlist_rows)
+    # 2. MEXC fallback
+    mexc_sym = clean_sym
+    mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
+    mexc_bar = mexc_tf_map.get(timeframe, "15m")
+    mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={mexc_sym}&interval={mexc_bar}&limit={limit}"
+    try:
+        resp = requests.get(mexc_url, headers=HEADERS, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) > 0:
+                parsed = []
+                for row in data:
+                    if len(row) >= 6:
+                        parsed.append(row[:6])
+                if parsed:
+                    df = pd.DataFrame(parsed, columns=[
+                        'timestamp', 'open', 'high', 'low', 'close', 'volume'
+                    ])
+                    for col in ['open', 'high', 'low', 'close', 'volume']:
+                        df[col] = df[col].astype(float)
+                    print(f"[MEXC][{symbol}][{timeframe}] ✓ Downloaded {len(df)} candles")
+                    return df
+                else:
+                    print(f"[MEXC][{symbol}] No valid rows")
+            else:
+                print(f"[MEXC][{symbol}] Empty data")
+        else:
+            print(f"[MEXC][{symbol}] HTTP {resp.status_code}")
+    except Exception as e:
+        print(f"[MEXC][{symbol}] Exception: {e}")
 
-    # --- Build scanner results ---
-    if selected_tf == "ALL":
-        # Aggregate all timeframes
-        all_results = []
-        for key, data in CACHE.items():
-            # key format: "SYMBOL_TF"
-            parts = key.rsplit("_", 1)
-            if len(parts) == 2:
-                sym, tf = parts[0], parts[1]
-                if tf in ["5M", "15M", "1H", "4H"]:
-                    # Only include if score > 0
-                    if data.get("readiness_score", 0) > 0:
-                        entry = dict(data)
-                        entry["pinned"] = any(w["symbol"] == sym and w["pinned"] for w in WATCHLIST)
-                        all_results.append(entry)
-        scanner_results = sort_results(all_results)
-    else:
-        # Specific timeframe: use watchlist_rows but filter those with score > 0
-        scanner_results = [r for r in watchlist_rows if r.get("readiness_score", 0) > 0]
-        scanner_results = sort_results(scanner_results)
+    print(f"[{symbol}][{timeframe}] ✗ FAILED")
+    return pd.DataFrame()
 
-    print(f"[ROUTE] Total results: {len(scanner_results)}")
 
-    return render_template(
-        "index.html",
-        selected_tf=selected_tf,
-        watchlist_rows=watchlist_rows,
-        rows=scanner_results,
-        is_loading=is_loading,
-        scan_status=scan_status
+def detect_support_resistance(highs, lows, closes, lookback=30):
+    support = np.min(lows[-lookback:])
+    resistance = np.max(highs[-lookback:])
+    tolerance = 0.005
+    support_touches = 0
+    resistance_touches = 0
+    for i in range(len(closes) - lookback, len(closes)):
+        price = closes[i]
+        if abs(price - support) / support < tolerance:
+            support_touches += 1
+        if abs(price - resistance) / resistance < tolerance:
+            resistance_touches += 1
+    return support, resistance, support_touches, resistance_touches
+
+
+def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
+    if df.empty or len(df) < 30:
+        if DEBUG:
+            print(f"[DEBUG][{symbol}][{timeframe}] ❌ Insufficient candles")
+        return None, "DATA UNAVAILABLE"
+
+    closes = df['close'].values
+    highs = df['high'].values
+    lows = df['low'].values
+    volumes = df['volume'].values
+
+    curr_close = float(closes[-1])
+
+    tr = np.maximum(highs[1:] - lows[1:], 
+                    np.abs(highs[1:] - closes[:-1]),
+                    np.abs(lows[1:] - closes[:-1]))
+    atr = np.mean(tr[-14:]) if len(tr) >= 14 else np.mean(tr)
+    vol_factor = atr / curr_close if curr_close > 0 else 0
+    lookback = min(40, max(20, int(30 * (1 + vol_factor * 10))))
+    lookback = min(lookback, len(df) - 1)
+
+    support, resistance, support_touches, resistance_touches = detect_support_resistance(
+        highs, lows, closes, lookback
     )
 
-@app.route("/api/watchlist/add", methods=["POST"])
-def add_watchlist():
-    data = request.json or {}
-    sym = data.get("symbol", "").upper().strip()
-    tf = data.get("timeframe", "15M")
-    if sym and not any(w["symbol"] == sym for w in WATCHLIST):
-        WATCHLIST.append({"symbol": sym, "timeframe": tf, "pinned": False})
-    return jsonify({"status": "ok"})
+    range_height = resistance - support
+    range_mid = (resistance + support) / 2
+    range_width_pct = (range_height / range_mid) * 100 if range_mid > 0 else 100
 
-@app.route("/api/watchlist/remove", methods=["POST"])
-def remove_watchlist():
-    data = request.json or {}
-    sym = data.get("symbol", "").upper().strip()
-    global WATCHLIST
-    WATCHLIST = [w for w in WATCHLIST if w["symbol"] != sym]
-    return jsonify({"status": "ok"})
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] Range: S={support:.6f}, R={resistance:.6f}, Width={range_width_pct:.2f}%")
+        print(f"[DEBUG][{symbol}][{timeframe}] Touches: Support={support_touches}, Resistance={resistance_touches}")
 
-@app.route("/api/watchlist/pin", methods=["POST"])
-def pin_watchlist():
-    data = request.json or {}
-    sym = data.get("symbol", "").upper().strip()
-    for w in WATCHLIST:
-        if w["symbol"] == sym:
-            w["pinned"] = not w["pinned"]
-    return jsonify({"status": "ok"})
+    if range_height <= 0:
+        return None, "NO RANGE"
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    if range_width_pct > 12.0:
+        if DEBUG:
+            print(f"[DEBUG][{symbol}][{timeframe}] ❌ Range too wide: {range_width_pct:.2f}%")
+        return None, "RANGE TOO WIDE"
+
+    dist_to_resistance = (resistance - curr_close) / curr_close * 100
+    dist_to_support = (curr_close - support) / curr_close * 100
+
+    if dist_to_resistance < dist_to_support:
+        primary_direction = "BULLISH"
+        breakout_level = resistance
+        distance_to_breakout = dist_to_resistance
+        touches = resistance_touches
+    else:
+        primary_direction = "BEARISH"
+        breakout_level = support
+        distance_to_breakout = dist_to_support
+        touches = support_touches
+
+    if touches < 2:
+        if DEBUG:
+            print(f"[DEBUG][{symbol}][{timeframe}] ❌ Breakout level has only {touches} touch(es)")
+        return None, "INSUFFICIENT_TOUCHES"
+
+    vol_ma20 = np.mean(volumes[-20:]) if len(volumes) >= 20 else np.mean(volumes)
+    vol_ma5 = np.mean(volumes[-5:]) if len(volumes) >= 5 else 0
+    vol_trend = np.polyfit(range(10), volumes[-10:], 1)[0] if len(volumes) >= 10 else 0
+
+    if vol_ma5 < vol_ma20 * 0.6 and vol_trend < 0:
+        volume_label = "Drying Up"
+        volume_score = 25
+    elif vol_ma5 < vol_ma20 * 0.8 and vol_trend < 0:
+        volume_label = "Drying Up"
+        volume_score = 20
+    elif vol_ma5 < vol_ma20 * 0.9:
+        volume_label = "Picking Up"
+        volume_score = 15
+    elif vol_ma5 < vol_ma20 * 1.2:
+        volume_label = "Picking Up"
+        volume_score = 10
+    elif vol_ma5 < vol_ma20 * 1.8:
+        volume_label = "Expanding"
+        volume_score = 8
+    else:
+        volume_label = "Exploding"
+        volume_score = 5
+
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] Volume: {volume_label} (score={volume_score})")
+
+    max_distance = 5.0
+    proximity_score = max(0, min(35, 35 * (1 - min(distance_to_breakout, max_distance) / max_distance)))
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] Proximity Score: {proximity_score:.1f}/35")
+
+    pattern_maturity = min(20, touches * 5)
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] Pattern Maturity: {pattern_maturity:.1f}/20")
+
+    if range_width_pct < 2.0:
+        tightness_score = 10
+    elif range_width_pct < 3.0:
+        tightness_score = 7
+    elif range_width_pct < 5.0:
+        tightness_score = 4
+    else:
+        tightness_score = 0
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] Tightness Score: {tightness_score:.1f}/10")
+
+    candle_score = 0
+    for i in range(max(0, len(closes)-6), len(closes)-1):
+        candle_range = highs[i] - lows[i]
+        if candle_range > 0:
+            if primary_direction == "BULLISH":
+                close_position = (closes[i] - lows[i]) / candle_range
+                if close_position > 0.7:
+                    candle_score += 2
+                if highs[i] - breakout_level < 0.001:
+                    candle_score += 1
+            else:
+                close_position = (closes[i] - lows[i]) / candle_range
+                if close_position < 0.3:
+                    candle_score += 2
+                if breakout_level - lows[i] < 0.001:
+                    candle_score += 1
+    candle_score = min(10, candle_score)
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] Candle Score: {candle_score:.1f}/10")
+
+    readiness_score = int(round(proximity_score + volume_score + pattern_maturity + tightness_score + candle_score))
+    readiness_score = max(0, min(100, readiness_score))
+
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] Total Readiness: {readiness_score}%")
+
+    last_10_lows = lows[-10:]
+    last_10_highs = highs[-10:]
+    higher_lows = all(last_10_lows[i] >= last_10_lows[i-1] for i in range(1, len(last_10_lows)))
+    lower_highs = all(last_10_highs[i] <= last_10_highs[i-1] for i in range(1, len(last_10_highs)))
+
+    if higher_lows and primary_direction == "BULLISH":
+        pattern_type = "ASCENDING TRIANGLE"
+    elif lower_highs and primary_direction == "BEARISH":
+        pattern_type = "DESCENDING TRIANGLE"
+    elif range_width_pct < 2.0:
+        pattern_type = "RECTANGLE"
+    else:
+        pattern_type = "CONSOLIDATION"
+
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] Pattern: {pattern_type}")
+
+    if readiness_score >= 80 and pattern_type in ["ASCENDING TRIANGLE", "RECTANGLE"]:
+        confidence = "Very High"
+    elif readiness_score >= 65:
+        confidence = "High"
+    elif readiness_score >= 45:
+        confidence = "Medium"
+    elif readiness_score >= 25:
+        confidence = "Low"
+    else:
+        confidence = "Very Low"
+
+    if readiness_score >= 80:
+        status_label = "Almost Ready"
+    elif readiness_score >= 65:
+        status_label = "Building"
+    elif readiness_score >= 45:
+        status_label = "Developing"
+    elif readiness_score >= 25:
+        status_label = "Early"
+    else:
+        status_label = "Waiting"
+
+    last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    clean_display = symbol.replace("-", "").replace("_", "").upper()
+
+    if primary_direction == "BULLISH":
+        direction_label = "Bullish Breakout Candidate"
+        break_symbol = "▲"
+    else:
+        direction_label = "Bearish Breakdown Candidate"
+        break_symbol = "▼"
+
+    if DEBUG:
+        print(f"[DEBUG][{symbol}][{timeframe}] ✅ FINAL: {primary_direction} {readiness_score}%")
+        print(f"[DEBUG][{symbol}][{timeframe}] === ANALYSIS COMPLETE ===")
+
+    return {
+        "symbol": clean_display,
+        "timeframe": timeframe,
+        "curr_close": round(curr_close, 6),
+        "support": round(support, 6),
+        "resistance": round(resistance, 6),
+        "range_width": round(range_width_pct, 2),
+        "pattern_type": pattern_type,
+        "direction_label": direction_label,
+        "break_direction": primary_direction,
+        "break_symbol": break_symbol,
+        "readiness_score": readiness_score,
+        "readiness_display": f"{readiness_score}%",
+        "distance_to_resistance": round(dist_to_resistance, 2),
+        "distance_to_support": round(dist_to_support, 2),
+        "volume_label": volume_label,
+        "confidence": confidence,
+        "status_label": status_label,
+        "touches": touches,
+        "last_updated": last_updated
+    }, None
+
+
+def _process_symbol_tf(symbol: str, tf: str):
+    """Process a single symbol/timeframe combination."""
+    print(f"[SCAN][{symbol}][{tf}] Starting...")
+    df = fetch_ohlcv(symbol, tf)
+    if df.empty:
+        print(f"[SCAN][{symbol}][{tf}] ❌ No data")
+        return None, "DATA UNAVAILABLE"
+    result, err = analyze_range_structure(df, symbol, tf)
+    if result:
+        print(f"[SCAN][{symbol}][{tf}] ✅ PASSED - Readiness: {result['readiness_score']}%")
+    else:
+        print(f"[SCAN][{symbol}][{tf}] ❌ FAILED - {err}")
+    return result, err
+
+
+def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
+    results = []
+    diagnostics = {"symbols_scanned": len(symbols), "symbols_downloaded": 0, "rejections": {}}
+
+    tfs_to_run = ["5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
+
+    for sym in symbols:
+        for tf in tfs_to_run:
+            match, err = _process_symbol_tf(sym, tf)
+            if match:
+                diagnostics["symbols_downloaded"] += 1
+                results.append(match)
+            else:
+                diagnostics["rejections"][err] = diagnostics["rejections"].get(err, 0) + 1
+
+    results.sort(key=lambda x: -x["readiness_score"])
+    return results, diagnostics
