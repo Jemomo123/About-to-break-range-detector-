@@ -22,14 +22,15 @@ CACHE_LOCK = threading.Lock()
 _worker_thread_started = False
 SCAN_READY = False
 
-# Live status tracking
+# Live status tracking - now shows ALL scanned symbols
 scan_status = {
     "state": "INITIALIZING",
     "current_symbol": "",
     "current_timeframe": "",
     "last_update": "",
     "symbols_scanned": 0,
-    "total_symbols": len(DEFAULT_WATCHLIST)
+    "total_symbols": len(DEFAULT_WATCHLIST),
+    "recently_scanned": []  # NEW: list of recently scanned symbols
 }
 
 def fetch_single_safe(sym, tf):
@@ -69,6 +70,7 @@ def update_cache_job():
     print(">>> BACKGROUND SCANNER STARTED")
     scan_status["state"] = "SCANNING"
     first_data_received = False
+    scanned_in_cycle = []
     
     while True:
         try:
@@ -87,9 +89,13 @@ def update_cache_job():
                                 scan_status["symbols_scanned"] += 1
                                 scan_status["current_symbol"] = sym
                                 scan_status["last_update"] = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+                                # Keep a rolling list of the last 10 scanned symbols
+                                scanned_in_cycle.append(sym)
+                                if len(scanned_in_cycle) > 10:
+                                    scanned_in_cycle.pop(0)
+                                scan_status["recently_scanned"] = scanned_in_cycle.copy()
                                 print(f"[CACHE] Stored {sym} {tf}")
                                 
-                                # CRITICAL FIX: Set SCAN_READY = True on first successful cache
                                 if not first_data_received:
                                     first_data_received = True
                                     SCAN_READY = True
@@ -161,10 +167,8 @@ def index():
 
     watchlist_rows = sort_results(watchlist_rows)
 
-    scanner_results = [
-        r for r in watchlist_rows 
-        if isinstance(r.get("readiness_score"), (int, float)) and r["readiness_score"] >= 40
-    ]
+    # SHOW ALL SYMBOLS, not just >= 40 — let the user see the full picture
+    scanner_results = watchlist_rows.copy()
     scanner_results = sort_results(scanner_results)
 
     return render_template(
