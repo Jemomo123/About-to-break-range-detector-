@@ -15,16 +15,16 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     if not clean_sym.endswith("USDT"):
         clean_sym += "USDT"
 
-    # OKX expects BTC-USDT-SWAP format
-    okx_sym = f"{clean_sym[:-4]}-USDT-SWAP"
+    # OKX expects BTC-USDT (without -SWAP) for public candles
+    okx_sym = f"{clean_sym[:-4]}-USDT"
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
     okx_bar = okx_tf_map.get(timeframe, "15m")
 
-    # 1. PRIMARY: OKX
+    # 1. PRIMARY: OKX (correct endpoint)
     okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
     try:
         print(f"[OKX][{symbol}][{timeframe}] Fetching...")
-        resp = requests.get(okx_url, headers=HEADERS, timeout=6)
+        resp = requests.get(okx_url, headers=HEADERS, timeout=10)
         if resp.status_code == 200:
             res_json = resp.json()
             data = res_json.get("data", [])
@@ -42,6 +42,8 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
                 print(f"[OKX][{symbol}] Empty data. Code: {res_json.get('code')}")
         else:
             print(f"[OKX][{symbol}] HTTP {resp.status_code}")
+    except requests.exceptions.Timeout:
+        print(f"[OKX][{symbol}] TIMEOUT - Request took >10s")
     except Exception as e:
         print(f"[OKX][{symbol}] Exception: {e}")
 
@@ -52,7 +54,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={mexc_sym}&interval={mexc_bar}&limit={limit}"
     try:
         print(f"[MEXC][{symbol}][{timeframe}] Fallback...")
-        resp = requests.get(mexc_url, headers=HEADERS, timeout=6)
+        resp = requests.get(mexc_url, headers=HEADERS, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
@@ -68,6 +70,8 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
                 print(f"[MEXC][{symbol}] Empty data.")
         else:
             print(f"[MEXC][{symbol}] HTTP {resp.status_code}")
+    except requests.exceptions.Timeout:
+        print(f"[MEXC][{symbol}] TIMEOUT - Request took >10s")
     except Exception as e:
         print(f"[MEXC][{symbol}] Exception: {e}")
 
