@@ -8,48 +8,22 @@ HEADERS = {
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
     """
-    PRIMARY: Binance Public API
-    FALLBACK 1: OKX REST API
-    FALLBACK 2: MEXC REST API
+    PRIMARY: OKX REST API (Your watchlist is built for OKX)
+    FALLBACK: MEXC REST API (Only if OKX fails)
     """
     clean_sym = symbol.replace("_", "").replace("-", "").upper()
     if not clean_sym.endswith("USDT"):
         clean_sym += "USDT"
 
-    # Binance uses uppercase interval: 5m, 15m, 1h, 4h
-    binance_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
-    binance_interval = binance_tf_map.get(timeframe, "15m")
-    
-    # 1. PRIMARY: Binance
-    binance_url = f"https://api.binance.com/api/v3/klines?symbol={clean_sym}&interval={binance_interval}&limit={limit}"
-    try:
-        print(f"[DEBUG][{symbol}][{timeframe}] Attempting Binance: {binance_url}")
-        resp = requests.get(binance_url, headers=HEADERS, timeout=6)
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data, columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'close_time', 'quote_vol', 'trades', 'tb_base_vol', 'tb_quote_vol', 'ignore'
-                ])
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = df[col].astype(float)
-                print(f"[{symbol}][{timeframe}] Downloaded {len(df)} candles (Source: Binance)")
-                return df
-            else:
-                print(f"[Binance][{symbol}] Returned empty data.")
-        else:
-            print(f"[Binance][{symbol}] HTTP {resp.status_code}")
-    except Exception as e:
-        print(f"[Binance][{symbol}] Exception: {e}")
-
-    # 2. FALLBACK: OKX
-    okx_sym = clean_sym[:-4] + "-USDT"
+    # OKX expects BTC-USDT-SWAP format
+    okx_sym = f"{clean_sym[:-4]}-USDT-SWAP"
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
     okx_bar = okx_tf_map.get(timeframe, "15m")
+
+    # 1. PRIMARY: OKX
     okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
     try:
-        print(f"[DEBUG][{symbol}][{timeframe}] Attempting OKX: {okx_url}")
+        print(f"[OKX][{symbol}][{timeframe}] Fetching...")
         resp = requests.get(okx_url, headers=HEADERS, timeout=6)
         if resp.status_code == 200:
             res_json = resp.json()
@@ -62,22 +36,22 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
                 df = df.iloc[::-1].reset_index(drop=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
-                print(f"[{symbol}][{timeframe}] Downloaded {len(df)} candles (Source: OKX)")
+                print(f"[OKX][{symbol}][{timeframe}] ✓ Downloaded {len(df)} candles")
                 return df
             else:
-                print(f"[OKX][{symbol}] Returned empty data. Code: {res_json.get('code')}")
+                print(f"[OKX][{symbol}] Empty data. Code: {res_json.get('code')}")
         else:
             print(f"[OKX][{symbol}] HTTP {resp.status_code}")
     except Exception as e:
         print(f"[OKX][{symbol}] Exception: {e}")
 
-    # 3. FALLBACK: MEXC
+    # 2. FALLBACK: MEXC
     mexc_sym = clean_sym
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
     mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={mexc_sym}&interval={mexc_bar}&limit={limit}"
     try:
-        print(f"[DEBUG][{symbol}][{timeframe}] Attempting MEXC: {mexc_url}")
+        print(f"[MEXC][{symbol}][{timeframe}] Fallback...")
         resp = requests.get(mexc_url, headers=HEADERS, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
@@ -88,16 +62,16 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100):
                 ])
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
-                print(f"[{symbol}][{timeframe}] Downloaded {len(df)} candles (Source: MEXC)")
+                print(f"[MEXC][{symbol}][{timeframe}] ✓ Downloaded {len(df)} candles")
                 return df
             else:
-                print(f"[MEXC][{symbol}] Returned empty data.")
+                print(f"[MEXC][{symbol}] Empty data.")
         else:
             print(f"[MEXC][{symbol}] HTTP {resp.status_code}")
     except Exception as e:
         print(f"[MEXC][{symbol}] Exception: {e}")
 
-    print(f"[{symbol}][{timeframe}] FAILED - All sources returned no data.")
+    print(f"[{symbol}][{timeframe}] ✗ FAILED (OKX + MEXC)")
     return pd.DataFrame()
 
 
