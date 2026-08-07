@@ -22,7 +22,7 @@ CACHE_LOCK = threading.Lock()
 _worker_thread_started = False
 SCAN_READY = False
 
-# Live status tracking - now shows ALL scanned symbols
+# Live status tracking
 scan_status = {
     "state": "INITIALIZING",
     "current_symbol": "",
@@ -30,7 +30,8 @@ scan_status = {
     "last_update": "",
     "symbols_scanned": 0,
     "total_symbols": len(DEFAULT_WATCHLIST),
-    "recently_scanned": []  # NEW: list of recently scanned symbols
+    "recently_scanned": [],
+    "cache_size": 0
 }
 
 def fetch_single_safe(sym, tf):
@@ -40,8 +41,10 @@ def fetch_single_safe(sym, tf):
         scan_status["current_timeframe"] = tf
         match, err = _process_symbol_tf(sym, tf)
         if match:
+            print(f"[CACHE] ✅ {sym} {tf} - Storing (Score: {match.get('readiness_score')}%)")
             return match
         else:
+            print(f"[CACHE] ❌ {sym} {tf} - Unsupported ({err})")
             return {
                 "symbol": sym,
                 "timeframe": tf,
@@ -62,7 +65,7 @@ def fetch_single_safe(sym, tf):
                 "last_updated": "--:--:-- UTC"
             }
     except Exception as e:
-        print(f"Fetch error for {sym} {tf}: {e}")
+        print(f"[CACHE] ⚠️ {sym} {tf} - Exception: {e}")
         return None
 
 def update_cache_job():
@@ -89,18 +92,19 @@ def update_cache_job():
                                 scan_status["symbols_scanned"] += 1
                                 scan_status["current_symbol"] = sym
                                 scan_status["last_update"] = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-                                # Keep a rolling list of the last 10 scanned symbols
+                                scan_status["cache_size"] = len(CACHE)
+                                
                                 scanned_in_cycle.append(sym)
                                 if len(scanned_in_cycle) > 10:
                                     scanned_in_cycle.pop(0)
                                 scan_status["recently_scanned"] = scanned_in_cycle.copy()
-                                print(f"[CACHE] Stored {sym} {tf}")
                                 
                                 if not first_data_received:
                                     first_data_received = True
                                     SCAN_READY = True
                                     scan_status["state"] = "LIVE"
-                                    print(">>> SCAN_READY = True (first data received)")
+                                    print(f">>> SCAN_READY = True (first data: {sym} {tf})")
+                                print(f"[CACHE] Stored {sym} {tf} (Cache size: {len(CACHE)})")
                 print(f">>> Completed {tf}")
                 time.sleep(2)
             
@@ -134,6 +138,16 @@ def index():
     selected_tf = request.args.get("tf", "15M").upper()
     active_tf = "15M" if selected_tf == "ALL" else selected_tf
 
+    print(f"[ROUTE] Selected TF: {selected_tf}, Active TF: {active_tf}")
+    print(f"[ROUTE] SCAN_READY: {SCAN_READY}, CACHE size: {len(CACHE)}")
+    
+    if len(CACHE) > 0:
+        # Log a sample of what's in the cache
+        sample_keys = list(CACHE.keys())[:3]
+        for key in sample_keys:
+            val = CACHE[key]
+            print(f"[ROUTE] Cache sample: {key} -> Score: {val.get('readiness_score', 'N/A')}%")
+
     watchlist_rows = []
     is_loading = not SCAN_READY
 
@@ -144,7 +158,9 @@ def index():
                 match = dict(CACHE[key])
                 match["pinned"] = item["pinned"]
                 watchlist_rows.append(match)
+                print(f"[ROUTE] Found in cache: {key}")
             else:
+                print(f"[ROUTE] NOT in cache: {key}")
                 watchlist_rows.append({
                     "symbol": item["symbol"],
                     "timeframe": active_tf,
@@ -167,9 +183,12 @@ def index():
 
     watchlist_rows = sort_results(watchlist_rows)
 
-    # SHOW ALL SYMBOLS, not just >= 40 — let the user see the full picture
+    # Show ALL symbols with their actual scores
     scanner_results = watchlist_rows.copy()
     scanner_results = sort_results(scanner_results)
+    
+    active_results = [r for r in scanner_results if r.get("readiness_score", 0) > 0]
+    print(f"[ROUTE] Total results: {len(scanner_results)}, Active (score>0): {len(active_results)}")
 
     return render_template(
         "index.html",
