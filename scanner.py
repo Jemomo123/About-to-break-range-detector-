@@ -23,16 +23,20 @@ def is_unsupported(symbol):
 def mark_unsupported(symbol):
     with UNSUPPORTED_LOCK:
         UNSUPPORTED_SYMBOLS.add(symbol)
-        print(f"[UNSUPPORTED] {symbol} added to unsupported cache")
+        if DEBUG:
+            print(f"[UNSUPPORTED] {symbol} added to unsupported cache")
 
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     """
     PRIMARY: OKX REST API
     FALLBACK: MEXC REST API
+    Returns: DataFrame or empty DataFrame
     """
+    # Skip if symbol is known unsupported
     if is_unsupported(symbol):
-        print(f"[SKIP] {symbol} {timeframe} - unsupported")
+        if DEBUG:
+            print(f"[SKIP] {symbol} {timeframe} - unsupported")
         return pd.DataFrame()
 
     clean_sym = symbol.replace("_", "").replace("-", "").upper()
@@ -72,7 +76,10 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     except Exception as e:
         print(f"[OKX][{symbol}] Exception: {e}")
 
-    # 2. MEXC fallback
+    # 2. MEXC fallback (only if symbol not already unsupported)
+    if is_unsupported(symbol):
+        return pd.DataFrame()
+
     mexc_sym = clean_sym
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
@@ -331,7 +338,16 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
 
 
 def _process_symbol_tf(symbol: str, tf: str):
-    """Process a single symbol/timeframe combination."""
+    """
+    Process a single symbol/timeframe combination.
+    Returns: (result_dict, error_message) or (None, error_message)
+    """
+    # Check unsupported cache first
+    if is_unsupported(symbol):
+        if DEBUG:
+            print(f"[SCAN][{symbol}][{tf}] ⏭️ Skipping (unsupported)")
+        return None, "UNSUPPORTED"
+
     print(f"[SCAN][{symbol}][{tf}] Starting...")
     df = fetch_ohlcv(symbol, tf)
     if df.empty:
@@ -346,19 +362,34 @@ def _process_symbol_tf(symbol: str, tf: str):
 
 
 def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
+    """
+    Run full scanner pipeline and return results with diagnostics.
+    """
     results = []
-    diagnostics = {"symbols_scanned": len(symbols), "symbols_downloaded": 0, "rejections": {}}
+    diagnostics = {
+        "total_scanned": 0,
+        "passed": 0,
+        "unsupported": 0,
+        "failed_logic": 0,
+        "displayed": 0,
+        "rejections": {}
+    }
 
     tfs_to_run = ["5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
 
     for sym in symbols:
         for tf in tfs_to_run:
+            diagnostics["total_scanned"] += 1
             match, err = _process_symbol_tf(sym, tf)
             if match:
-                diagnostics["symbols_downloaded"] += 1
+                diagnostics["passed"] += 1
                 results.append(match)
+            elif err == "UNSUPPORTED":
+                diagnostics["unsupported"] += 1
             else:
+                diagnostics["failed_logic"] += 1
                 diagnostics["rejections"][err] = diagnostics["rejections"].get(err, 0) + 1
 
     results.sort(key=lambda x: -x["readiness_score"])
+    diagnostics["displayed"] = len(results)
     return results, diagnostics
