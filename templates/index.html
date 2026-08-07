@@ -18,7 +18,6 @@
         }
         .container { max-width: 1600px; margin: 0 auto; }
 
-        /* --- HEADER --- */
         .header {
             display: flex;
             align-items: center;
@@ -39,7 +38,7 @@
             background-clip: text;
         }
         .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .live-badge {
+        .status-badge {
             background: #052e16; color: #4ade80;
             border: 1px solid #166534;
             border-radius: 100px;
@@ -47,7 +46,25 @@
             font-size: 0.55rem;
             font-weight: 700;
             text-transform: uppercase;
+            animation: pulse-green 1.5s ease-in-out infinite;
         }
+        .status-badge.scanning {
+            background: #451a03; color: #fb923c;
+            border-color: #78350f;
+            animation: pulse-orange 1s ease-in-out infinite;
+        }
+        @keyframes pulse-green { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        @keyframes pulse-orange { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .status-detail {
+            font-size: 0.6rem;
+            color: #64748b;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .status-detail span { white-space: nowrap; }
+        .status-detail .highlight { color: #94a3b8; font-weight: 600; }
+
         .tf-pills {
             display: flex;
             gap: 3px;
@@ -70,7 +87,6 @@
         .tf-pill:hover { color: #e2e8f0; background: #1e293b; }
         .tf-pill.active { background: #2563eb; color: #fff; }
 
-        /* --- COLLAPSIBLE WATCHLIST (DRAWER) --- */
         .watchlist-drawer {
             background: #0f172a;
             border: 1px solid #1e293b;
@@ -92,8 +108,8 @@
         }
         .watchlist-drawer summary::-webkit-details-marker { display: none; }
         .watchlist-drawer summary:hover { color: #e2e8f0; }
-        .watchlist-drawer .wl-icon { font-size: 0.6rem; color: #fbbf24; }
-        .watchlist-drawer .wl-count { color: #475569; font-weight: 400; }
+        .wl-icon { font-size: 0.6rem; color: #fbbf24; }
+        .wl-count { color: #475569; font-weight: 400; }
         .wl-grid {
             display: flex;
             flex-wrap: wrap;
@@ -147,14 +163,12 @@
         }
         .wl-add-btn:hover { background: #3b82f6; }
 
-        /* --- CARD GRID (THE PRODUCT) --- */
         .card-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
             gap: 10px;
         }
 
-        /* --- INDIVIDUAL SCANNER CARD --- */
         .scan-card {
             background: #0f172a;
             border: 1px solid #1e293b;
@@ -164,7 +178,6 @@
             display: flex;
             flex-direction: column;
             gap: 4px;
-            position: relative;
         }
         .scan-card.card-bullish { border-left: 4px solid #00c897; }
         .scan-card.card-bearish { border-left: 4px solid #f23645; }
@@ -173,7 +186,6 @@
 
         .card-row { display: flex; justify-content: space-between; align-items: center; }
         .card-row-center { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
-
         .card-symbol { font-weight: 700; font-size: 0.95rem; color: #f1f5f9; }
         .card-tf {
             background: #1e293b; color: #94a3b8;
@@ -182,7 +194,6 @@
             margin-left: 6px;
         }
         .card-updated { font-size: 0.5rem; color: #475569; font-weight: 400; }
-
         .price-group {
             display: flex;
             align-items: baseline;
@@ -195,6 +206,7 @@
         .price-value.sup { color: #4ade80; }
         .price-value.res { color: #f87171; }
         .price-value.dist { font-size: 0.6rem; color: #94a3b8; }
+        .price-value.unsupported { color: #64748b; font-style: italic; }
 
         .badge-structure {
             background: #1e293b; color: #94a3b8;
@@ -204,7 +216,6 @@
         .direction-bull { color: #00c897; font-weight: 700; font-size: 0.75rem; }
         .direction-bear { color: #f23645; font-weight: 700; font-size: 0.75rem; }
         .direction-neutral { color: #64748b; font-weight: 600; font-size: 0.75rem; }
-        
         .volume-trend { font-size: 0.6rem; font-weight: 600; }
         .vol-up { color: #4ade80; }
         .vol-down { color: #f87171; }
@@ -231,6 +242,7 @@
         .rl-developing { background: #78350f; color: #fbbf24; }
         .rl-forming { background: #451a03; color: #fb923c; }
         .rl-early { background: #1e293b; color: #64748b; }
+        .rl-unsupported { background: #1e293b; color: #475569; }
 
         .pressure-bar-wrap {
             width: 100%;
@@ -261,7 +273,6 @@
         .pressure-labels .b { color: #4ade80; }
         .pressure-labels .s { color: #f87171; }
 
-        /* --- CENTERED STATUS MESSAGES --- */
         .status-center {
             grid-column: 1/-1;
             display: flex;
@@ -273,19 +284,9 @@
             text-align: center;
             gap: 12px;
         }
-        .status-center .icon {
-            font-size: 2rem;
-            opacity: 0.6;
-        }
-        .status-center .msg {
-            font-size: 1rem;
-            font-weight: 500;
-            color: #94a3b8;
-        }
-        .status-center .sub {
-            font-size: 0.8rem;
-            color: #475569;
-        }
+        .status-center .icon { font-size: 2rem; opacity: 0.6; }
+        .status-center .msg { font-size: 1rem; font-weight: 500; color: #94a3b8; }
+        .status-center .sub { font-size: 0.8rem; color: #475569; }
         .spinner {
             display: inline-block;
             width: 24px;
@@ -297,7 +298,6 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* --- LOADING SKELETON (brief) --- */
         .skeleton-card {
             background: #0f172a;
             border: 1px solid #1e293b;
@@ -310,7 +310,6 @@
         }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-        /* --- MOBILE --- */
         @media (max-width: 600px) {
             body { padding: 6px; font-size: 12px; }
             .header-title { font-size: 0.85rem; }
@@ -319,9 +318,8 @@
             .card-grid { grid-template-columns: 1fr; gap: 8px; }
             .scan-card { padding: 8px 10px; }
             .price-main { font-size: 0.9rem; }
-            .wl-add-input { width: 70px; }
             .status-center { padding: 40px 16px; }
-            .status-center .msg { font-size: 0.9rem; }
+            .status-detail { font-size: 0.5rem; flex-wrap: wrap; gap: 4px; }
         }
     </style>
 </head>
@@ -332,7 +330,14 @@
     <div class="header">
         <span class="header-title">⟡ ABOUT TO BREAK RANGE DETECTOR</span>
         <div class="header-right">
-            <span class="live-badge">● LIVE</span>
+            <span class="status-badge {% if scan_status.state == 'SCANNING' %}scanning{% endif %}">
+                {% if scan_status.state == 'SCANNING' %}● SCANNING{% else %}● LIVE{% endif %}
+            </span>
+            <div class="status-detail">
+                <span>Symbol: <span class="highlight">{{ scan_status.current_symbol or '—' }}</span></span>
+                <span>TF: <span class="highlight">{{ scan_status.current_timeframe or '—' }}</span></span>
+                <span>Updated: <span class="highlight">{{ scan_status.last_update or '—' }}</span></span>
+            </div>
             <div class="tf-pills">
                 <a href="/?tf=ALL" class="tf-pill {{ 'active' if selected_tf == 'ALL' else '' }}">ALL</a>
                 <a href="/?tf=5M" class="tf-pill {{ 'active' if selected_tf == '5M' else '' }}">5M</a>
@@ -343,7 +348,7 @@
         </div>
     </div>
 
-    <!-- WATCHLIST (COLLAPSIBLE DRAWER) -->
+    <!-- WATCHLIST (COLLAPSIBLE) -->
     <details class="watchlist-drawer">
         <summary>
             <span class="wl-icon">★</span> Watchlist
@@ -366,45 +371,44 @@
         </div>
     </details>
 
-    <!-- SCANNER RESULTS (CARD GRID) -->
+    <!-- SCANNER RESULTS -->
     <div class="card-grid">
         {% if is_loading %}
-            <!-- Loading state: show skeleton -->
             {% for _ in range(6) %}
             <div class="skeleton-card"></div>
             {% endfor %}
             <div class="status-center">
                 <div class="spinner"></div>
-                <div class="msg">⏳ Connecting to exchange...</div>
-                <div class="sub">Initializing scanner cache</div>
+                <div class="msg">⏳ Connecting to OKX...</div>
+                <div class="sub">Initial scan in progress</div>
             </div>
 
         {% elif rows|length == 0 %}
-            <!-- No active setups: show waiting message -->
             <div class="status-center">
                 <div class="icon">📡</div>
-                <div class="msg">Waiting for live market data...</div>
-                <div class="sub">Scanner is idle. Data will appear when breakouts form.</div>
+                <div class="msg">No breakout setups detected</div>
+                <div class="sub">Scanner is live and monitoring {{ watchlist_rows|length }} symbols</div>
             </div>
 
         {% else %}
-            <!-- Active setups: display cards -->
             {% for row in rows %}
             <div class="scan-card 
                 {% if row.break_direction == 'BULLISH' %}card-bullish
                 {% elif row.break_direction == 'BEARISH' %}card-bearish
                 {% else %}card-neutral{% endif %}">
                 
-                <!-- Row 1: Symbol + TF + Updated -->
                 <div class="card-row">
                     <div>
                         <span class="card-symbol">{{ row.symbol }}</span>
                         <span class="card-tf">{{ row.timeframe }}</span>
+                        {% if row.curr_close == 'Unsupported' %}
+                            <span class="price-value unsupported" style="margin-left:6px;">Unsupported</span>
+                        {% endif %}
                     </div>
                     <span class="card-updated">{{ row.last_updated }}</span>
                 </div>
 
-                <!-- Row 2: Price, Support, Resistance -->
+                {% if row.curr_close != 'Unsupported' %}
                 <div class="card-row">
                     <div class="price-group">
                         <span class="price-main">${{ row.curr_close }}</span>
@@ -413,7 +417,6 @@
                     </div>
                 </div>
 
-                <!-- Row 3: Distances + Structure + Direction + Volume -->
                 <div class="card-row-center">
                     <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                         <span class="price-value dist">📏 Res: {{ row.distance_to_resistance }}%</span>
@@ -435,7 +438,6 @@
                     </div>
                 </div>
 
-                <!-- Row 4: Readiness Score + Label -->
                 <div class="card-row">
                     <div class="readiness-block">
                         <span class="readiness-score" style="color: 
@@ -456,12 +458,9 @@
                             {% else %}🔴 EARLY{% endif %}
                         </span>
                     </div>
-                    <div style="font-size:0.6rem; color:#475569;">
-                        #{{ loop.index }}
-                    </div>
+                    <div style="font-size:0.6rem; color:#475569;">#{{ loop.index }}</div>
                 </div>
 
-                <!-- Row 5: Pressure Bar -->
                 <div>
                     <div class="pressure-bar-wrap">
                         <div class="pressure-bar-buyer" style="width: {{ row.buyer_power }}%;"></div>
@@ -472,6 +471,7 @@
                         <span class="s">S {{ row.seller_power }}%</span>
                     </div>
                 </div>
+                {% endif %}
             </div>
             {% endfor %}
         {% endif %}
@@ -479,7 +479,6 @@
 
 </div>
 
-<!-- Auto-refresh if loading -->
 {% if is_loading %}
 <script>
     setTimeout(function() { window.location.reload(); }, 5000);
