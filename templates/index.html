@@ -61,6 +61,7 @@
             display: flex;
             gap: 12px;
             align-items: center;
+            flex-wrap: wrap;
         }
         .status-detail span { white-space: nowrap; }
         .status-detail .highlight { color: #94a3b8; font-weight: 600; }
@@ -163,17 +164,19 @@
         }
         .wl-add-btn:hover { background: #3b82f6; }
 
+        /* CARD GRID */
         .card-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
             gap: 10px;
         }
 
+        /* SCANNER CARD */
         .scan-card {
             background: #0f172a;
             border: 1px solid #1e293b;
             border-radius: 8px;
-            padding: 10px 12px;
+            padding: 12px 14px;
             transition: all 0.2s ease;
             display: flex;
             flex-direction: column;
@@ -186,92 +189,72 @@
 
         .card-row { display: flex; justify-content: space-between; align-items: center; }
         .card-row-center { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
-        .card-symbol { font-weight: 700; font-size: 0.95rem; color: #f1f5f9; }
+
+        .card-symbol { font-weight: 700; font-size: 1rem; color: #f1f5f9; }
         .card-tf {
             background: #1e293b; color: #94a3b8;
             padding: 1px 6px; border-radius: 4px;
             font-size: 0.55rem; font-weight: 600;
             margin-left: 6px;
         }
-        .card-updated { font-size: 0.5rem; color: #475569; font-weight: 400; }
-        .price-group {
-            display: flex;
-            align-items: baseline;
-            gap: 8px;
-            flex-wrap: wrap;
+        .card-pattern {
+            font-size: 0.6rem;
+            color: #94a3b8;
+            background: #1e293b;
+            padding: 1px 8px;
+            border-radius: 4px;
         }
+        .card-updated { font-size: 0.5rem; color: #475569; font-weight: 400; }
+
+        .direction-bull { color: #00c897; font-weight: 700; font-size: 0.75rem; }
+        .direction-bear { color: #f23645; font-weight: 700; font-size: 0.75rem; }
+        .direction-neutral { color: #64748b; font-weight: 600; font-size: 0.75rem; }
+
         .price-main { font-weight: 700; font-size: 1rem; color: #e2e8f0; }
         .price-label { font-size: 0.5rem; color: #64748b; font-weight: 600; text-transform: uppercase; }
         .price-value { font-weight: 600; font-size: 0.75rem; }
         .price-value.sup { color: #4ade80; }
         .price-value.res { color: #f87171; }
-        .price-value.dist { font-size: 0.6rem; color: #94a3b8; }
-        .price-value.unsupported { color: #64748b; font-style: italic; }
 
-        .badge-structure {
-            background: #1e293b; color: #94a3b8;
-            padding: 1px 8px; border-radius: 4px;
-            font-size: 0.6rem; font-weight: 600;
-        }
-        .direction-bull { color: #00c897; font-weight: 700; font-size: 0.75rem; }
-        .direction-bear { color: #f23645; font-weight: 700; font-size: 0.75rem; }
-        .direction-neutral { color: #64748b; font-weight: 600; font-size: 0.75rem; }
-        .volume-trend { font-size: 0.6rem; font-weight: 600; }
-        .vol-up { color: #4ade80; }
-        .vol-down { color: #f87171; }
-        .vol-neutral { color: #94a3b8; }
-
-        .readiness-block {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
         .readiness-score {
             font-weight: 800;
-            font-size: 1.2rem;
-            min-width: 40px;
+            font-size: 1.4rem;
         }
         .readiness-label {
+            font-size: 0.55rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 100px;
+        }
+        .rl-high { background: #064e3b; color: #34d399; }
+        .rl-medium { background: #78350f; color: #fbbf24; }
+        .rl-low { background: #451a03; color: #fb923c; }
+        .rl-verylow { background: #1e293b; color: #64748b; }
+
+        .metric-label { font-size: 0.5rem; color: #64748b; text-transform: uppercase; }
+        .metric-value { font-size: 0.7rem; font-weight: 600; color: #e2e8f0; }
+
+        .alignment-dots {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .dot-bullish { background: #00c897; }
+        .dot-bearish { background: #f23645; }
+        .dot-neutral { background: #475569; }
+
+        .confidence-badge {
             font-size: 0.6rem;
             font-weight: 700;
             padding: 2px 8px;
             border-radius: 100px;
         }
-        .rl-imminent { background: #064e3b; color: #34d399; }
-        .rl-developing { background: #78350f; color: #fbbf24; }
-        .rl-forming { background: #451a03; color: #fb923c; }
-        .rl-early { background: #1e293b; color: #64748b; }
-        .rl-unsupported { background: #1e293b; color: #475569; }
-
-        .pressure-bar-wrap {
-            width: 100%;
-            height: 6px;
-            background: #1e293b;
-            border-radius: 4px;
-            overflow: hidden;
-            display: flex;
-            margin-top: 2px;
-        }
-        .pressure-bar-buyer {
-            height: 100%;
-            background: linear-gradient(90deg, #166534, #4ade80);
-            transition: width 0.3s;
-        }
-        .pressure-bar-seller {
-            height: 100%;
-            background: linear-gradient(90deg, #f87171, #7f1d1d);
-            transition: width 0.3s;
-        }
-        .pressure-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.55rem;
-            font-weight: 600;
-            margin-top: 1px;
-        }
-        .pressure-labels .b { color: #4ade80; }
-        .pressure-labels .s { color: #f87171; }
+        .conf-vhigh { background: #064e3b; color: #34d399; }
+        .conf-high { background: #1a3a2a; color: #4ade80; }
+        .conf-medium { background: #78350f; color: #fbbf24; }
+        .conf-low { background: #451a03; color: #fb923c; }
+        .conf-vlow { background: #1e293b; color: #64748b; }
 
         .status-center {
             grid-column: 1/-1;
@@ -302,8 +285,8 @@
             background: #0f172a;
             border: 1px solid #1e293b;
             border-radius: 10px;
-            padding: 10px 12px;
-            height: 120px;
+            padding: 12px 14px;
+            height: 180px;
             background-image: linear-gradient(90deg, #1a2332 25%, #243044 50%, #1a2332 75%);
             background-size: 200% 100%;
             animation: shimmer 1.5s infinite;
@@ -316,17 +299,14 @@
             .tf-pills { width: 100%; justify-content: space-between; }
             .tf-pill { flex: 1; text-align: center; padding: 2px 4px; font-size: 0.6rem; }
             .card-grid { grid-template-columns: 1fr; gap: 8px; }
-            .scan-card { padding: 8px 10px; }
-            .price-main { font-size: 0.9rem; }
-            .status-center { padding: 40px 16px; }
-            .status-detail { font-size: 0.5rem; flex-wrap: wrap; gap: 4px; }
+            .scan-card { padding: 10px 12px; }
+            .status-detail { font-size: 0.5rem; gap: 6px; }
         }
     </style>
 </head>
 <body>
 <div class="container">
 
-    <!-- HEADER -->
     <div class="header">
         <span class="header-title">⟡ ABOUT TO BREAK RANGE DETECTOR</span>
         <div class="header-right">
@@ -334,7 +314,7 @@
                 {% if scan_status.state == 'SCANNING' %}● SCANNING{% else %}● LIVE{% endif %}
             </span>
             <div class="status-detail">
-                <span>Symbol: <span class="highlight">{{ scan_status.current_symbol or '—' }}</span></span>
+                <span>Scanned: <span class="highlight">{{ scan_status.symbols_scanned }}/{{ scan_status.total_symbols }}</span></span>
                 <span>TF: <span class="highlight">{{ scan_status.current_timeframe or '—' }}</span></span>
                 <span>Updated: <span class="highlight">{{ scan_status.last_update or '—' }}</span></span>
             </div>
@@ -348,7 +328,6 @@
         </div>
     </div>
 
-    <!-- WATCHLIST (COLLAPSIBLE) -->
     <details class="watchlist-drawer">
         <summary>
             <span class="wl-icon">★</span> Watchlist
@@ -371,7 +350,6 @@
         </div>
     </details>
 
-    <!-- SCANNER RESULTS -->
     <div class="card-grid">
         {% if is_loading %}
             {% for _ in range(6) %}
@@ -382,14 +360,12 @@
                 <div class="msg">⏳ Connecting to OKX...</div>
                 <div class="sub">Initial scan in progress</div>
             </div>
-
         {% elif rows|length == 0 %}
             <div class="status-center">
                 <div class="icon">📡</div>
                 <div class="msg">No breakout setups detected</div>
                 <div class="sub">Scanner is live and monitoring {{ watchlist_rows|length }} symbols</div>
             </div>
-
         {% else %}
             {% for row in rows %}
             <div class="scan-card 
@@ -397,33 +373,19 @@
                 {% elif row.break_direction == 'BEARISH' %}card-bearish
                 {% else %}card-neutral{% endif %}">
                 
+                <!-- Row 1: Symbol + Pattern + Timeframe -->
                 <div class="card-row">
                     <div>
                         <span class="card-symbol">{{ row.symbol }}</span>
                         <span class="card-tf">{{ row.timeframe }}</span>
-                        {% if row.curr_close == 'Unsupported' %}
-                            <span class="price-value unsupported" style="margin-left:6px;">Unsupported</span>
-                        {% endif %}
+                        <span class="card-pattern">{{ row.pattern_type }}</span>
                     </div>
                     <span class="card-updated">{{ row.last_updated }}</span>
                 </div>
 
-                {% if row.curr_close != 'Unsupported' %}
+                <!-- Row 2: Direction + Price -->
                 <div class="card-row">
-                    <div class="price-group">
-                        <span class="price-main">${{ row.curr_close }}</span>
-                        <span><span class="price-label">Sup</span> <span class="price-value sup">${{ row.support }}</span></span>
-                        <span><span class="price-label">Res</span> <span class="price-value res">${{ row.resistance }}</span></span>
-                    </div>
-                </div>
-
-                <div class="card-row-center">
-                    <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                        <span class="price-value dist">📏 Res: {{ row.distance_to_resistance }}%</span>
-                        <span class="price-value dist">Sup: {{ row.distance_to_support }}%</span>
-                        <span class="badge-structure">{{ row.structure_type }}</span>
-                    </div>
-                    <div style="display:flex; align-items:center; gap:4px;">
+                    <div>
                         {% if row.break_direction == 'BULLISH' %}
                             <span class="direction-bull">▲ Bullish</span>
                         {% elif row.break_direction == 'BEARISH' %}
@@ -431,47 +393,88 @@
                         {% else %}
                             <span class="direction-neutral">● Neutral</span>
                         {% endif %}
-                        <span class="volume-trend 
-                            {% if row.volume_trend == 'Increasing' %}vol-up{% elif row.volume_trend == 'Decreasing' %}vol-down{% else %}vol-neutral{% endif %}">
-                            Vol: {{ row.volume_trend }}
-                        </span>
+                    </div>
+                    <div>
+                        <span class="price-main">${{ row.curr_close }}</span>
                     </div>
                 </div>
 
+                <!-- Row 3: Readiness + Confidence -->
                 <div class="card-row">
-                    <div class="readiness-block">
+                    <div style="display:flex; align-items:center; gap:8px;">
                         <span class="readiness-score" style="color: 
                             {% if row.readiness_score >= 80 %}#34d399
-                            {% elif row.readiness_score >= 60 %}#fbbf24
-                            {% elif row.readiness_score >= 40 %}#fb923c
+                            {% elif row.readiness_score >= 65 %}#fbbf24
+                            {% elif row.readiness_score >= 45 %}#fb923c
                             {% else %}#64748b{% endif %}">
                             {{ row.readiness_score }}%
                         </span>
                         <span class="readiness-label 
-                            {% if row.readiness_score >= 80 %}rl-imminent
-                            {% elif row.readiness_score >= 60 %}rl-developing
-                            {% elif row.readiness_score >= 40 %}rl-forming
-                            {% else %}rl-early{% endif %}">
-                            {% if row.readiness_score >= 80 %}🟢 IMMINENT
-                            {% elif row.readiness_score >= 60 %}🟡 DEVELOPING
-                            {% elif row.readiness_score >= 40 %}🟠 FORMING
-                            {% else %}🔴 EARLY{% endif %}
+                            {% if row.readiness_score >= 80 %}rl-high
+                            {% elif row.readiness_score >= 65 %}rl-medium
+                            {% elif row.readiness_score >= 45 %}rl-low
+                            {% else %}rl-verylow{% endif %}">
+                            {{ row.status_label }}
                         </span>
                     </div>
-                    <div style="font-size:0.6rem; color:#475569;">#{{ loop.index }}</div>
+                    <div>
+                        <span class="confidence-badge 
+                            {% if row.confidence == 'Very High' %}conf-vhigh
+                            {% elif row.confidence == 'High' %}conf-high
+                            {% elif row.confidence == 'Medium' %}conf-medium
+                            {% elif row.confidence == 'Low' %}conf-low
+                            {% else %}conf-vlow{% endif %}">
+                            {{ row.confidence }}
+                        </span>
+                    </div>
                 </div>
 
-                <div>
-                    <div class="pressure-bar-wrap">
-                        <div class="pressure-bar-buyer" style="width: {{ row.buyer_power }}%;"></div>
-                        <div class="pressure-bar-seller" style="width: {{ row.seller_power }}%;"></div>
-                    </div>
-                    <div class="pressure-labels">
-                        <span class="b">B {{ row.buyer_power }}%</span>
-                        <span class="s">S {{ row.seller_power }}%</span>
-                    </div>
+                <!-- Row 4: Volume + Range Width + Distance -->
+                <div class="card-row-center">
+                    <span><span class="metric-label">Volume:</span> <span class="metric-value">{{ row.volume_label }}</span></span>
+                    <span><span class="metric-label">Range Width:</span> <span class="metric-value">{{ row.range_width }}%</span></span>
+                    <span><span class="metric-label">
+                        {% if row.break_direction == 'BULLISH' %}Distance to R:{% else %}Distance to S:{% endif %}
+                    </span> <span class="metric-value">
+                        {% if row.break_direction == 'BULLISH' %}{{ row.distance_to_resistance }}{% else %}{{ row.distance_to_support }}{% endif %}%
+                    </span></span>
                 </div>
-                {% endif %}
+
+                <!-- Row 5: Support + Resistance -->
+                <div class="card-row">
+                    <span><span class="metric-label">Support:</span> <span class="price-value sup">${{ row.support }}</span></span>
+                    <span><span class="metric-label">Resistance:</span> <span class="price-value res">${{ row.resistance }}</span></span>
+                </div>
+
+                <!-- Row 6: Multi-Timeframe Alignment -->
+                <div class="card-row" style="border-top:1px solid #1e293b; padding-top:4px; margin-top:2px;">
+                    <div class="alignment-dots">
+                        <span style="font-size:0.5rem; color:#64748b; margin-right:4px;">Alignment:</span>
+                        {% set tfs = ['5M', '15M', '1H'] %}
+                        {% for tf in tfs %}
+                            {% if tf in row.tf_data %}
+                                {% if row.tf_data[tf].direction == 'BULLISH' %}
+                                    <span class="dot dot-bullish" title="{{ tf }} Bullish"></span>
+                                {% elif row.tf_data[tf].direction == 'BEARISH' %}
+                                    <span class="dot dot-bearish" title="{{ tf }} Bearish"></span>
+                                {% else %}
+                                    <span class="dot dot-neutral" title="{{ tf }} Neutral"></span>
+                                {% endif %}
+                            {% else %}
+                                <span class="dot dot-neutral" title="{{ tf }} N/A"></span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    <span style="font-size:0.6rem; color:#64748b;">
+                        {% if row.alignment_direction == 'BULLISH' %}
+                            <span style="color:#4ade80;">▲ {{ row.alignment_count }}</span>
+                        {% elif row.alignment_direction == 'BEARISH' %}
+                            <span style="color:#f87171;">▼ {{ row.alignment_count }}</span>
+                        {% else %}
+                            <span>● {{ row.alignment_count }}</span>
+                        {% endif %}
+                    </span>
+                </div>
             </div>
             {% endfor %}
         {% endif %}
