@@ -70,43 +70,66 @@
         .tf-pill:hover { color: #e2e8f0; background: #1e293b; }
         .tf-pill.active { background: #2563eb; color: #fff; }
 
-        /* --- WATCHLIST BAR (Compact) --- */
-        .watchlist-wrapper {
+        /* --- COLLAPSIBLE WATCHLIST (DRAWER) --- */
+        .watchlist-drawer {
             background: #0f172a;
             border: 1px solid #1e293b;
             border-radius: 8px;
-            padding: 6px 10px;
             margin-bottom: 12px;
+            padding: 4px 8px;
+        }
+        .watchlist-drawer summary {
+            cursor: pointer;
+            color: #94a3b8;
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 6px 4px;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            user-select: none;
+        }
+        .watchlist-drawer summary::-webkit-details-marker { display: none; }
+        .watchlist-drawer summary:hover { color: #e2e8f0; }
+        .watchlist-drawer .wl-icon { font-size: 0.6rem; color: #fbbf24; }
+        .watchlist-drawer .wl-count { color: #475569; font-weight: 400; }
+        .wl-grid {
             display: flex;
             flex-wrap: wrap;
-            align-items: center;
-            gap: 4px 12px;
+            gap: 4px 8px;
+            padding: 4px 0 8px 0;
+            max-height: 120px;
+            overflow-y: auto;
         }
-        .wl-label { font-size: 0.55rem; font-weight: 700; color: #fbbf24; text-transform: uppercase; letter-spacing: 0.06em; }
-        .wl-items { display: flex; flex-wrap: wrap; gap: 4px 8px; flex: 1; }
         .wl-item {
             display: flex;
             align-items: center;
             gap: 3px;
             background: #1a2332;
-            padding: 1px 6px 1px 4px;
+            padding: 2px 6px 2px 4px;
             border-radius: 4px;
             font-size: 0.6rem;
             font-weight: 600;
         }
         .wl-sym { color: #e2e8f0; }
         .wl-tf { color: #64748b; font-weight: 400; font-size: 0.5rem; }
-        .wl-price { color: #94a3b8; font-weight: 500; margin-left: 2px; }
         .wl-pin { background: none; border: none; color: #64748b; padding: 0 2px; font-size: 0.6rem; cursor: pointer; }
         .wl-pin:hover { color: #fbbf24; }
         .wl-pin.active { color: #fbbf24; }
         .wl-remove { background: none; border: none; color: #475569; padding: 0 2px; font-size: 0.5rem; cursor: pointer; }
         .wl-remove:hover { color: #f87171; }
+        .wl-add-area {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            margin-left: 4px;
+        }
         .wl-add-input {
             background: #1e293b;
             border: 1px solid #334155;
             border-radius: 4px;
-            padding: 1px 6px;
+            padding: 2px 6px;
             color: #e2e8f0;
             font-size: 0.6rem;
             width: 80px;
@@ -117,21 +140,21 @@
             border: none;
             color: #fff;
             font-weight: 600;
-            padding: 1px 10px;
+            padding: 2px 10px;
             border-radius: 4px;
             font-size: 0.6rem;
             cursor: pointer;
         }
         .wl-add-btn:hover { background: #3b82f6; }
 
-        /* --- CARD GRID --- */
+        /* --- CARD GRID (THE PRODUCT) --- */
         .card-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
             gap: 10px;
         }
 
-        /* --- INDIVIDUAL CARD (PROFESSIONAL) --- */
+        /* --- INDIVIDUAL SCANNER CARD --- */
         .scan-card {
             background: #0f172a;
             border: 1px solid #1e293b;
@@ -143,7 +166,6 @@
             gap: 4px;
             position: relative;
         }
-        /* Directional Accent Borders */
         .scan-card.card-bullish { border-left: 4px solid #00c897; }
         .scan-card.card-bearish { border-left: 4px solid #f23645; }
         .scan-card.card-neutral { border-left: 4px solid #334155; }
@@ -239,7 +261,43 @@
         .pressure-labels .b { color: #4ade80; }
         .pressure-labels .s { color: #f87171; }
 
-        /* --- LOADING --- */
+        /* --- CENTERED STATUS MESSAGES --- */
+        .status-center {
+            grid-column: 1/-1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: #64748b;
+            text-align: center;
+            gap: 12px;
+        }
+        .status-center .icon {
+            font-size: 2rem;
+            opacity: 0.6;
+        }
+        .status-center .msg {
+            font-size: 1rem;
+            font-weight: 500;
+            color: #94a3b8;
+        }
+        .status-center .sub {
+            font-size: 0.8rem;
+            color: #475569;
+        }
+        .spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #1e293b;
+            border-top-color: #60a5fa;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* --- LOADING SKELETON (brief) --- */
         .skeleton-card {
             background: #0f172a;
             border: 1px solid #1e293b;
@@ -251,27 +309,8 @@
             animation: shimmer 1.5s infinite;
         }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-        .loading-text {
-            text-align: center;
-            padding: 30px 0;
-            color: #475569;
-            font-size: 0.8rem;
-            grid-column: 1/-1;
-        }
-        .spin {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #1e293b;
-            border-top-color: #60a5fa;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            vertical-align: middle;
-            margin-right: 8px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* --- MOBILE FIRST --- */
+        /* --- MOBILE --- */
         @media (max-width: 600px) {
             body { padding: 6px; font-size: 12px; }
             .header-title { font-size: 0.85rem; }
@@ -281,10 +320,8 @@
             .scan-card { padding: 8px 10px; }
             .price-main { font-size: 0.9rem; }
             .wl-add-input { width: 70px; }
-            .watchlist-wrapper { padding: 4px 6px; }
-            .card-symbol { font-size: 0.85rem; }
-            .readiness-score { font-size: 1.1rem; }
-            .price-group { gap: 4px; }
+            .status-center { padding: 40px 16px; }
+            .status-center .msg { font-size: 0.9rem; }
         }
     </style>
 </head>
@@ -306,46 +343,52 @@
         </div>
     </div>
 
-    <!-- WATCHLIST BAR -->
-    <div class="watchlist-wrapper">
-        <span class="wl-label">★ Watchlist</span>
-        <div class="wl-items" id="watchlistContainer">
+    <!-- WATCHLIST (COLLAPSIBLE DRAWER) -->
+    <details class="watchlist-drawer">
+        <summary>
+            <span class="wl-icon">★</span> Watchlist
+            <span class="wl-count">({{ watchlist_rows|length }} symbols)</span>
+            <span style="margin-left:auto; font-size:0.6rem; color:#475569;">▼ click to expand</span>
+        </summary>
+        <div class="wl-grid">
             {% for item in watchlist_rows %}
             <div class="wl-item">
                 <button class="wl-pin {{ 'active' if item.pinned else '' }}" onclick="togglePin('{{ item.symbol }}', '{{ item.timeframe }}')">★</button>
                 <span class="wl-sym">{{ item.symbol }}</span>
                 <span class="wl-tf">{{ item.timeframe }}</span>
-                <span class="wl-price">
-                    {% if item.curr_close not in ['Loading...', 'N/A'] %}
-                        ${{ item.curr_close }}
-                    {% else %}
-                        ...
-                    {% endif %}
-                </span>
                 <button class="wl-remove" onclick="removeSymbol('{{ item.symbol }}', '{{ item.timeframe }}')">✕</button>
             </div>
-            {% else %}
-            <span style="color:#475569; font-size:0.6rem;">No coins.</span>
             {% endfor %}
+            <div class="wl-add-area">
+                <input type="text" id="add-symbol-input" class="wl-add-input" placeholder="Add Symbol">
+                <button class="wl-add-btn" onclick="addWatchlistSymbol()">+</button>
+            </div>
         </div>
-        <div style="display:flex; gap:3px; align-items:center;">
-            <input type="text" id="add-symbol-input" class="wl-add-input" placeholder="Add">
-            <button class="wl-add-btn" onclick="addWatchlistSymbol()">+</button>
-        </div>
-    </div>
+    </details>
 
-    <!-- CARD GRID -->
+    <!-- SCANNER RESULTS (CARD GRID) -->
     <div class="card-grid">
         {% if is_loading %}
+            <!-- Loading state: show skeleton -->
             {% for _ in range(6) %}
             <div class="skeleton-card"></div>
             {% endfor %}
-            <div class="loading-text">
-                <span class="spin"></span> Initializing scanner cache...
+            <div class="status-center">
+                <div class="spinner"></div>
+                <div class="msg">⏳ Connecting to exchange...</div>
+                <div class="sub">Initializing scanner cache</div>
             </div>
+
         {% elif rows|length == 0 %}
-            <div class="loading-text">No active range setups detected. Waiting for data...</div>
+            <!-- No active setups: show waiting message -->
+            <div class="status-center">
+                <div class="icon">📡</div>
+                <div class="msg">Waiting for live market data...</div>
+                <div class="sub">Scanner is idle. Data will appear when breakouts form.</div>
+            </div>
+
         {% else %}
+            <!-- Active setups: display cards -->
             {% for row in rows %}
             <div class="scan-card 
                 {% if row.break_direction == 'BULLISH' %}card-bullish
@@ -418,7 +461,7 @@
                     </div>
                 </div>
 
-                <!-- Row 5: Pressure Bar (Exactly as requested) -->
+                <!-- Row 5: Pressure Bar -->
                 <div>
                     <div class="pressure-bar-wrap">
                         <div class="pressure-bar-buyer" style="width: {{ row.buyer_power }}%;"></div>
