@@ -4,6 +4,7 @@ from flask import Flask, render_template, request, jsonify
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from scanner import _process_symbol_tf
 from datetime import datetime, timezone
+from collections import defaultdict
 
 app = Flask(__name__)
 
@@ -22,7 +23,6 @@ CACHE_LOCK = threading.Lock()
 _worker_thread_started = False
 SCAN_READY = False
 
-# Live status tracking
 scan_status = {
     "state": "INITIALIZING",
     "current_symbol": "",
@@ -41,7 +41,7 @@ def fetch_single_safe(sym, tf):
         scan_status["current_timeframe"] = tf
         match, err = _process_symbol_tf(sym, tf)
         if match:
-            print(f"[CACHE] ✅ {sym} {tf} - Storing (Score: {match.get('readiness_score')}%)")
+            print(f"[CACHE] ✅ {sym} {tf} - Score: {match.get('readiness_score')}%")
             return match
         else:
             print(f"[CACHE] ❌ {sym} {tf} - Unsupported ({err})")
@@ -51,17 +51,19 @@ def fetch_single_safe(sym, tf):
                 "curr_close": "Unsupported",
                 "support": "N/A",
                 "resistance": "N/A",
-                "structure_type": "N/A",
+                "range_width": 0.0,
+                "pattern_type": "N/A",
                 "direction_label": "Unsupported",
                 "break_direction": "NEUTRAL",
                 "break_symbol": "⏳",
                 "readiness_score": 0,
                 "readiness_display": "0%",
-                "buyer_power": 0.0,
-                "seller_power": 0.0,
                 "distance_to_resistance": 0.0,
                 "distance_to_support": 0.0,
-                "volume_trend": "N/A",
+                "volume_label": "N/A",
+                "confidence": "N/A",
+                "status_label": "N/A",
+                "touches": 0,
                 "last_updated": "--:--:-- UTC"
             }
     except Exception as e:
@@ -141,13 +143,6 @@ def index():
     print(f"[ROUTE] Selected TF: {selected_tf}, Active TF: {active_tf}")
     print(f"[ROUTE] SCAN_READY: {SCAN_READY}, CACHE size: {len(CACHE)}")
     
-    if len(CACHE) > 0:
-        # Log a sample of what's in the cache
-        sample_keys = list(CACHE.keys())[:3]
-        for key in sample_keys:
-            val = CACHE[key]
-            print(f"[ROUTE] Cache sample: {key} -> Score: {val.get('readiness_score', 'N/A')}%")
-
     watchlist_rows = []
     is_loading = not SCAN_READY
 
@@ -158,37 +153,76 @@ def index():
                 match = dict(CACHE[key])
                 match["pinned"] = item["pinned"]
                 watchlist_rows.append(match)
-                print(f"[ROUTE] Found in cache: {key}")
             else:
-                print(f"[ROUTE] NOT in cache: {key}")
                 watchlist_rows.append({
                     "symbol": item["symbol"],
                     "timeframe": active_tf,
                     "curr_close": "Loading..." if not SCAN_READY else "Unavailable",
                     "support": "...",
                     "resistance": "...",
+                    "range_width": 0.0,
+                    "pattern_type": "N/A",
                     "direction_label": "Fetching..." if not SCAN_READY else "Unavailable",
                     "break_direction": "NEUTRAL",
                     "break_symbol": "⏳",
                     "readiness_score": 0,
                     "readiness_display": "0%",
-                    "buyer_power": 50.0,
-                    "seller_power": 50.0,
-                    "pinned": item["pinned"],
                     "distance_to_resistance": 0.0,
                     "distance_to_support": 0.0,
-                    "volume_trend": "Neutral",
+                    "volume_label": "N/A",
+                    "confidence": "N/A",
+                    "status_label": "N/A",
+                    "touches": 0,
+                    "pinned": item["pinned"],
                     "last_updated": "--:--:-- UTC"
                 })
 
     watchlist_rows = sort_results(watchlist_rows)
+    
+    # --- MULTI-TIMEFRAME ALIGNMENT ---
+    # For each symbol, determine alignment across timeframes
+    for row in watchlist_rows:
+        sym = row["symbol"]
+        # Collect readiness from all timeframes for this symbol
+        tf_scores = {}
+        for tf in ["5M", "15M", "1H"]:
+            key = f"{sym}_{tf}"
+            if key in CACHE:
+                cached = CACHE[key]
+                if cached.get("break_direction") in ["BULLISH", "BEARISH"]:
+                    tf_scores[tf] = {
+                        "direction": cached["break_direction"],
+                        "readiness": cached.get("readiness_score", 0)
+                    }
+        
+        # Determine alignment
+        if len(tf_scores) >= 2:
+            directions = [v["direction"] for v in tf_scores.values() if v["direction"] in ["BULLISH", "BEARISH"]]
+            if directions:
+                bullish_count = directions.count("BULLISH")
+                bearish_count = directions.count("BEARISH")
+                if bullish_count > bearish_count:
+                    row["alignment_direction"] = "BULLISH"
+                elif bearish_count > bullish_count:
+                    row["alignment_direction"] = "BEARISH"
+                else:
+                    row["alignment_direction"] = "NEUTRAL"
+                row["alignment_count"] = f"{max(bullish_count, bearish_count)}/{len(tf_scores)}"
+            else:
+                row["alignment_direction"] = "NEUTRAL"
+                row["alignment_count"] = "0/0"
+        else:
+            row["alignment_direction"] = "NEUTRAL"
+            row["alignment_count"] = "1/1"
+        
+        # Store individual timeframe data for display
+        row["tf_data"] = tf_scores
 
-    # Show ALL symbols with their actual scores
-    scanner_results = watchlist_rows.copy()
+    # Scanner results - all symbols with score > 0
+    scanner_results = [r for r in watchlist_rows if r.get("readiness_score", 0) > 0]
     scanner_results = sort_results(scanner_results)
     
-    active_results = [r for r in scanner_results if r.get("readiness_score", 0) > 0]
-    print(f"[ROUTE] Total results: {len(scanner_results)}, Active (score>0): {len(active_results)}")
+    print(f"[ROUTE] Total results: {len(scanner_results)}")
 
     return render_template(
         "index.html",
