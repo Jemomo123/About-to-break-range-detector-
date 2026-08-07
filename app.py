@@ -135,6 +135,107 @@ def sort_results(items):
         return (-readiness, tf_priority.get(tf, 99))
     return sorted(items, key=sort_key)
 
+def generate_alignment_explanation(symbol, active_tf):
+    """
+    Generates a plain English explanation of multi-timeframe alignment.
+    """
+    tf_scores = {}
+    for tf in ["5M", "15M", "1H"]:
+        key = f"{symbol}_{tf}"
+        if key in CACHE:
+            cached = CACHE[key]
+            if cached.get("break_direction") in ["BULLISH", "BEARISH"]:
+                tf_scores[tf] = {
+                    "direction": cached["break_direction"],
+                    "readiness": cached.get("readiness_score", 0)
+                }
+    
+    if len(tf_scores) < 2:
+        return "Insufficient data for alignment analysis."
+    
+    # Count directions
+    directions = []
+    for tf, data in tf_scores.items():
+        if data["direction"] in ["BULLISH", "BEARISH"]:
+            directions.append(data["direction"])
+    
+    bullish_count = directions.count("BULLISH")
+    bearish_count = directions.count("BEARISH")
+    total_tfs = len(tf_scores)
+    
+    # Build explanation
+    explanation = []
+    reasons = []
+    
+    # Determine trend direction
+    if bullish_count > bearish_count:
+        primary = "BULLISH"
+        explanation.append("▲ BULLISH")
+        reasons.append("✓ Trend is Up")
+        # Check if price is near resistance
+        key = f"{symbol}_{active_tf}"
+        if key in CACHE:
+            data = CACHE[key]
+            if data.get("distance_to_resistance", 100) < 3.0:
+                reasons.append("✓ Price is Near Resistance")
+            else:
+                reasons.append("○ Price has room to run")
+        # Check momentum - look at the most recent timeframe
+        if "1H" in tf_scores and tf_scores["1H"]["direction"] == "BULLISH":
+            reasons.append("✓ Momentum is Bullish")
+        elif "15M" in tf_scores and tf_scores["15M"]["direction"] == "BULLISH":
+            reasons.append("✓ Momentum is Bullish")
+        else:
+            reasons.append("○ Momentum is Building")
+            
+    elif bearish_count > bullish_count:
+        primary = "BEARISH"
+        explanation.append("▼ BEARISH")
+        reasons.append("✓ Trend is Down")
+        # Check if price is near support
+        key = f"{symbol}_{active_tf}"
+        if key in CACHE:
+            data = CACHE[key]
+            if data.get("distance_to_support", 100) < 3.0:
+                reasons.append("✓ Price is Near Support")
+            else:
+                reasons.append("○ Price has room to fall")
+        # Check momentum
+        if "1H" in tf_scores and tf_scores["1H"]["direction"] == "BEARISH":
+            reasons.append("✓ Momentum is Bearish")
+        elif "15M" in tf_scores and tf_scores["15M"]["direction"] == "BEARISH":
+            reasons.append("✓ Momentum is Bearish")
+        else:
+            reasons.append("○ Momentum is Building")
+    else:
+        primary = "MIXED"
+        explanation.append("● MIXED")
+        # Mixed alignment - list both
+        if bullish_count > 0:
+            reasons.append(f"✓ {bullish_count} timeframe(s) Bullish")
+        if bearish_count > 0:
+            reasons.append(f"✓ {bearish_count} timeframe(s) Bearish")
+        
+        # Check price position
+        key = f"{symbol}_{active_tf}"
+        if key in CACHE:
+            data = CACHE[key]
+            if data.get("distance_to_resistance", 100) < 3.0:
+                reasons.append("✓ Price is Near Resistance")
+            if data.get("distance_to_support", 100) < 3.0:
+                reasons.append("✓ Price is Near Support")
+    
+    # Add alignment summary
+    summary = f"Alignment: {bullish_count}/{total_tfs} Bullish, {bearish_count}/{total_tfs} Bearish"
+    
+    # Build final display
+    display_lines = []
+    display_lines.append(" ".join(explanation))
+    display_lines.extend(reasons)
+    display_lines.append(summary)
+    
+    return "\n".join(display_lines)
+
 @app.route("/")
 def index():
     selected_tf = request.args.get("tf", "15M").upper()
@@ -152,6 +253,8 @@ def index():
             if key in CACHE:
                 match = dict(CACHE[key])
                 match["pinned"] = item["pinned"]
+                # Generate alignment explanation
+                match["alignment_explanation"] = generate_alignment_explanation(item["symbol"], active_tf)
                 watchlist_rows.append(match)
             else:
                 watchlist_rows.append({
@@ -174,50 +277,12 @@ def index():
                     "status_label": "N/A",
                     "touches": 0,
                     "pinned": item["pinned"],
-                    "last_updated": "--:--:-- UTC"
+                    "last_updated": "--:--:-- UTC",
+                    "alignment_explanation": "Waiting for data..."
                 })
 
     watchlist_rows = sort_results(watchlist_rows)
     
-    # --- MULTI-TIMEFRAME ALIGNMENT ---
-    # For each symbol, determine alignment across timeframes
-    for row in watchlist_rows:
-        sym = row["symbol"]
-        # Collect readiness from all timeframes for this symbol
-        tf_scores = {}
-        for tf in ["5M", "15M", "1H"]:
-            key = f"{sym}_{tf}"
-            if key in CACHE:
-                cached = CACHE[key]
-                if cached.get("break_direction") in ["BULLISH", "BEARISH"]:
-                    tf_scores[tf] = {
-                        "direction": cached["break_direction"],
-                        "readiness": cached.get("readiness_score", 0)
-                    }
-        
-        # Determine alignment
-        if len(tf_scores) >= 2:
-            directions = [v["direction"] for v in tf_scores.values() if v["direction"] in ["BULLISH", "BEARISH"]]
-            if directions:
-                bullish_count = directions.count("BULLISH")
-                bearish_count = directions.count("BEARISH")
-                if bullish_count > bearish_count:
-                    row["alignment_direction"] = "BULLISH"
-                elif bearish_count > bullish_count:
-                    row["alignment_direction"] = "BEARISH"
-                else:
-                    row["alignment_direction"] = "NEUTRAL"
-                row["alignment_count"] = f"{max(bullish_count, bearish_count)}/{len(tf_scores)}"
-            else:
-                row["alignment_direction"] = "NEUTRAL"
-                row["alignment_count"] = "0/0"
-        else:
-            row["alignment_direction"] = "NEUTRAL"
-            row["alignment_count"] = "1/1"
-        
-        # Store individual timeframe data for display
-        row["tf_data"] = tf_scores
-
     # Scanner results - all symbols with score > 0
     scanner_results = [r for r in watchlist_rows if r.get("readiness_score", 0) > 0]
     scanner_results = sort_results(scanner_results)
