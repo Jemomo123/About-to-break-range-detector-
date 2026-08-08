@@ -320,7 +320,8 @@
             </span>
             <div class="status-detail">
                 <span>Scanned: <span class="highlight">{{ scan_status.symbols_scanned }}/{{ scan_status.total_symbols }}</span></span>
-                <span>TF: <span class="highlight">{{ scan_status.current_timeframe or '—' }}</span></span>
+                <!-- FIX: display selected_tf instead of scan_status.current_timeframe -->
+                <span>TF: <span class="highlight">{{ selected_tf }}</span></span>
                 <span>Updated: <span class="highlight">{{ scan_status.last_update or '—' }}</span></span>
             </div>
             <div class="tf-pills">
@@ -399,7 +400,7 @@
                     <span class="card-updated">{{ row.last_updated }}</span>
                 </div>
 
-                <!-- Row 2: Price -->
+                <!-- Row 2: Price + Level Price -->
                 <div class="card-row">
                     <span class="price-main">${{ row.curr_close }}</span>
                     <span style="font-size:0.6rem; color:#64748b;">
