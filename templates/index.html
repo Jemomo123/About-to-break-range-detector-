@@ -213,7 +213,6 @@
         .price-value { font-weight: 600; font-size: 0.75rem; }
         .price-value.sup { color: #4ade80; }
         .price-value.res { color: #f87171; }
-        .price-value.unsupported { color: #64748b; font-style: italic; }
 
         .readiness-score {
             font-weight: 800;
@@ -377,7 +376,7 @@
         </div>
     </details>
 
-    <!-- SCANNER RESULTS (CARD GRID) -->
+    <!-- SCANNER RESULTS -->
     <div class="card-grid">
         {% if is_loading %}
             {% for _ in range(6) %}
