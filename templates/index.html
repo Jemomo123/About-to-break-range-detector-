@@ -180,8 +180,8 @@
             flex-direction: column;
             gap: 4px;
         }
-        .scan-card.card-bullish { border-left: 4px solid #00c897; }
-        .scan-card.card-bearish { border-left: 4px solid #f23645; }
+        .scan-card.card-buyers { border-left: 4px solid #00c897; }
+        .scan-card.card-sellers { border-left: 4px solid #f23645; }
         .scan-card.card-neutral { border-left: 4px solid #334155; }
         .scan-card:hover { border-color: #475569; background: #131d2e; }
 
@@ -385,8 +385,8 @@
         {% else %}
             {% for row in rows %}
             <div class="scan-card 
-                {% if row.winner == 'BUYERS' %}card-bullish
-                {% elif row.winner == 'SELLERS' %}card-bearish
+                {% if row.winner == 'BUYERS' %}card-buyers
+                {% elif row.winner == 'SELLERS' %}card-sellers
                 {% else %}card-neutral{% endif %}">
                 
                 <!-- Row 1: Symbol + Timeframe + Level -->
@@ -408,7 +408,7 @@
                     </span>
                 </div>
 
-                <!-- Row 3: Who is winning -->
+                <!-- Row 3: Who is winning + Signal -->
                 <div class="card-row">
                     <span class="winner-badge 
                         {% if row.winner == 'BUYERS' %}winner-buyers
