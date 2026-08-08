@@ -5,14 +5,13 @@ from datetime import datetime, timezone
 import threading
 
 # ===== CONFIGURATION =====
-DEBUG = False  # Set to True for detailed scoring logs
+DEBUG = False
 # =========================
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
-# Unsupported symbol cache (thread-safe)
 UNSUPPORTED_SYMBOLS = set()
 UNSUPPORTED_LOCK = threading.Lock()
 
@@ -23,20 +22,10 @@ def is_unsupported(symbol):
 def mark_unsupported(symbol):
     with UNSUPPORTED_LOCK:
         UNSUPPORTED_SYMBOLS.add(symbol)
-        if DEBUG:
-            print(f"[UNSUPPORTED] {symbol} added to unsupported cache")
 
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
-    """
-    PRIMARY: OKX REST API
-    FALLBACK: MEXC REST API
-    Returns: DataFrame or empty DataFrame
-    """
-    # Skip if symbol is known unsupported
     if is_unsupported(symbol):
-        if DEBUG:
-            print(f"[SKIP] {symbol} {timeframe} - unsupported")
         return pd.DataFrame()
 
     clean_sym = symbol.replace("_", "").replace("-", "").upper()
@@ -47,7 +36,6 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
     okx_bar = okx_tf_map.get(timeframe, "15m")
 
-    # 1. OKX
     okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
     try:
         resp = requests.get(okx_url, headers=HEADERS, timeout=10)
@@ -63,22 +51,12 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 df = df.iloc[::-1].reset_index(drop=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
-                print(f"[OKX][{symbol}][{timeframe}] ✓ Downloaded {len(df)} candles")
                 return df
             elif code == "51001":
-                print(f"[OKX][{symbol}] Unsupported instrument (51001)")
                 mark_unsupported(symbol)
                 return pd.DataFrame()
-            else:
-                print(f"[OKX][{symbol}] Empty data. Code: {code}")
-        else:
-            print(f"[OKX][{symbol}] HTTP {resp.status_code}")
-    except Exception as e:
-        print(f"[OKX][{symbol}] Exception: {e}")
-
-    # 2. MEXC fallback (only if symbol not already unsupported)
-    if is_unsupported(symbol):
-        return pd.DataFrame()
+    except Exception:
+        pass
 
     mexc_sym = clean_sym
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
@@ -99,41 +77,27 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     ])
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
-                    print(f"[MEXC][{symbol}][{timeframe}] ✓ Downloaded {len(df)} candles")
                     return df
-                else:
-                    print(f"[MEXC][{symbol}] No valid rows")
-            else:
-                print(f"[MEXC][{symbol}] Empty data")
-        else:
-            print(f"[MEXC][{symbol}] HTTP {resp.status_code}")
-    except Exception as e:
-        print(f"[MEXC][{symbol}] Exception: {e}")
+    except Exception:
+        pass
 
-    print(f"[{symbol}][{timeframe}] ✗ FAILED")
     return pd.DataFrame()
 
 
-def detect_support_resistance(highs, lows, closes, lookback=30):
+def detect_levels(highs, lows, closes, lookback=30):
+    """Find support and resistance levels from recent price action."""
     support = np.min(lows[-lookback:])
     resistance = np.max(highs[-lookback:])
-    tolerance = 0.005
-    support_touches = 0
-    resistance_touches = 0
-    for i in range(len(closes) - lookback, len(closes)):
-        price = closes[i]
-        if abs(price - support) / support < tolerance:
-            support_touches += 1
-        if abs(price - resistance) / resistance < tolerance:
-            resistance_touches += 1
-    return support, resistance, support_touches, resistance_touches
+    return support, resistance
 
 
-def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
+def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
+    """
+    Determines who is winning at the nearest support/resistance level.
+    Returns battle result and signal.
+    """
     if df.empty or len(df) < 30:
-        if DEBUG:
-            print(f"[DEBUG][{symbol}][{timeframe}] ❌ Insufficient candles")
-        return None, "DATA UNAVAILABLE"
+        return None, "INSUFFICIENT DATA"
 
     closes = df['close'].values
     highs = df['high'].values
@@ -141,230 +105,193 @@ def analyze_range_structure(df: pd.DataFrame, symbol: str, timeframe: str):
     volumes = df['volume'].values
 
     curr_close = float(closes[-1])
+    lookback = min(30, len(df) - 1)
 
-    tr = np.maximum(highs[1:] - lows[1:], 
-                    np.abs(highs[1:] - closes[:-1]),
-                    np.abs(lows[1:] - closes[:-1]))
-    atr = np.mean(tr[-14:]) if len(tr) >= 14 else np.mean(tr)
-    vol_factor = atr / curr_close if curr_close > 0 else 0
-    lookback = min(40, max(20, int(30 * (1 + vol_factor * 10))))
-    lookback = min(lookback, len(df) - 1)
-
-    support, resistance, support_touches, resistance_touches = detect_support_resistance(
-        highs, lows, closes, lookback
-    )
-
+    # 1. Identify support and resistance
+    support, resistance = detect_levels(highs, lows, closes, lookback)
     range_height = resistance - support
-    range_mid = (resistance + support) / 2
-    range_width_pct = (range_height / range_mid) * 100 if range_mid > 0 else 100
-
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] Range: S={support:.6f}, R={resistance:.6f}, Width={range_width_pct:.2f}%")
-        print(f"[DEBUG][{symbol}][{timeframe}] Touches: Support={support_touches}, Resistance={resistance_touches}")
-
     if range_height <= 0:
-        return None, "NO RANGE"
+        return None, "INVALID RANGE"
 
-    if range_width_pct > 12.0:
-        if DEBUG:
-            print(f"[DEBUG][{symbol}][{timeframe}] ❌ Range too wide: {range_width_pct:.2f}%")
-        return None, "RANGE TOO WIDE"
+    # 2. Determine which level price is nearest to (within 3%)
+    dist_to_res = (resistance - curr_close) / curr_close * 100
+    dist_to_sup = (curr_close - support) / curr_close * 100
+    threshold = 3.0  # within 3% of level
 
-    dist_to_resistance = (resistance - curr_close) / curr_close * 100
-    dist_to_support = (curr_close - support) / curr_close * 100
+    if dist_to_res < dist_to_sup and dist_to_res < threshold:
+        # NEAR RESISTANCE
+        level_type = "RESISTANCE"
+        level_price = resistance
+        distance = dist_to_res
+        # Determine who is winning at resistance
+        buyer_score, seller_score = compute_battle_score(
+            highs, lows, closes, volumes, 
+            level=level_price, 
+            level_type="RESISTANCE"
+        )
+        if buyer_score > seller_score + 5:
+            winner = "BUYERS"
+            signal = "BREAKOUT IMMINENT"
+            explanation = "Buyers are absorbing selling pressure near resistance."
+        elif seller_score > buyer_score + 5:
+            winner = "SELLERS"
+            signal = "RESISTANCE HOLDING"
+            explanation = "Sellers are defending resistance, rejecting price."
+        else:
+            winner = "NEUTRAL"
+            signal = "NO CLEAR SIGNAL"
+            explanation = "Battle at resistance is evenly matched."
 
-    if dist_to_resistance < dist_to_support:
-        primary_direction = "BULLISH"
-        breakout_level = resistance
-        distance_to_breakout = dist_to_resistance
-        touches = resistance_touches
+    elif dist_to_sup < threshold:
+        # NEAR SUPPORT
+        level_type = "SUPPORT"
+        level_price = support
+        distance = dist_to_sup
+        buyer_score, seller_score = compute_battle_score(
+            highs, lows, closes, volumes,
+            level=level_price,
+            level_type="SUPPORT"
+        )
+        if seller_score > buyer_score + 5:
+            winner = "SELLERS"
+            signal = "BREAKDOWN IMMINENT"
+            explanation = "Sellers are overpowering support, price breaking lower."
+        elif buyer_score > seller_score + 5:
+            winner = "BUYERS"
+            signal = "SUPPORT HOLDING"
+            explanation = "Buyers are defending support, absorbing selling."
+        else:
+            winner = "NEUTRAL"
+            signal = "NO CLEAR SIGNAL"
+            explanation = "Battle at support is evenly matched."
+
     else:
-        primary_direction = "BEARISH"
-        breakout_level = support
-        distance_to_breakout = dist_to_support
-        touches = support_touches
+        # Not near any significant level
+        level_type = "NONE"
+        level_price = curr_close
+        distance = 0.0
+        winner = "NEUTRAL"
+        signal = "NO CLEAR SIGNAL"
+        explanation = "Price is not near a key support or resistance level."
 
-    if touches < 2:
-        if DEBUG:
-            print(f"[DEBUG][{symbol}][{timeframe}] ❌ Breakout level has only {touches} touch(es)")
-        return None, "INSUFFICIENT_TOUCHES"
-
-    vol_ma20 = np.mean(volumes[-20:]) if len(volumes) >= 20 else np.mean(volumes)
-    vol_ma5 = np.mean(volumes[-5:]) if len(volumes) >= 5 else 0
-    vol_trend = np.polyfit(range(10), volumes[-10:], 1)[0] if len(volumes) >= 10 else 0
-
-    if vol_ma5 < vol_ma20 * 0.6 and vol_trend < 0:
-        volume_label = "Drying Up"
-        volume_score = 25
-    elif vol_ma5 < vol_ma20 * 0.8 and vol_trend < 0:
-        volume_label = "Drying Up"
-        volume_score = 20
-    elif vol_ma5 < vol_ma20 * 0.9:
-        volume_label = "Picking Up"
-        volume_score = 15
-    elif vol_ma5 < vol_ma20 * 1.2:
-        volume_label = "Picking Up"
-        volume_score = 10
-    elif vol_ma5 < vol_ma20 * 1.8:
-        volume_label = "Expanding"
-        volume_score = 8
-    else:
-        volume_label = "Exploding"
-        volume_score = 5
-
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] Volume: {volume_label} (score={volume_score})")
-
-    max_distance = 5.0
-    proximity_score = max(0, min(35, 35 * (1 - min(distance_to_breakout, max_distance) / max_distance)))
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] Proximity Score: {proximity_score:.1f}/35")
-
-    pattern_maturity = min(20, touches * 5)
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] Pattern Maturity: {pattern_maturity:.1f}/20")
-
-    if range_width_pct < 2.0:
-        tightness_score = 10
-    elif range_width_pct < 3.0:
-        tightness_score = 7
-    elif range_width_pct < 5.0:
-        tightness_score = 4
-    else:
-        tightness_score = 0
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] Tightness Score: {tightness_score:.1f}/10")
-
-    candle_score = 0
-    for i in range(max(0, len(closes)-6), len(closes)-1):
-        candle_range = highs[i] - lows[i]
-        if candle_range > 0:
-            if primary_direction == "BULLISH":
-                close_position = (closes[i] - lows[i]) / candle_range
-                if close_position > 0.7:
-                    candle_score += 2
-                if highs[i] - breakout_level < 0.001:
-                    candle_score += 1
-            else:
-                close_position = (closes[i] - lows[i]) / candle_range
-                if close_position < 0.3:
-                    candle_score += 2
-                if breakout_level - lows[i] < 0.001:
-                    candle_score += 1
-    candle_score = min(10, candle_score)
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] Candle Score: {candle_score:.1f}/10")
-
-    readiness_score = int(round(proximity_score + volume_score + pattern_maturity + tightness_score + candle_score))
-    readiness_score = max(0, min(100, readiness_score))
-
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] Total Readiness: {readiness_score}%")
-
-    last_10_lows = lows[-10:]
-    last_10_highs = highs[-10:]
-    higher_lows = all(last_10_lows[i] >= last_10_lows[i-1] for i in range(1, len(last_10_lows)))
-    lower_highs = all(last_10_highs[i] <= last_10_highs[i-1] for i in range(1, len(last_10_highs)))
-
-    if higher_lows and primary_direction == "BULLISH":
-        pattern_type = "ASCENDING TRIANGLE"
-    elif lower_highs and primary_direction == "BEARISH":
-        pattern_type = "DESCENDING TRIANGLE"
-    elif range_width_pct < 2.0:
-        pattern_type = "RECTANGLE"
-    else:
-        pattern_type = "CONSOLIDATION"
-
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] Pattern: {pattern_type}")
-
-    if readiness_score >= 80 and pattern_type in ["ASCENDING TRIANGLE", "RECTANGLE"]:
-        confidence = "Very High"
-    elif readiness_score >= 65:
-        confidence = "High"
-    elif readiness_score >= 45:
-        confidence = "Medium"
-    elif readiness_score >= 25:
-        confidence = "Low"
-    else:
-        confidence = "Very Low"
-
-    if readiness_score >= 80:
-        status_label = "Almost Ready"
-    elif readiness_score >= 65:
-        status_label = "Building"
-    elif readiness_score >= 45:
-        status_label = "Developing"
-    elif readiness_score >= 25:
-        status_label = "Early"
-    else:
-        status_label = "Waiting"
-
+    # Build result
     last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     clean_display = symbol.replace("-", "").replace("_", "").upper()
-
-    if primary_direction == "BULLISH":
-        direction_label = "Bullish Breakout Candidate"
-        break_symbol = "▲"
-    else:
-        direction_label = "Bearish Breakdown Candidate"
-        break_symbol = "▼"
-
-    if DEBUG:
-        print(f"[DEBUG][{symbol}][{timeframe}] ✅ FINAL: {primary_direction} {readiness_score}%")
-        print(f"[DEBUG][{symbol}][{timeframe}] === ANALYSIS COMPLETE ===")
 
     return {
         "symbol": clean_display,
         "timeframe": timeframe,
         "curr_close": round(curr_close, 6),
+        "level_type": level_type,
+        "level_price": round(level_price, 6),
+        "distance_to_level": round(distance, 2),
+        "winner": winner,
+        "signal": signal,
+        "explanation": explanation,
         "support": round(support, 6),
         "resistance": round(resistance, 6),
-        "range_width": round(range_width_pct, 2),
-        "pattern_type": pattern_type,
-        "direction_label": direction_label,
-        "break_direction": primary_direction,
-        "break_symbol": break_symbol,
-        "readiness_score": readiness_score,
-        "readiness_display": f"{readiness_score}%",
-        "distance_to_resistance": round(dist_to_resistance, 2),
-        "distance_to_support": round(dist_to_support, 2),
-        "volume_label": volume_label,
-        "confidence": confidence,
-        "status_label": status_label,
-        "touches": touches,
         "last_updated": last_updated
     }, None
 
 
-def _process_symbol_tf(symbol: str, tf: str):
+def compute_battle_score(highs, lows, closes, volumes, level, level_type, lookback=5):
     """
-    Process a single symbol/timeframe combination.
-    Returns: (result_dict, error_message) or (None, error_message)
+    Compute buyer and seller scores from the last `lookback` candles.
+    - For RESISTANCE: bullish candles indicate buyers winning, bearish candles with wicks indicate sellers defending.
+    - For SUPPORT: bearish candles indicate sellers winning, bullish candles with wicks indicate buyers defending.
     """
-    # Check unsupported cache first
-    if is_unsupported(symbol):
-        if DEBUG:
-            print(f"[SCAN][{symbol}][{tf}] ⏭️ Skipping (unsupported)")
-        return None, "UNSUPPORTED"
+    buyer_score = 0
+    seller_score = 0
 
-    print(f"[SCAN][{symbol}][{tf}] Starting...")
+    # Calculate average volume for context
+    avg_vol = np.mean(volumes[-20:]) if len(volumes) >= 20 else np.mean(volumes)
+
+    for i in range(max(0, len(closes) - lookback), len(closes)):
+        candle_high = highs[i]
+        candle_low = lows[i]
+        candle_open = closes[i-1] if i > 0 else closes[i]
+        candle_close = closes[i]
+        candle_vol = volumes[i] if i < len(volumes) else 0
+        candle_range = candle_high - candle_low
+
+        if candle_range <= 0:
+            continue
+
+        # Determine if candle is bullish or bearish
+        is_bullish = candle_close > candle_open
+        is_bearish = candle_close < candle_open
+
+        # Close position in candle (0 = low, 1 = high)
+        close_position = (candle_close - candle_low) / candle_range
+
+        # Check wick lengths
+        upper_wick = candle_high - max(candle_open, candle_close)
+        lower_wick = min(candle_open, candle_close) - candle_low
+
+        # Volume relative to average
+        vol_ratio = candle_vol / avg_vol if avg_vol > 0 else 1.0
+        is_high_vol = vol_ratio > 1.2
+
+        if level_type == "RESISTANCE":
+            # At resistance, buyers are trying to break through, sellers are defending.
+            # Buyers winning: bullish candle closing near high with volume
+            if is_bullish and close_position > 0.7:
+                buyer_score += 3
+                if is_high_vol:
+                    buyer_score += 2
+            # Sellers winning: bearish candle with long upper wick (rejection)
+            if is_bearish and upper_wick / candle_range > 0.3:
+                seller_score += 3
+                if is_high_vol:
+                    seller_score += 2
+            # Also check for bullish wick rejection at resistance (if price tried but failed)
+            if is_bullish and upper_wick / candle_range > 0.3:
+                seller_score += 2  # rejection of resistance
+
+        elif level_type == "SUPPORT":
+            # At support, sellers are trying to break down, buyers are defending.
+            # Sellers winning: bearish candle closing near low with volume
+            if is_bearish and close_position < 0.3:
+                seller_score += 3
+                if is_high_vol:
+                    seller_score += 2
+            # Buyers winning: bullish candle with long lower wick (rejection of support)
+            if is_bullish and lower_wick / candle_range > 0.3:
+                buyer_score += 3
+                if is_high_vol:
+                    buyer_score += 2
+            # Also check for bearish wick rejection at support (if price tried but bounced)
+            if is_bearish and lower_wick / candle_range > 0.3:
+                buyer_score += 2  # rejection of support
+
+        # Additional volume-weighted points
+        if is_high_vol:
+            if is_bullish:
+                buyer_score += 1  # volume confirms bullish intent
+            else:
+                seller_score += 1
+
+        # Add points for consecutive candles in same direction (momentum)
+        if i > 0:
+            prev_close = closes[i-1]
+            if is_bullish and candle_close > prev_close:
+                buyer_score += 1
+            elif is_bearish and candle_close < prev_close:
+                seller_score += 1
+
+    return buyer_score, seller_score
+
+
+def _process_symbol_tf(symbol: str, tf: str):
+    if is_unsupported(symbol):
+        return None, "UNSUPPORTED"
     df = fetch_ohlcv(symbol, tf)
     if df.empty:
-        print(f"[SCAN][{symbol}][{tf}] ❌ No data")
         return None, "DATA UNAVAILABLE"
-    result, err = analyze_range_structure(df, symbol, tf)
-    if result:
-        print(f"[SCAN][{symbol}][{tf}] ✅ PASSED - Readiness: {result['readiness_score']}%")
-    else:
-        print(f"[SCAN][{symbol}][{tf}] ❌ FAILED - {err}")
-    return result, err
+    return analyze_level_battle(df, symbol, tf)
 
 
 def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
-    """
-    Run full scanner pipeline and return results with diagnostics.
-    """
     results = []
     diagnostics = {
         "total_scanned": 0,
@@ -390,6 +317,6 @@ def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
                 diagnostics["failed_logic"] += 1
                 diagnostics["rejections"][err] = diagnostics["rejections"].get(err, 0) + 1
 
-    results.sort(key=lambda x: -x["readiness_score"])
+    results.sort(key=lambda x: 0 if x.get("winner") == "NEUTRAL" else 1, reverse=True)
     diagnostics["displayed"] = len(results)
     return results, diagnostics
