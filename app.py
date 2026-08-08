@@ -40,14 +40,10 @@ def fetch_single_safe(sym, tf):
         scan_status["current_timeframe"] = tf
         match, err = _process_symbol_tf(sym, tf)
         if match:
-            print(f"[CACHE] ✅ {sym} {tf} - Score: {match.get('readiness_score')}%")
             return match
         else:
-            # If unsupported, we don't want to store a placeholder; we just skip
             if err == "UNSUPPORTED":
-                print(f"[CACHE] ⏭️ {sym} {tf} - Unsupported")
                 return None
-            # For other errors, store a placeholder to avoid repeated retries
             return {
                 "symbol": sym,
                 "timeframe": tf,
@@ -91,7 +87,7 @@ def update_cache_job():
                     for future in as_completed(future_map):
                         sym = future_map[future]
                         res = future.result()
-                        if res:  # Only store if we got a valid dict
+                        if res:
                             with CACHE_LOCK:
                                 CACHE[f"{sym}_{tf}"] = res
                                 scan_status["symbols_scanned"] += 1
@@ -109,10 +105,6 @@ def update_cache_job():
                                     SCAN_READY = True
                                     scan_status["state"] = "LIVE"
                                     print(f">>> SCAN_READY = True (first data: {sym} {tf})")
-                                print(f"[CACHE] Stored {sym} {tf} (Cache size: {len(CACHE)})")
-                        else:
-                            # if res is None (unsupported or error), we don't cache
-                            print(f"[CACHE] Skipped {sym} {tf} (no data)")
                 print(f">>> Completed {tf}")
                 time.sleep(1)
             
@@ -204,32 +196,9 @@ def index():
     selected_tf = request.args.get("tf", "15M").upper()
     active_tf = "15M" if selected_tf == "ALL" else selected_tf
 
-    print(f"[ROUTE] Selected TF: {selected_tf}, Active TF: {active_tf}")
-    print(f"[ROUTE] SCAN_READY: {SCAN_READY}, CACHE size: {len(CACHE)}")
-
     watchlist_rows = []
     is_loading = not SCAN_READY
 
-    # Compute diagnostics from cache and watchlist
-    total_watchlist_symbols = len(WATCHLIST)
-    unsupported_count = 0
-    cached_symbols = set()
-    # Count how many symbols have at least one timeframe in cache
-    for item in WATCHLIST:
-        sym = item["symbol"]
-        if is_unsupported(sym):
-            unsupported_count += 1
-        # check if any timeframe exists
-        has_data = False
-        for tf in ["5M", "15M", "1H", "4H"]:
-            if f"{sym}_{tf}" in CACHE:
-                has_data = True
-                cached_symbols.add(sym)
-                break
-        if has_data:
-            cached_symbols.add(sym)
-
-    # Build watchlist rows (for the active timeframe)
     with CACHE_LOCK:
         for item in WATCHLIST:
             key = f"{item['symbol']}_{active_tf}"
@@ -239,7 +208,6 @@ def index():
                 match["alignment_explanation"] = generate_alignment_explanation(item["symbol"], active_tf)
                 watchlist_rows.append(match)
             else:
-                # Determine if symbol is unsupported
                 if is_unsupported(item["symbol"]):
                     status_display = "Unsupported"
                 else:
@@ -270,80 +238,38 @@ def index():
 
     watchlist_rows = sort_results(watchlist_rows)
 
-    # Build scanner results (all timeframes if "ALL", else active)
     if selected_tf == "ALL":
-        # Aggregate all timeframes
         all_results = []
         for key, data in CACHE.items():
             parts = key.rsplit("_", 1)
             if len(parts) == 2:
                 sym, tf = parts[0], parts[1]
                 if tf in ["5M", "15M", "1H", "4H"]:
-                    if data.get("readiness_score", 0) > 0:
-                        entry = dict(data)
-                        entry["pinned"] = any(w["symbol"] == sym and w["pinned"] for w in WATCHLIST)
-                        # alignment for active tf (just for display)
-                        entry["alignment_explanation"] = generate_alignment_explanation(sym, active_tf)
-                        all_results.append(entry)
+                    entry = dict(data)
+                    entry["pinned"] = any(w["symbol"] == sym and w["pinned"] for w in WATCHLIST)
+                    entry["alignment_explanation"] = generate_alignment_explanation(sym, active_tf)
+                    all_results.append(entry)
         scanner_results = sort_results(all_results)
     else:
-        # Specific timeframe: use watchlist_rows but filter those with score > 0
-        scanner_results = [r for r in watchlist_rows if r.get("readiness_score", 0) > 0]
+        scanner_results = watchlist_rows.copy()
         scanner_results = sort_results(scanner_results)
 
-    # Build diagnostics
-    total_scanned = len(WATCHLIST) * 4  # 4 timeframes per symbol
-    passed = len(scanner_results)
-    failed_logic = 0
-    displayed = passed
-    # We can compute rejected count from cache misses or error placeholders
-    # For simplicity, use unsupported_count from above and logic failures from cache placeholders
-    # Actually we can compute by subtracting passed and unsupported from total_scanned
-    # But we don't have a count of logic failures easily. We'll approximate:
-    # Logic failures = total_scanned - passed - unsupported_count*4 (since unsupported symbols skip all timeframes)
-    # That's a rough estimate.
-    unsupported_timeframes = unsupported_count * 4
-    # count how many cache entries have readiness_score == 0 and are not "Unsupported" – they are logic failures
-    # We'll loop through cache and count those with score == 0 and not unsupported
-    # But unsupported symbols have no cache entry, so they won't be in cache.
-    # We'll use the watchlist_rows that have "Unavailable" or "Loading..." but not unsupported.
-    logic_fail_count = 0
-    for row in watchlist_rows:
-        if row.get("curr_close") in ["Unavailable", "Loading..."] and row.get("symbol") not in UNSUPPORTED_SYMBOLS:
-            # This is approximate; we can refine by checking if there is a cached entry for that symbol in any timeframe.
-            # For now, we'll count rows with score 0.
-            pass
-    # Simpler: compute rejected as total_scanned - passed - unsupported_timeframes (approx)
-    # But unsupported_timeframes may be more than actually scanned because we skip them.
-    # Since we skip unsupported entirely, total_scanned should exclude them.
-    total_scanned_effective = (len(WATCHLIST) - unsupported_count) * 4
-    failed_logic = total_scanned_effective - passed
-    # but passed is only those with score > 0; some may have score = 0 but not unsupported.
-    # Actually we can compute from cache entries: count entries with score == 0 and not unsupported.
-    # We'll do that.
-    logic_fail_entries = 0
-    for key, data in CACHE.items():
-        if data.get("readiness_score", -1) == 0 and data.get("break_direction") != "UNSUPPORTED":
-            logic_fail_entries += 1
-    # But this counts only cached entries. Some symbols may not be cached at all.
-    # Better: we use the watchlist_rows to count how many have "Unavailable" and are not unsupported.
-    # That's the number of symbols that failed logic.
-    # Since each symbol appears once in watchlist_rows for the active timeframe, we can estimate per symbol.
-    # For simplicity, we'll just use the unsupported count and the passed count.
-    # A cleaner approach: compute from the cache size and unsupported symbols.
-    # We'll just provide a reasonable summary.
+    total_symbols = len(WATCHLIST)
+    unsupported_count = sum(1 for sym in DEFAULT_WATCHLIST if is_unsupported(sym))
+    passed_count = sum(1 for key, data in CACHE.items() if data.get("readiness_score", 0) > 0)
+    total_scanned = len(CACHE)
+    failed_logic = total_scanned - passed_count
+    displayed = len(scanner_results)
 
     diagnostics = {
-        "total_symbols": len(WATCHLIST),
+        "total_symbols": total_symbols,
         "timeframes": 4,
-        "passed": passed,
+        "passed": passed_count,
         "unsupported": unsupported_count,
         "failed_logic": failed_logic,
         "displayed": displayed,
         "cache_size": len(CACHE)
     }
-
-    print(f"[ROUTE] Total results: {len(scanner_results)}")
 
     return render_template(
         "index.html",
