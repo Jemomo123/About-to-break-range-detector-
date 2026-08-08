@@ -166,7 +166,7 @@
 
         .card-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 10px;
         }
 
@@ -195,7 +195,7 @@
             font-size: 0.55rem; font-weight: 600;
             margin-left: 6px;
         }
-        .card-pattern {
+        .card-level {
             font-size: 0.6rem;
             color: #94a3b8;
             background: #1e293b;
@@ -204,45 +204,43 @@
         }
         .card-updated { font-size: 0.5rem; color: #475569; font-weight: 400; }
 
-        .direction-bull { color: #00c897; font-weight: 700; font-size: 0.75rem; }
-        .direction-bear { color: #f23645; font-weight: 700; font-size: 0.75rem; }
-        .direction-neutral { color: #64748b; font-weight: 600; font-size: 0.75rem; }
-
         .price-main { font-weight: 700; font-size: 1rem; color: #e2e8f0; }
         .price-label { font-size: 0.5rem; color: #64748b; font-weight: 600; text-transform: uppercase; }
         .price-value { font-weight: 600; font-size: 0.75rem; }
         .price-value.sup { color: #4ade80; }
         .price-value.res { color: #f87171; }
 
-        .readiness-score {
-            font-weight: 800;
-            font-size: 1.4rem;
-        }
-        .readiness-label {
-            font-size: 0.55rem;
+        .winner-badge {
             font-weight: 700;
-            padding: 2px 8px;
+            font-size: 0.8rem;
+            padding: 2px 10px;
             border-radius: 100px;
+            display: inline-block;
         }
-        .rl-high { background: #064e3b; color: #34d399; }
-        .rl-medium { background: #78350f; color: #fbbf24; }
-        .rl-low { background: #451a03; color: #fb923c; }
-        .rl-verylow { background: #1e293b; color: #64748b; }
+        .winner-buyers { background: #064e3b; color: #4ade80; }
+        .winner-sellers { background: #7f1d1d; color: #f87171; }
+        .winner-neutral { background: #1e293b; color: #94a3b8; }
 
-        .metric-label { font-size: 0.5rem; color: #64748b; text-transform: uppercase; }
-        .metric-value { font-size: 0.7rem; font-weight: 600; color: #e2e8f0; }
-
-        .confidence-badge {
-            font-size: 0.6rem;
+        .signal-badge {
             font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 100px;
+            font-size: 0.75rem;
+            padding: 2px 10px;
+            border-radius: 4px;
+            display: inline-block;
         }
-        .conf-vhigh { background: #064e3b; color: #34d399; }
-        .conf-high { background: #1a3a2a; color: #4ade80; }
-        .conf-medium { background: #78350f; color: #fbbf24; }
-        .conf-low { background: #451a03; color: #fb923c; }
-        .conf-vlow { background: #1e293b; color: #64748b; }
+        .signal-breakout { background: #064e3b; color: #34d399; }
+        .signal-breakdown { background: #7f1d1d; color: #f87171; }
+        .signal-holding { background: #78350f; color: #fbbf24; }
+        .signal-none { background: #1e293b; color: #64748b; }
+
+        .explanation-text {
+            font-size: 0.65rem;
+            color: #94a3b8;
+            font-style: italic;
+            border-top: 1px solid #1e293b;
+            padding-top: 4px;
+            margin-top: 2px;
+        }
 
         .status-center {
             grid-column: 1/-1;
@@ -294,18 +292,9 @@
             flex-wrap: wrap;
             align-items: center;
         }
-        .scanner-summary .stat { 
-            display: flex; 
-            align-items: center; 
-            gap: 4px; 
-        }
-        .scanner-summary .stat .num { 
-            color: #e2e8f0; 
-            font-weight: 600; 
-        }
-        .scanner-summary .stat .label { 
-            color: #64748b; 
-        }
+        .scanner-summary .stat { display: flex; align-items: center; gap: 4px; }
+        .scanner-summary .stat .num { color: #e2e8f0; font-weight: 600; }
+        .scanner-summary .stat .label { color: #64748b; }
 
         @media (max-width: 600px) {
             body { padding: 6px; font-size: 12px; }
@@ -390,104 +379,61 @@
         {% elif rows|length == 0 %}
             <div class="status-center">
                 <div class="icon">📡</div>
-                <div class="msg">No breakout setups detected</div>
+                <div class="msg">No active battles detected</div>
                 <div class="sub">Scanner is live and monitoring {{ watchlist_rows|length }} symbols</div>
             </div>
         {% else %}
             {% for row in rows %}
             <div class="scan-card 
-                {% if row.break_direction == 'BULLISH' %}card-bullish
-                {% elif row.break_direction == 'BEARISH' %}card-bearish
+                {% if row.winner == 'BUYERS' %}card-bullish
+                {% elif row.winner == 'SELLERS' %}card-bearish
                 {% else %}card-neutral{% endif %}">
                 
-                <!-- Row 1: Symbol + Pattern + Timeframe -->
+                <!-- Row 1: Symbol + Timeframe + Level -->
                 <div class="card-row">
                     <div>
                         <span class="card-symbol">{{ row.symbol }}</span>
                         <span class="card-tf">{{ row.timeframe }}</span>
-                        <span class="card-pattern">{{ row.pattern_type }}</span>
+                        <span class="card-level">{{ row.level_type }}</span>
                     </div>
                     <span class="card-updated">{{ row.last_updated }}</span>
                 </div>
 
-                <!-- Row 2: Direction + Price -->
+                <!-- Row 2: Price -->
                 <div class="card-row">
-                    <div>
-                        {% if row.break_direction == 'BULLISH' %}
-                            <span class="direction-bull">▲ Bullish</span>
-                        {% elif row.break_direction == 'BEARISH' %}
-                            <span class="direction-bear">▼ Bearish</span>
-                        {% else %}
-                            <span class="direction-neutral">● Neutral</span>
-                        {% endif %}
-                    </div>
-                    <div>
-                        <span class="price-main">${{ row.curr_close }}</span>
-                    </div>
+                    <span class="price-main">${{ row.curr_close }}</span>
+                    <span style="font-size:0.6rem; color:#64748b;">
+                        Level: ${{ row.level_price }}
+                        ({{ row.distance_to_level }}%)
+                    </span>
                 </div>
 
-                <!-- Row 3: Readiness + Confidence -->
+                <!-- Row 3: Who is winning -->
                 <div class="card-row">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span class="readiness-score" style="color: 
-                            {% if row.readiness_score >= 80 %}#34d399
-                            {% elif row.readiness_score >= 65 %}#fbbf24
-                            {% elif row.readiness_score >= 45 %}#fb923c
-                            {% else %}#64748b{% endif %}">
-                            {{ row.readiness_score }}%
-                        </span>
-                        <span class="readiness-label 
-                            {% if row.readiness_score >= 80 %}rl-high
-                            {% elif row.readiness_score >= 65 %}rl-medium
-                            {% elif row.readiness_score >= 45 %}rl-low
-                            {% else %}rl-verylow{% endif %}">
-                            {{ row.status_label }}
-                        </span>
-                    </div>
-                    <div>
-                        <span class="confidence-badge 
-                            {% if row.confidence == 'Very High' %}conf-vhigh
-                            {% elif row.confidence == 'High' %}conf-high
-                            {% elif row.confidence == 'Medium' %}conf-medium
-                            {% elif row.confidence == 'Low' %}conf-low
-                            {% else %}conf-vlow{% endif %}">
-                            {{ row.confidence }}
-                        </span>
-                    </div>
+                    <span class="winner-badge 
+                        {% if row.winner == 'BUYERS' %}winner-buyers
+                        {% elif row.winner == 'SELLERS' %}winner-sellers
+                        {% else %}winner-neutral{% endif %}">
+                        {{ row.winner }}
+                    </span>
+                    <span class="signal-badge
+                        {% if row.signal == 'BREAKOUT IMMINENT' %}signal-breakout
+                        {% elif row.signal == 'BREAKDOWN IMMINENT' %}signal-breakdown
+                        {% elif row.signal == 'RESISTANCE HOLDING' or row.signal == 'SUPPORT HOLDING' %}signal-holding
+                        {% else %}signal-none{% endif %}">
+                        {{ row.signal }}
+                    </span>
                 </div>
 
-                <!-- Row 4: Volume + Range Width + Distance -->
+                <!-- Row 4: Support + Resistance -->
                 <div class="card-row-center">
-                    <span><span class="metric-label">Volume:</span> <span class="metric-value">{{ row.volume_label }}</span></span>
-                    <span><span class="metric-label">Range Width:</span> <span class="metric-value">{{ row.range_width }}%</span></span>
-                    <span><span class="metric-label">
-                        {% if row.break_direction == 'BULLISH' %}Distance to R:{% else %}Distance to S:{% endif %}
-                    </span> <span class="metric-value">
-                        {% if row.break_direction == 'BULLISH' %}{{ row.distance_to_resistance }}{% else %}{{ row.distance_to_support }}{% endif %}%
-                    </span></span>
+                    <span><span class="price-label">Support</span> <span class="price-value sup">${{ row.support }}</span></span>
+                    <span><span class="price-label">Resistance</span> <span class="price-value res">${{ row.resistance }}</span></span>
                 </div>
 
-                <!-- Row 5: Support + Resistance -->
-                <div class="card-row">
-                    <span><span class="metric-label">Support:</span> <span class="price-value sup">${{ row.support }}</span></span>
-                    <span><span class="metric-label">Resistance:</span> <span class="price-value res">${{ row.resistance }}</span></span>
-                </div>
+                <!-- Row 5: Explanation -->
+                <div class="explanation-text">{{ row.explanation }}</div>
 
-                <!-- Row 6: Multi-Timeframe Alignment Explanation -->
-                <div class="card-row" style="border-top:1px solid #1e293b; padding-top:6px; margin-top:4px; flex-direction:column; align-items:stretch;">
-                    <div style="display:flex; flex-direction:column; gap:2px; width:100%;">
-                        {% set lines = row.alignment_explanation.split('\n') %}
-                        {% for line in lines %}
-                            <div style="font-size:0.6rem; 
-                                {% if 'BULLISH' in line %}color:#4ade80;
-                                {% elif 'BEARISH' in line %}color:#f87171;
-                                {% elif 'MIXED' in line %}color:#fbbf24;
-                                {% else %}color:#94a3b8;{% endif %}">
-                                {{ line }}
-                            </div>
-                        {% endfor %}
-                    </div>
-                </div>
             </div>
             {% endfor %}
         {% endif %}
