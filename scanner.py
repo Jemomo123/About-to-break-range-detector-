@@ -135,76 +135,59 @@ def evaluate_resistance_battle(df, resistance, window=8):
     if df.empty or len(df) < window:
         return {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "Insufficient data."}
 
-    # Use the last `window` candles (they should be near resistance due to proximity check)
     recent = df.tail(window)
     closes = df['close'].values
     volumes = df['volume'].values
 
     buyer_score = 0
     seller_score = 0
-    total_weight = 0
 
     for idx, row in recent.iterrows():
         pressure = calculate_candle_pressure(row)
         vol_ratio = get_volume_confirmation(volumes, idx)
 
-        # Base points for bullish/bearish pressure
         if pressure['is_bullish']:
-            # Bullish candle: buyers are pushing up
+            # Bullish candle: buyers pushing up
             buyer_score += 2
-            # Strong body (body > 0.5 of range) adds
             if pressure['body_ratio'] > 0.5:
                 buyer_score += 1
-            # Close near high (close_position > 0.7)
             if pressure['close_position'] > 0.7:
                 buyer_score += 2
-            # Weak upper wick (small rejection) – buyers absorbing
             if pressure['upper_wick'] / (row['high'] - row['low']) < 0.2:
                 buyer_score += 1
-            # Volume confirmation: high volume on bullish candle
             if vol_ratio > 1.2:
                 buyer_score += 2
         elif pressure['is_bearish']:
-            # Bearish candle: sellers pushing down
             seller_score += 2
-            # Strong body
             if pressure['body_ratio'] > 0.5:
                 seller_score += 1
-            # Close near low (close_position < 0.3)
             if pressure['close_position'] < 0.3:
                 seller_score += 2
-            # Strong upper wick (rejection at resistance)
             if pressure['upper_wick'] / (row['high'] - row['low']) > 0.3:
                 seller_score += 2
-            # Volume confirmation
             if vol_ratio > 1.2:
                 seller_score += 2
 
-        # Additional: repeated tests of resistance (price high near resistance)
+        # Price testing resistance
         if row['high'] >= resistance * 0.995:
             buyer_score += 1  # buyers testing
-            # If rejected (close far from high), sellers get extra
             if pressure['close_position'] < 0.5:
-                seller_score += 1
+                seller_score += 1  # rejected
 
-        total_weight += 1
-
-    # Normalize scores? We'll keep raw totals and compare.
-    # Threshold: we require a minimum score difference to declare a winner
     diff = buyer_score - seller_score
-    threshold = 3  # minimum margin
+    threshold = 3
 
     if diff >= threshold:
         return {
             "side": "BUYERS",
             "signal": "BREAKOUT IMMINENT",
             "score": buyer_score,
-            "reason": "Buyers are absorbing selling pressure near resistance."
+            "reason": "Buyers are winning at resistance; breakout pressure is building."
         }
     elif -diff >= threshold:
         return {
             "side": "SELLERS",
-            "signal": "RESISTANCE REJECTING",
+            "signal": "RESISTANCE HOLDING",
             "score": seller_score,
             "reason": "Sellers are defending resistance."
         }
@@ -231,44 +214,37 @@ def evaluate_support_battle(df, support, window=8):
 
     buyer_score = 0
     seller_score = 0
-    total_weight = 0
 
     for idx, row in recent.iterrows():
         pressure = calculate_candle_pressure(row)
         vol_ratio = get_volume_confirmation(volumes, idx)
 
         if pressure['is_bearish']:
-            # Bearish candle: sellers pushing down
             seller_score += 2
             if pressure['body_ratio'] > 0.5:
                 seller_score += 1
             if pressure['close_position'] < 0.3:
                 seller_score += 2
-            # Weak lower wick – sellers overpowering
             if pressure['lower_wick'] / (row['high'] - row['low']) < 0.2:
                 seller_score += 1
             if vol_ratio > 1.2:
                 seller_score += 2
         elif pressure['is_bullish']:
-            # Bullish candle: buyers defending
             buyer_score += 2
             if pressure['body_ratio'] > 0.5:
                 buyer_score += 1
             if pressure['close_position'] > 0.7:
                 buyer_score += 2
-            # Strong lower wick – rejection of support
             if pressure['lower_wick'] / (row['high'] - row['low']) > 0.3:
                 buyer_score += 2
             if vol_ratio > 1.2:
                 buyer_score += 2
 
-        # Repeated tests of support (price low near support)
+        # Price testing support
         if row['low'] <= support * 1.005:
             seller_score += 1  # sellers attacking
             if pressure['close_position'] > 0.5:
-                buyer_score += 1  # buyers rejected the attack
-
-        total_weight += 1
+                buyer_score += 1  # defended
 
     diff = seller_score - buyer_score
     threshold = 3
@@ -278,7 +254,7 @@ def evaluate_support_battle(df, support, window=8):
             "side": "SELLERS",
             "signal": "BREAKDOWN IMMINENT",
             "score": seller_score,
-            "reason": "Sellers are overpowering support with bearish closes."
+            "reason": "Sellers are winning at support; breakdown pressure is building."
         }
     elif -diff >= threshold:
         return {
