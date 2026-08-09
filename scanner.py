@@ -6,7 +6,7 @@ import threading
 from collections import defaultdict
 
 # ===== CONFIGURATION =====
-DEBUG = False
+DEBUG = False   # set to True for detailed range decision logging
 # =========================
 
 HEADERS = {
@@ -15,6 +15,19 @@ HEADERS = {
 
 UNSUPPORTED_SYMBOLS = set()
 UNSUPPORTED_LOCK = threading.Lock()
+
+# ===== RANGE STATE — PERSISTENT STORAGE =====
+# Key: f"{symbol}_{timeframe}"
+# Value: dict with support, resistance, status, touches, width, pattern,
+#        range_start_index, range_last_validated, range_age, consecutive_outside_closes
+RANGE_STATE = {}
+RANGE_STATE_LOCK = threading.Lock()
+
+# ===== RANGE CONFIGURATION =====
+INVALIDATION_RATIO = 0.02          # 2% of range width for normal invalidation
+STRONG_INVALIDATION_RATIO = 0.05   # 5% of range width for strong displacement
+BODY_RATIO_THRESHOLD = 0.75        # minimum body ratio for strong displacement
+# ===============================
 
 def is_unsupported(symbol):
     with UNSUPPORTED_LOCK:
@@ -26,6 +39,7 @@ def mark_unsupported(symbol):
 
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
+    """PRIMARY: OKX, FALLBACK: MEXC"""
     if is_unsupported(symbol):
         return pd.DataFrame()
 
@@ -85,32 +99,23 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     return pd.DataFrame()
 
 
+# ============================================================
+# 1. STRUCTURAL RANGE DETECTION
+# ============================================================
+
 def find_swings(highs, lows, lookback=5):
-    """
-    Identify swing highs and swing lows using local extrema.
-    Returns lists of (index, price) for swings.
-    """
     swing_highs = []
     swing_lows = []
     n = len(highs)
     for i in range(lookback, n - lookback):
-        # Swing high: higher than both sides
         if highs[i] == max(highs[i-lookback:i+lookback+1]):
             swing_highs.append((i, highs[i]))
-        # Swing low: lower than both sides
         if lows[i] == min(lows[i-lookback:i+lookback+1]):
             swing_lows.append((i, lows[i]))
     return swing_highs, swing_lows
 
 
-def cluster_prices(prices, tolerance_pct=0.5):
-    """
-    Cluster price points that are within tolerance_pct % of each other.
-    Returns list of clusters, each cluster is a dict with:
-        - 'level': average price of cluster
-        - 'count': number of points in cluster
-        - 'points': list of prices
-    """
+def cluster_prices(prices, tolerance_pct=0.7):
     if not prices:
         return []
     prices = sorted(prices)
@@ -134,49 +139,48 @@ def cluster_prices(prices, tolerance_pct=0.5):
     return clusters
 
 
-def find_structural_levels(highs, lows, closes, lookback=40, tolerance_pct=0.7, min_touches=2):
-    """
-    Detect structural support and resistance using swing points and clustering.
-    Returns (support, resistance, support_touches, resistance_touches, is_valid)
-    """
-    # Use a longer lookback for structural analysis
+def calculate_acceptance_rate(closes, support, resistance, lookback=40):
+    """Percentage of candles that closed between support and resistance."""
+    if support is None or resistance is None or support >= resistance:
+        return 0.0
+    n = min(len(closes), lookback)
+    recent_closes = closes[-n:]
+    inside_count = 0
+    for price in recent_closes:
+        if support <= price <= resistance:
+            inside_count += 1
+    return (inside_count / n) * 100.0
+
+
+def find_structural_levels(highs, lows, closes, lookback=40, tolerance_pct=0.7, min_touches=2, acceptance_threshold=60.0):
     n = min(len(highs), lookback)
     if n < 20:
-        return None, None, 0, 0, False
+        return None, None, 0, 0, False, 0.0, False
 
     recent_highs = highs[-n:]
     recent_lows = lows[-n:]
     recent_closes = closes[-n:]
 
-    # Find swing points
     swing_highs, swing_lows = find_swings(recent_highs, recent_lows, lookback=5)
 
-    # Cluster the swing lows (support candidates)
     low_prices = [price for _, price in swing_lows]
     low_clusters = cluster_prices(low_prices, tolerance_pct)
 
-    # Cluster the swing highs (resistance candidates)
     high_prices = [price for _, price in swing_highs]
     high_clusters = cluster_prices(high_prices, tolerance_pct)
 
-    # Select the best support: cluster with most touches (count) and at the lowest price region?
-    # For support, we want a cluster that is not too low (recent) and has multiple touches.
-    # We'll choose the cluster with the highest count, but ensure it's not an extreme outlier.
     if not low_clusters or not high_clusters:
-        return None, None, 0, 0, False
+        return None, None, 0, 0, False, 0.0, False
 
-    # Sort clusters by count descending, then by level
     low_clusters.sort(key=lambda x: (-x['count'], x['level']))
     high_clusters.sort(key=lambda x: (-x['count'], -x['level']))
 
-    # Pick the best support: cluster with highest count, and level not too far from current price
     curr_price = recent_closes[-1]
     best_support = None
     best_support_touches = 0
     for cluster in low_clusters:
         if cluster['count'] >= min_touches:
-            # Check if level is within reasonable range of current price (e.g., not 50% away)
-            if abs(cluster['level'] - curr_price) / curr_price < 0.2:  # within 20%
+            if abs(cluster['level'] - curr_price) / curr_price < 0.2:
                 best_support = cluster['level']
                 best_support_touches = cluster['count']
                 break
@@ -190,36 +194,65 @@ def find_structural_levels(highs, lows, closes, lookback=40, tolerance_pct=0.7, 
                 best_resistance_touches = cluster['count']
                 break
 
-    # If we have both support and resistance, ensure they are correctly ordered
     if best_support is not None and best_resistance is not None:
         if best_support > best_resistance:
-            # swap if inverted
             best_support, best_resistance = best_resistance, best_support
             best_support_touches, best_resistance_touches = best_resistance_touches, best_support_touches
 
-        # Validate range width: between 0.5% and 20%
         range_width = (best_resistance - best_support) / best_support * 100 if best_support > 0 else 100
-        if 0.5 < range_width < 20:
-            return best_support, best_resistance, best_support_touches, best_resistance_touches, True
-        else:
-            return best_support, best_resistance, best_support_touches, best_resistance_touches, False
-
-    return None, None, 0, 0, False
-
-
-def detect_structural_range(df, lookback=40, tolerance_pct=0.7, min_touches=2):
-    """
-    Main function to detect a structural range from a DataFrame.
-    Returns (support, resistance, support_touches, resistance_touches, is_valid)
-    """
-    highs = df['high'].values
-    lows = df['low'].values
-    closes = df['close'].values
-    return find_structural_levels(highs, lows, closes, lookback, tolerance_pct, min_touches)
+        if 0.3 < range_width < 25:
+            acceptance = calculate_acceptance_rate(closes, best_support, best_resistance, lookback)
+            is_accepted = acceptance >= acceptance_threshold
+            return (best_support, best_resistance,
+                    best_support_touches, best_resistance_touches,
+                    is_accepted, acceptance, is_accepted)
+    return None, None, 0, 0, False, 0.0, False
 
 
-# ---- The rest: battle evaluation, volume, etc. are unchanged ----
-# I'll include them here for completeness, but they are the same as before.
+# ============================================================
+# 2. SIMPLE RANGE DETECTION (FALLBACK)
+# ============================================================
+
+def detect_range_simple(df, lookback=30):
+    if df.empty or len(df) < lookback:
+        return None, None, "N/A", False
+
+    recent_df = df.tail(lookback).copy()
+    resistance = float(recent_df['high'].max())
+    support = float(recent_df['low'].min())
+    range_height = resistance - support
+
+    if range_height <= 0:
+        return None, None, "N/A", False
+
+    curr_close = float(recent_df['close'].iloc[-1])
+    avg_price = (resistance + support) / 2.0
+    range_pct = (range_height / avg_price) * 100.0 if avg_price > 0 else 0
+
+    highs = recent_df['high'].values
+    lows = recent_df['low'].values
+    window = len(recent_df)
+    first_half_high = max(highs[:window//2])
+    second_half_high = max(highs[window//2:])
+    first_half_low = min(lows[:window//2])
+    second_half_low = min(lows[window//2:])
+
+    pattern_type = "RECTANGLE"
+    if second_half_low > first_half_low * 1.002 and abs(second_half_high - first_half_high) / avg_price < 0.005:
+        pattern_type = "ASCENDING TRIANGLE"
+    elif second_half_high < first_half_high * 0.998 and abs(second_half_low - first_half_low) / avg_price < 0.005:
+        pattern_type = "DESCENDING TRIANGLE"
+    elif range_pct < 2.0:
+        pattern_type = "RECTANGLE"
+    else:
+        pattern_type = "CONSOLIDATION"
+
+    return support, resistance, pattern_type, True
+
+
+# ============================================================
+# 3. BATTLE LOGIC (UNCHANGED)
+# ============================================================
 
 def calculate_candle_pressure(row):
     body = abs(row['close'] - row['open'])
@@ -390,58 +423,298 @@ def evaluate_support_battle(df, support, window=8):
         }
 
 
+# ============================================================
+# 4. RANGE STATE MANAGEMENT
+# ============================================================
+
+def get_existing_range(symbol, timeframe):
+    key = f"{symbol}_{timeframe}"
+    with RANGE_STATE_LOCK:
+        return RANGE_STATE.get(key, None)
+
+
+def set_range(symbol, timeframe, range_data):
+    key = f"{symbol}_{timeframe}"
+    with RANGE_STATE_LOCK:
+        RANGE_STATE[key] = range_data
+
+
+def classify_pattern(df, support, resistance):
+    if support is None or resistance is None:
+        return "NO CLEAR RANGE"
+    recent_df = df.tail(30)
+    highs = recent_df['high'].values
+    lows = recent_df['low'].values
+    avg_price = (resistance + support) / 2.0
+    range_height = resistance - support
+    range_width_pct = (range_height / avg_price) * 100 if avg_price > 0 else 100
+    window = len(recent_df)
+    first_half_high = max(highs[:window//2])
+    second_half_high = max(highs[window//2:])
+    first_half_low = min(lows[:window//2])
+    second_half_low = min(lows[window//2:])
+
+    if second_half_low > first_half_low * 1.002 and abs(second_half_high - first_half_high) / avg_price < 0.005:
+        return "ASCENDING TRIANGLE"
+    elif second_half_high < first_half_high * 0.998 and abs(second_half_low - first_half_low) / avg_price < 0.005:
+        return "DESCENDING TRIANGLE"
+    elif range_width_pct < 2.0:
+        return "RECTANGLE"
+    else:
+        return "CONSOLIDATION"
+
+
+def is_strong_displacement(row, support, resistance, strong_margin, body_ratio_threshold=0.75):
+    body = abs(row['close'] - row['open'])
+    candle_range = row['high'] - row['low']
+    if candle_range == 0:
+        return False
+    body_ratio = body / candle_range
+    if body_ratio < body_ratio_threshold:
+        return False
+    close = row['close']
+    if close > resistance + strong_margin:
+        return True
+    if close < support - strong_margin:
+        return True
+    return False
+
+
+def is_range_invalidated(existing_range, df,
+                         invalidation_ratio=INVALIDATION_RATIO,
+                         strong_ratio=STRONG_INVALIDATION_RATIO,
+                         body_ratio_threshold=BODY_RATIO_THRESHOLD):
+    if not existing_range:
+        return False
+
+    support = existing_range['support']
+    resistance = existing_range['resistance']
+    range_width = resistance - support
+    if range_width <= 0:
+        return False
+
+    normal_margin = range_width * invalidation_ratio
+    strong_margin = range_width * strong_ratio
+
+    last_row = df.iloc[-1]
+    above_normal = last_row['close'] > resistance + normal_margin
+    below_normal = last_row['close'] < support - normal_margin
+    above_strong = last_row['close'] > resistance + strong_margin
+    below_strong = last_row['close'] < support - strong_margin
+
+    # Strong displacement immediate invalidation
+    if above_strong or below_strong:
+        existing_range['consecutive_outside_closes'] = 2
+        return True
+
+    if is_strong_displacement(last_row, support, resistance, strong_margin, body_ratio_threshold):
+        existing_range['consecutive_outside_closes'] = 2
+        return True
+
+    # Normal outside close
+    if above_normal or below_normal:
+        existing_range['consecutive_outside_closes'] = existing_range.get('consecutive_outside_closes', 0) + 1
+    else:
+        existing_range['consecutive_outside_closes'] = 0
+
+    return existing_range['consecutive_outside_closes'] >= 2
+
+
+# ============================================================
+# 5. MAIN ANALYSIS — RANGE + BATTLE INTEGRATION
+# ============================================================
+
 def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     if df.empty or len(df) < 30:
         return None, "INSUFFICIENT DATA"
 
-    # ---- STRUCTURAL RANGE DETECTION ----
-    support, resistance, sup_touches, res_touches, is_valid = detect_structural_range(
-        df, lookback=40, tolerance_pct=0.7, min_touches=2
+    highs = df['high'].values
+    lows = df['low'].values
+    closes = df['close'].values
+    curr_close = float(closes[-1])
+
+    # ---- 1. Detect Candidate Range ----
+    support_struct, resistance_struct, sup_touches, res_touches, is_accepted, acceptance_rate, _ = find_structural_levels(
+        highs=highs,
+        lows=lows,
+        closes=closes,
+        lookback=40,
+        tolerance_pct=0.7,
+        min_touches=2,
+        acceptance_threshold=60.0
     )
 
-    if not is_valid or support is None or resistance is None:
-        # Fallback: if structural detection fails, use simple min/max (but we want to avoid that)
-        # Instead, return NEUTRAL with a message
-        return {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "curr_close": round(df['close'].iloc[-1], 6),
-            "level_type": "NONE",
-            "level_price": 0,
-            "distance_to_level": 0,
-            "winner": "NEUTRAL",
-            "signal": "NO CLEAR SIGNAL",
-            "explanation": "No stable structural range detected.",
-            "support": 0,
-            "resistance": 0,
-            "last_updated": datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-        }, "NO_STRUCTURAL_RANGE"
+    candidate = None
+    if support_struct is not None and resistance_struct is not None and is_accepted:
+        range_width = (resistance_struct - support_struct) / support_struct * 100 if support_struct > 0 else 0
+        candidate = {
+            'support': support_struct,
+            'resistance': resistance_struct,
+            'support_touches': sup_touches,
+            'resistance_touches': res_touches,
+            'range_status': 'STRUCTURAL',
+            'range_width_percent': range_width,
+            'pattern_type': classify_pattern(df, support_struct, resistance_struct),
+            'acceptance_rate': acceptance_rate,
+            'is_accepted': True,
+        }
+    else:
+        support_simple, resistance_simple, pattern_type, valid = detect_range_simple(df, lookback=30)
+        if valid and support_simple is not None and resistance_simple is not None:
+            range_width = (resistance_simple - support_simple) / support_simple * 100 if support_simple > 0 else 0
+            acceptance = calculate_acceptance_rate(closes, support_simple, resistance_simple, lookback=30)
+            candidate = {
+                'support': support_simple,
+                'resistance': resistance_simple,
+                'support_touches': 1,
+                'resistance_touches': 1,
+                'range_status': 'PROVISIONAL',
+                'range_width_percent': range_width,
+                'pattern_type': pattern_type,
+                'acceptance_rate': acceptance,
+                'is_accepted': False,
+            }
+        else:
+            candidate = None
 
-    curr_close = df['close'].iloc[-1]
-    dist_to_res = (resistance - curr_close) / curr_close * 100
-    dist_to_sup = (curr_close - support) / curr_close * 100
+    # ---- 2. Existing Range ----
+    existing = get_existing_range(symbol, timeframe)
+
+    # ---- 3. Decision Logic ----
+    active_support = None
+    active_resistance = None
+    active_status = "NO VALID RANGE"
+    active_pattern = "NO CLEAR RANGE"
+    decision = None
+    reason = None
+
+    if existing is None:
+        if candidate is not None:
+            candidate['range_start_index'] = len(df) - 1
+            candidate['range_age'] = 0
+            candidate['range_last_validated'] = len(df) - 1
+            candidate['consecutive_outside_closes'] = 0
+            set_range(symbol, timeframe, candidate)
+            active_support = candidate['support']
+            active_resistance = candidate['resistance']
+            active_status = candidate['range_status']
+            active_pattern = candidate['pattern_type']
+            decision = "STORED"
+            reason = "new range established"
+        else:
+            active_support = 0.0
+            active_resistance = 0.0
+            active_status = "NO VALID RANGE"
+            active_pattern = "NO CLEAR RANGE"
+            decision = "NONE"
+            reason = "no candidate"
+    else:
+        # Existing range exists – check invalidation
+        invalidated = is_range_invalidated(existing, df)
+        if invalidated:
+            # Range invalidated
+            if candidate is not None:
+                candidate['range_start_index'] = len(df) - 1
+                candidate['range_age'] = 0
+                candidate['range_last_validated'] = len(df) - 1
+                candidate['consecutive_outside_closes'] = 0
+                set_range(symbol, timeframe, candidate)
+                active_support = candidate['support']
+                active_resistance = candidate['resistance']
+                active_status = candidate['range_status']
+                active_pattern = candidate['pattern_type']
+                decision = "REPLACED"
+                reason = f"range invalidated after {existing.get('consecutive_outside_closes',0)} outside closes"
+            else:
+                # No candidate – clear range
+                set_range(symbol, timeframe, None)
+                active_support = 0.0
+                active_resistance = 0.0
+                active_status = "NO VALID RANGE"
+                active_pattern = "NO CLEAR RANGE"
+                decision = "INVALIDATED"
+                reason = "range invalidated with no replacement candidate"
+        else:
+            # Existing range is still valid
+            # Check upgrade possibility: existing PROVISIONAL, candidate STRUCTURAL, and candidate stronger
+            if existing['range_status'] == 'PROVISIONAL' and candidate is not None and candidate['range_status'] == 'STRUCTURAL':
+                if (candidate['support_touches'] >= 3 and
+                    candidate['resistance_touches'] >= 3 and
+                    candidate.get('is_accepted', False)):
+                    # Upgrade to structural
+                    candidate['range_age'] = existing.get('range_age', 0)
+                    candidate['range_start_index'] = existing.get('range_start_index', len(df) - 1)
+                    candidate['range_last_validated'] = len(df) - 1
+                    candidate['consecutive_outside_closes'] = 0
+                    set_range(symbol, timeframe, candidate)
+                    active_support = candidate['support']
+                    active_resistance = candidate['resistance']
+                    active_status = 'STRUCTURAL'
+                    active_pattern = candidate['pattern_type']
+                    decision = "UPGRADED"
+                    reason = "provisional upgraded to structural with sufficient evidence"
+                else:
+                    # Keep provisional
+                    active_support = existing['support']
+                    active_resistance = existing['resistance']
+                    active_status = existing['range_status']
+                    active_pattern = existing.get('pattern_type', 'CONSOLIDATION')
+                    decision = "KEPT"
+                    reason = "existing provisional remains (candidate lacks sufficient evidence)"
+            else:
+                # Keep existing range (hysteresis)
+                active_support = existing['support']
+                active_resistance = existing['resistance']
+                active_status = existing['range_status']
+                active_pattern = existing.get('pattern_type', 'CONSOLIDATION')
+                decision = "KEPT"
+                reason = f"existing {active_status} range still valid"
+
+        # Update age and validation for kept/upgraded ranges
+        if decision in ['KEPT', 'UPGRADED', 'STORED']:
+            stored = get_existing_range(symbol, timeframe)
+            if stored is not None:
+                stored['range_age'] = stored.get('range_age', 0) + 1
+                stored['range_last_validated'] = len(df) - 1
+                set_range(symbol, timeframe, stored)
+
+    # ---- 4. Logging ----
+    if DEBUG:
+        print(f"RANGE DECISION {symbol} {timeframe}")
+        print(f"  Candidate: {candidate['support'] if candidate else None} / {candidate['resistance'] if candidate else None} ({candidate['range_status'] if candidate else 'NONE'})")
+        print(f"  Existing:  {existing['support'] if existing else None} / {existing['resistance'] if existing else None} ({existing['range_status'] if existing else 'NONE'})")
+        print(f"  Decision:  {decision}")
+        print(f"  Reason:    {reason}")
+        print(f"  Outside closes: {existing.get('consecutive_outside_closes',0) if existing else 0}")
+        print(f"  Final range: {active_support} / {active_resistance}")
+        print(f"  Status:    {active_status}")
+        print("---")
+
+    # ---- 5. Battle Logic (uses active range) ----
+    dist_to_res = (active_resistance - curr_close) / curr_close * 100 if active_resistance and active_resistance > 0 else 100
+    dist_to_sup = (curr_close - active_support) / curr_close * 100 if active_support and active_support > 0 else 100
     threshold = 5.0
 
-    if dist_to_res < dist_to_sup and dist_to_res < threshold:
+    if active_support is None or active_resistance is None or active_support == 0 or active_resistance == 0:
+        level_type = "NONE"
+        level_price = curr_close
+        distance = 0.0
+        result = {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "No valid range available."}
+    elif dist_to_res < dist_to_sup and dist_to_res < threshold:
         level_type = "RESISTANCE"
-        level_price = resistance
+        level_price = active_resistance
         distance = dist_to_res
-        result = evaluate_resistance_battle(df, resistance)
+        result = evaluate_resistance_battle(df, active_resistance)
     elif dist_to_sup < threshold:
         level_type = "SUPPORT"
-        level_price = support
+        level_price = active_support
         distance = dist_to_sup
-        result = evaluate_support_battle(df, support)
+        result = evaluate_support_battle(df, active_support)
     else:
         level_type = "NONE"
         level_price = curr_close
         distance = 0.0
-        result = {
-            "side": "NEUTRAL",
-            "signal": "NO CLEAR SIGNAL",
-            "score": 0,
-            "reason": "Price is not near a key structural support or resistance level."
-        }
+        result = {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "Price not near range boundary."}
 
     last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     clean_display = symbol.replace("-", "").replace("_", "").upper()
@@ -456,11 +729,17 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         "winner": result["side"],
         "signal": result["signal"],
         "explanation": result["reason"],
-        "support": round(support, 6),
-        "resistance": round(resistance, 6),
+        "support": round(active_support, 6) if active_support is not None else 0.0,
+        "resistance": round(active_resistance, 6) if active_resistance is not None else 0.0,
+        "pattern_type": active_pattern,
+        "range_status": active_status,
         "last_updated": last_updated
     }, None
 
+
+# ============================================================
+# 6. PROCESSOR AND PIPELINE (UNCHANGED)
+# ============================================================
 
 def _process_symbol_tf(symbol: str, tf: str):
     if is_unsupported(symbol):
