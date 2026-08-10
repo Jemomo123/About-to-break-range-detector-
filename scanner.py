@@ -502,7 +502,6 @@ def is_range_invalidated(existing_range, df,
     above_strong = last_row['close'] > resistance + strong_margin
     below_strong = last_row['close'] < support - strong_margin
 
-    # Strong displacement immediate invalidation
     if above_strong or below_strong:
         existing_range['consecutive_outside_closes'] = 2
         return True
@@ -511,7 +510,6 @@ def is_range_invalidated(existing_range, df,
         existing_range['consecutive_outside_closes'] = 2
         return True
 
-    # Normal outside close
     if above_normal or below_normal:
         existing_range['consecutive_outside_closes'] = existing_range.get('consecutive_outside_closes', 0) + 1
     else:
@@ -521,7 +519,7 @@ def is_range_invalidated(existing_range, df,
 
 
 # ============================================================
-# 5. MAIN ANALYSIS — RANGE + BATTLE INTEGRATION
+# 5. MAIN ANALYSIS — RANGE + BATTLE INTEGRATION (WITH PENETRATION)
 # ============================================================
 
 def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
@@ -532,6 +530,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     lows = df['low'].values
     closes = df['close'].values
     curr_close = float(closes[-1])
+    last_row = df.iloc[-1]  # <-- PENETRATION: get last candle
 
     # ---- 1. Detect Candidate Range ----
     support_struct, resistance_struct, sup_touches, res_touches, is_accepted, acceptance_rate, _ = find_structural_levels(
@@ -587,6 +586,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     active_pattern = "NO CLEAR RANGE"
     decision = None
     reason = None
+    range_invalidated = False  # <-- PENETRATION: track if range was invalidated
 
     if existing is None:
         if candidate is not None:
@@ -611,8 +611,8 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     else:
         # Existing range exists – check invalidation
         invalidated = is_range_invalidated(existing, df)
+        range_invalidated = invalidated  # <-- PENETRATION: store flag
         if invalidated:
-            # Range invalidated
             if candidate is not None:
                 candidate['range_start_index'] = len(df) - 1
                 candidate['range_age'] = 0
@@ -626,7 +626,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 decision = "REPLACED"
                 reason = f"range invalidated after {existing.get('consecutive_outside_closes',0)} outside closes"
             else:
-                # No candidate – clear range
                 set_range(symbol, timeframe, None)
                 active_support = 0.0
                 active_resistance = 0.0
@@ -641,7 +640,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 if (candidate['support_touches'] >= 3 and
                     candidate['resistance_touches'] >= 3 and
                     candidate.get('is_accepted', False)):
-                    # Upgrade to structural
                     candidate['range_age'] = existing.get('range_age', 0)
                     candidate['range_start_index'] = existing.get('range_start_index', len(df) - 1)
                     candidate['range_last_validated'] = len(df) - 1
@@ -654,7 +652,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                     decision = "UPGRADED"
                     reason = "provisional upgraded to structural with sufficient evidence"
                 else:
-                    # Keep provisional
                     active_support = existing['support']
                     active_resistance = existing['resistance']
                     active_status = existing['range_status']
@@ -662,7 +659,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                     decision = "KEPT"
                     reason = "existing provisional remains (candidate lacks sufficient evidence)"
             else:
-                # Keep existing range (hysteresis)
                 active_support = existing['support']
                 active_resistance = existing['resistance']
                 active_status = existing['range_status']
@@ -678,7 +674,32 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 stored['range_last_validated'] = len(df) - 1
                 set_range(symbol, timeframe, stored)
 
-    # ---- 4. Logging ----
+    # ---- 4. PENETRATION DETECTION (NEW) ----
+    penetration_type = "NONE"
+    penetration_explanation = ""
+    # Only detect if we have an active range (support/resistance > 0)
+    if active_support is not None and active_support > 0 and active_resistance is not None and active_resistance > 0:
+        # Hierarchy: if range was invalidated or confirmed, we do not report penetration
+        # because that would be a confirmed breakdown/outbreak.
+        if not range_invalidated:
+            # Support penetration
+            if last_row['low'] < active_support and last_row['close'] >= active_support:
+                penetration_type = "SUPPORT PENETRATION"
+                penetration_explanation = (f"Support penetrated: candle low ({last_row['low']:.2f}) traded below "
+                                           f"active support ({active_support:.2f}) but closed back above it.")
+            # Resistance penetration (only if not already support)
+            elif last_row['high'] > active_resistance and last_row['close'] <= active_resistance:
+                penetration_type = "RESISTANCE PENETRATION"
+                penetration_explanation = (f"Resistance penetrated: candle high ({last_row['high']:.2f}) traded above "
+                                           f"active resistance ({active_resistance:.2f}) but closed back below it.")
+            else:
+                # Could be a test if close is near boundary, but we keep it as NONE; the battle logic already handles proximity.
+                penetration_type = "NONE"
+        else:
+            # Range was invalidated, so any crossing is already a confirmed breakout/breakdown.
+            penetration_type = "NONE"  # do not report penetration as it's a confirmed break
+
+    # ---- 5. Logging (with penetration) ----
     if DEBUG:
         print(f"RANGE DECISION {symbol} {timeframe}")
         print(f"  Candidate: {candidate['support'] if candidate else None} / {candidate['resistance'] if candidate else None} ({candidate['range_status'] if candidate else 'NONE'})")
@@ -688,9 +709,12 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         print(f"  Outside closes: {existing.get('consecutive_outside_closes',0) if existing else 0}")
         print(f"  Final range: {active_support} / {active_resistance}")
         print(f"  Status:    {active_status}")
+        print(f"  Penetration: {penetration_type}")  # <-- PENETRATION: added log
+        if penetration_explanation:
+            print(f"  Explanation: {penetration_explanation}")
         print("---")
 
-    # ---- 5. Battle Logic (uses active range) ----
+    # ---- 6. Battle Logic (uses active range) ----
     dist_to_res = (active_resistance - curr_close) / curr_close * 100 if active_resistance and active_resistance > 0 else 100
     dist_to_sup = (curr_close - active_support) / curr_close * 100 if active_support and active_support > 0 else 100
     threshold = 5.0
@@ -733,7 +757,10 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         "resistance": round(active_resistance, 6) if active_resistance is not None else 0.0,
         "pattern_type": active_pattern,
         "range_status": active_status,
-        "last_updated": last_updated
+        "last_updated": last_updated,
+        # <-- PENETRATION: new fields
+        "penetration_type": penetration_type,
+        "penetration_explanation": penetration_explanation
     }, None
 
 
