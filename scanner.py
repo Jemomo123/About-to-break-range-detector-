@@ -1,3 +1,508 @@
+import requests
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
+import threading
+from collections import defaultdict
+
+# ===== CONFIGURATION =====
+DEBUG = True
+INVALIDATION_RATIO = 0.001
+STRONG_INVALIDATION_RATIO = 0.01
+BODY_RATIO_THRESHOLD = 0.75
+PROXIMITY_THRESHOLD = 1.5   # <-- NEW: 1.5% instead of 5%
+# =========================
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
+UNSUPPORTED_SYMBOLS = set()
+UNSUPPORTED_LOCK = threading.Lock()
+RANGE_STATE = {}
+RANGE_STATE_LOCK = threading.Lock()
+
+
+def is_unsupported(symbol):
+    with UNSUPPORTED_LOCK:
+        return symbol in UNSUPPORTED_SYMBOLS
+
+
+def mark_unsupported(symbol):
+    with UNSUPPORTED_LOCK:
+        UNSUPPORTED_SYMBOLS.add(symbol)
+
+
+def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
+    if is_unsupported(symbol):
+        return pd.DataFrame()
+
+    clean_sym = symbol.replace("_", "").replace("-", "").upper()
+    if not clean_sym.endswith("USDT"):
+        clean_sym += "USDT"
+
+    okx_sym = f"{clean_sym[:-4]}-USDT"
+    okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
+    okx_bar = okx_tf_map.get(timeframe, "15m")
+
+    okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
+    try:
+        resp = requests.get(okx_url, headers=HEADERS, timeout=10)
+        if resp.status_code == 200:
+            res_json = resp.json()
+            code = res_json.get("code")
+            data = res_json.get("data", [])
+            if code == "0" and isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data, columns=[
+                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                    'volCcy', 'volCcyQuote', 'confirm'
+                ])
+                df = df.iloc[::-1].reset_index(drop=True)
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = df[col].astype(float)
+                return df
+            elif code == "51001":
+                mark_unsupported(symbol)
+                return pd.DataFrame()
+    except Exception:
+        pass
+
+    mexc_sym = clean_sym
+    mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
+    mexc_bar = mexc_tf_map.get(timeframe, "15m")
+    mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={mexc_sym}&interval={mexc_bar}&limit={limit}"
+    try:
+        resp = requests.get(mexc_url, headers=HEADERS, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) > 0:
+                parsed = []
+                for row in data:
+                    if len(row) >= 6:
+                        parsed.append(row[:6])
+                if parsed:
+                    df = pd.DataFrame(parsed, columns=[
+                        'timestamp', 'open', 'high', 'low', 'close', 'volume'
+                    ])
+                    for col in ['open', 'high', 'low', 'close', 'volume']:
+                        df[col] = df[col].astype(float)
+                    return df
+    except Exception:
+        pass
+
+    return pd.DataFrame()
+
+
+def find_swings(highs, lows, lookback=5):
+    swing_highs = []
+    swing_lows = []
+    n = len(highs)
+    for i in range(lookback, n - lookback):
+        if highs[i] == max(highs[i-lookback:i+lookback+1]):
+            swing_highs.append((i, highs[i]))
+        if lows[i] == min(lows[i-lookback:i+lookback+1]):
+            swing_lows.append((i, lows[i]))
+    return swing_highs, swing_lows
+
+
+def cluster_prices(prices, tolerance_pct=0.7):
+    if not prices:
+        return []
+    prices = sorted(prices)
+    clusters = []
+    current_cluster = [prices[0]]
+    for price in prices[1:]:
+        if abs(price - current_cluster[-1]) / current_cluster[-1] * 100 <= tolerance_pct:
+            current_cluster.append(price)
+        else:
+            clusters.append({
+                'level': np.mean(current_cluster),
+                'count': len(current_cluster),
+                'points': current_cluster
+            })
+            current_cluster = [price]
+    clusters.append({
+        'level': np.mean(current_cluster),
+        'count': len(current_cluster),
+        'points': current_cluster
+    })
+    return clusters
+
+
+def calculate_acceptance_rate(closes, support, resistance, lookback=40):
+    if support is None or resistance is None or support >= resistance:
+        return 0.0
+    n = min(len(closes), lookback)
+    recent_closes = closes[-n:]
+    inside_count = 0
+    for price in recent_closes:
+        if support <= price <= resistance:
+            inside_count += 1
+    return (inside_count / n) * 100.0
+
+
+def find_structural_levels(highs, lows, closes, lookback=40, tolerance_pct=0.7,
+                           min_touches=2, acceptance_threshold=60.0):
+    n = min(len(highs), lookback)
+    if n < 20:
+        return None, None, 0, 0, False, 0.0, False
+
+    recent_highs = highs[-n:]
+    recent_lows = lows[-n:]
+    recent_closes = closes[-n:]
+
+    swing_highs, swing_lows = find_swings(recent_highs, recent_lows, lookback=5)
+
+    low_prices = [price for _, price in swing_lows]
+    low_clusters = cluster_prices(low_prices, tolerance_pct)
+
+    high_prices = [price for _, price in swing_highs]
+    high_clusters = cluster_prices(high_prices, tolerance_pct)
+
+    if not low_clusters or not high_clusters:
+        return None, None, 0, 0, False, 0.0, False
+
+    low_clusters.sort(key=lambda x: (-x['count'], x['level']))
+    high_clusters.sort(key=lambda x: (-x['count'], -x['level']))
+
+    curr_price = recent_closes[-1]
+    best_support = None
+    best_support_touches = 0
+    for cluster in low_clusters:
+        if cluster['count'] >= min_touches:
+            if abs(cluster['level'] - curr_price) / curr_price < 0.2:
+                best_support = cluster['level']
+                best_support_touches = cluster['count']
+                break
+
+    best_resistance = None
+    best_resistance_touches = 0
+    for cluster in high_clusters:
+        if cluster['count'] >= min_touches:
+            if abs(cluster['level'] - curr_price) / curr_price < 0.2:
+                best_resistance = cluster['level']
+                best_resistance_touches = cluster['count']
+                break
+
+    if best_support is not None and best_resistance is not None:
+        if best_support > best_resistance:
+            best_support, best_resistance = best_resistance, best_support
+            best_support_touches, best_resistance_touches = best_resistance_touches, best_support_touches
+
+        range_width = (best_resistance - best_support) / best_support * 100 if best_support > 0 else 100
+        if 0.3 < range_width < 25:
+            acceptance = calculate_acceptance_rate(closes, best_support, best_resistance, lookback)
+            is_accepted = acceptance >= acceptance_threshold
+            return (best_support, best_resistance,
+                    best_support_touches, best_resistance_touches,
+                    is_accepted, acceptance, is_accepted)
+    return None, None, 0, 0, False, 0.0, False
+
+
+def detect_range_simple(df, lookback=30):
+    if df.empty or len(df) < lookback:
+        return None, None, "N/A", False
+
+    recent_df = df.tail(lookback).copy()
+    resistance = float(recent_df['high'].max())
+    support = float(recent_df['low'].min())
+    range_height = resistance - support
+
+    if range_height <= 0:
+        return None, None, "N/A", False
+
+    curr_close = float(recent_df['close'].iloc[-1])
+    avg_price = (resistance + support) / 2.0
+    range_pct = (range_height / avg_price) * 100.0 if avg_price > 0 else 0
+
+    highs = recent_df['high'].values
+    lows = recent_df['low'].values
+    window = len(recent_df)
+    first_half_high = max(highs[:window//2])
+    second_half_high = max(highs[window//2:])
+    first_half_low = min(lows[:window//2])
+    second_half_low = min(lows[window//2:])
+
+    pattern_type = "RECTANGLE"
+    if second_half_low > first_half_low * 1.002 and abs(second_half_high - first_half_high) / avg_price < 0.005:
+        pattern_type = "ASCENDING TRIANGLE"
+    elif second_half_high < first_half_high * 0.998 and abs(second_half_low - first_half_low) / avg_price < 0.005:
+        pattern_type = "DESCENDING TRIANGLE"
+    elif range_pct < 2.0:
+        pattern_type = "RECTANGLE"
+    else:
+        pattern_type = "CONSOLIDATION"
+
+    return support, resistance, pattern_type, True
+
+
+def calculate_candle_pressure(row):
+    body = abs(row['close'] - row['open'])
+    candle_range = row['high'] - row['low']
+    if candle_range == 0:
+        return {
+            'body_ratio': 0,
+            'close_position': 0.5,
+            'upper_wick': 0,
+            'lower_wick': 0,
+            'is_bullish': row['close'] > row['open'],
+            'is_bearish': row['close'] < row['open']
+        }
+    body_ratio = body / candle_range
+    close_position = (row['close'] - row['low']) / candle_range
+    upper_wick = row['high'] - max(row['open'], row['close'])
+    lower_wick = min(row['open'], row['close']) - row['low']
+    return {
+        'body_ratio': body_ratio,
+        'close_position': close_position,
+        'upper_wick': upper_wick,
+        'lower_wick': lower_wick,
+        'is_bullish': row['close'] > row['open'],
+        'is_bearish': row['close'] < row['open']
+    }
+
+
+def get_volume_confirmation(volumes, idx, lookback=20):
+    if len(volumes) < lookback:
+        return 1.0
+    avg_vol = np.mean(volumes[max(0, idx-lookback):idx])
+    if avg_vol == 0:
+        return 1.0
+    return volumes[idx] / avg_vol
+
+
+def evaluate_resistance_battle(df, resistance, window=8):
+    if df.empty or len(df) < window:
+        return {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "Insufficient data."}
+
+    recent = df.tail(window)
+    closes = df['close'].values
+    volumes = df['volume'].values
+
+    buyer_score = 0
+    seller_score = 0
+
+    for idx, row in recent.iterrows():
+        pressure = calculate_candle_pressure(row)
+        vol_ratio = get_volume_confirmation(volumes, idx)
+
+        if pressure['is_bullish']:
+            buyer_score += 2
+            if pressure['body_ratio'] > 0.5:
+                buyer_score += 1
+            if pressure['close_position'] > 0.7:
+                buyer_score += 2
+            if pressure['upper_wick'] / (row['high'] - row['low']) < 0.2:
+                buyer_score += 1
+            if vol_ratio > 1.2:
+                buyer_score += 2
+        elif pressure['is_bearish']:
+            seller_score += 2
+            if pressure['body_ratio'] > 0.5:
+                seller_score += 1
+            if pressure['close_position'] < 0.3:
+                seller_score += 2
+            if pressure['upper_wick'] / (row['high'] - row['low']) > 0.3:
+                seller_score += 2
+            if vol_ratio > 1.2:
+                seller_score += 2
+
+        if row['high'] >= resistance * 0.995:
+            buyer_score += 1
+            if pressure['close_position'] < 0.5:
+                seller_score += 1
+
+    diff = buyer_score - seller_score
+    threshold = 3
+
+    if diff >= threshold:
+        return {
+            "side": "BUYERS",
+            "signal": "BREAKOUT IMMINENT",
+            "score": buyer_score,
+            "reason": "Buyers are winning at resistance; breakout pressure is building."
+        }
+    elif -diff >= threshold:
+        return {
+            "side": "SELLERS",
+            "signal": "RESISTANCE HOLDING",
+            "score": seller_score,
+            "reason": "Sellers are defending resistance."
+        }
+    else:
+        return {
+            "side": "NEUTRAL",
+            "signal": "NO CLEAR SIGNAL",
+            "score": max(buyer_score, seller_score),
+            "reason": "Battle at resistance is evenly matched."
+        }
+
+
+def evaluate_support_battle(df, support, window=8):
+    if df.empty or len(df) < window:
+        return {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "Insufficient data."}
+
+    recent = df.tail(window)
+    closes = df['close'].values
+    volumes = df['volume'].values
+
+    buyer_score = 0
+    seller_score = 0
+
+    for idx, row in recent.iterrows():
+        pressure = calculate_candle_pressure(row)
+        vol_ratio = get_volume_confirmation(volumes, idx)
+
+        if pressure['is_bearish']:
+            seller_score += 2
+            if pressure['body_ratio'] > 0.5:
+                seller_score += 1
+            if pressure['close_position'] < 0.3:
+                seller_score += 2
+            if pressure['lower_wick'] / (row['high'] - row['low']) < 0.2:
+                seller_score += 1
+            if vol_ratio > 1.2:
+                seller_score += 2
+        elif pressure['is_bullish']:
+            buyer_score += 2
+            if pressure['body_ratio'] > 0.5:
+                buyer_score += 1
+            if pressure['close_position'] > 0.7:
+                buyer_score += 2
+            if pressure['lower_wick'] / (row['high'] - row['low']) > 0.3:
+                buyer_score += 2
+            if vol_ratio > 1.2:
+                buyer_score += 2
+
+        if row['low'] <= support * 1.005:
+            seller_score += 1
+            if pressure['close_position'] > 0.5:
+                buyer_score += 1
+
+    diff = seller_score - buyer_score
+    threshold = 3
+
+    if diff >= threshold:
+        return {
+            "side": "SELLERS",
+            "signal": "BREAKDOWN IMMINENT",
+            "score": seller_score,
+            "reason": "Sellers are winning at support; breakdown pressure is building."
+        }
+    elif -diff >= threshold:
+        return {
+            "side": "BUYERS",
+            "signal": "SUPPORT HOLDING",
+            "score": buyer_score,
+            "reason": "Buyers are defending support."
+        }
+    else:
+        return {
+            "side": "NEUTRAL",
+            "signal": "NO CLEAR SIGNAL",
+            "score": max(buyer_score, seller_score),
+            "reason": "Battle at support is evenly matched."
+        }
+
+
+def get_existing_range(symbol, timeframe):
+    key = f"{symbol}_{timeframe}"
+    with RANGE_STATE_LOCK:
+        return RANGE_STATE.get(key, None)
+
+
+def set_range(symbol, timeframe, range_data):
+    key = f"{symbol}_{timeframe}"
+    with RANGE_STATE_LOCK:
+        RANGE_STATE[key] = range_data
+
+
+def classify_pattern(df, support, resistance):
+    if support is None or resistance is None:
+        return "NO CLEAR RANGE"
+    recent_df = df.tail(30)
+    highs = recent_df['high'].values
+    lows = recent_df['low'].values
+    avg_price = (resistance + support) / 2.0
+    range_height = resistance - support
+    range_width_pct = (range_height / avg_price) * 100 if avg_price > 0 else 100
+    window = len(recent_df)
+    first_half_high = max(highs[:window//2])
+    second_half_high = max(highs[window//2:])
+    first_half_low = min(lows[:window//2])
+    second_half_low = min(lows[window//2:])
+
+    if second_half_low > first_half_low * 1.002 and abs(second_half_high - first_half_high) / avg_price < 0.005:
+        return "ASCENDING TRIANGLE"
+    elif second_half_high < first_half_high * 0.998 and abs(second_half_low - first_half_low) / avg_price < 0.005:
+        return "DESCENDING TRIANGLE"
+    elif range_width_pct < 2.0:
+        return "RECTANGLE"
+    else:
+        return "CONSOLIDATION"
+
+
+def is_strong_displacement(row, support, resistance, strong_margin, body_ratio_threshold=0.75):
+    body = abs(row['close'] - row['open'])
+    candle_range = row['high'] - row['low']
+    if candle_range == 0:
+        return False
+    body_ratio = body / candle_range
+    if body_ratio < body_ratio_threshold:
+        return False
+    close = row['close']
+    if close > resistance + strong_margin:
+        return True
+    if close < support - strong_margin:
+        return True
+    return False
+
+
+def is_range_invalidated(existing_range, df,
+                         invalidation_ratio=INVALIDATION_RATIO,
+                         strong_ratio=STRONG_INVALIDATION_RATIO,
+                         body_ratio_threshold=BODY_RATIO_THRESHOLD):
+    if not existing_range:
+        return False, None, None
+
+    support = existing_range['support']
+    resistance = existing_range['resistance']
+    range_width = resistance - support
+    if range_width <= 0:
+        return False, None, None
+
+    normal_margin = range_width * invalidation_ratio
+    strong_margin = range_width * strong_ratio
+
+    last_row = df.iloc[-1]
+    above_normal = last_row['close'] > resistance + normal_margin
+    below_normal = last_row['close'] < support - normal_margin
+    above_strong = last_row['close'] > resistance + strong_margin
+    below_strong = last_row['close'] < support - strong_margin
+
+    if above_strong or below_strong:
+        direction = "UPSIDE" if above_strong else "DOWNSIDE"
+        price = last_row['close']
+        return True, direction, price
+
+    if is_strong_displacement(last_row, support, resistance, strong_margin, body_ratio_threshold):
+        direction = "UPSIDE" if last_row['close'] > resistance else "DOWNSIDE"
+        price = last_row['close']
+        return True, direction, price
+
+    if above_normal or below_normal:
+        existing_range['consecutive_outside_closes'] = existing_range.get('consecutive_outside_closes', 0) + 1
+        if existing_range['consecutive_outside_closes'] >= 2:
+            direction = "UPSIDE" if above_normal else "DOWNSIDE"
+            price = last_row['close']
+            return True, direction, price
+        else:
+            return False, None, None
+    else:
+        existing_range['consecutive_outside_closes'] = 0
+        return False, None, None
+
+
 def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     if df.empty or len(df) < 30:
         return None, "INSUFFICIENT DATA"
@@ -146,7 +651,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                     stored['range_last_validated'] = len(df) - 1
                     set_range(symbol, timeframe, stored)
 
-    # --- FORCE INVALIDATION: if price closed outside the active range ---
+    # ---- FORCE INVALIDATION ON ANY CLOSE OUTSIDE ----
     if active_support and active_resistance and active_support > 0 and active_resistance > 0:
         if last_row['close'] > active_resistance:
             if existing is not None:
@@ -158,7 +663,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                     'time': datetime.now(timezone.utc).isoformat()
                 }
                 set_range(symbol, timeframe, existing)
-            # Clear active range
             previous_support = active_support
             previous_resistance = active_resistance
             invalidation_direction = "UPSIDE"
@@ -190,7 +694,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
             decision = "FORCE_INVALIDATED"
             reason = "price closed below support"
 
-    # --- Try to establish new range after invalidation ---
+    # ---- Try to establish new range after invalidation ----
     stored = get_existing_range(symbol, timeframe)
     if stored is not None and stored.get('range_status') == 'INVALIDATED':
         invalidation_info = stored.get('invalidation_info')
@@ -216,7 +720,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                     active_status = "INVALIDATED"
                     active_pattern = "NO CLEAR RANGE"
 
-    # --- Penetration detection (unchanged) ---
+    # ---- Penetration detection ----
     penetration_type = "NONE"
     penetration_explanation = ""
     if active_support is not None and active_support > 0 and active_resistance is not None and active_resistance > 0:
@@ -230,7 +734,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 penetration_explanation = (f"Resistance penetrated: candle high ({last_row['high']:.2f}) traded above "
                                            f"active resistance ({active_resistance:.2f}) but closed back below it.")
 
-    # --- Logging ---
+    # ---- Logging ----
     if DEBUG:
         print(f"RANGE DECISION {symbol} {timeframe}")
         print(f"  Candidate: {candidate['support'] if candidate else None} / {candidate['resistance'] if candidate else None} ({candidate['range_status'] if candidate else 'NONE'})")
@@ -246,13 +750,12 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
             print(f"  Invalidation: {invalidation_direction} at {invalidation_price:.2f}")
         print("---")
 
-    # --- Battle logic (runs only when active range exists) ---
+    # ---- Battle logic (only when active range exists and price is near boundary) ----
     if active_support and active_resistance and active_support > 0 and active_resistance > 0:
-        # Only run battle logic if price is near the boundary
         dist_to_res = (active_resistance - curr_close) / curr_close * 100
         dist_to_sup = (curr_close - active_support) / curr_close * 100
-        # --- CHANGE: proximity threshold from 5.0 to 1.5 ---
-        threshold = 1.5
+        # Use PROXIMITY_THRESHOLD = 1.5%
+        threshold = PROXIMITY_THRESHOLD
 
         if dist_to_res < dist_to_sup and dist_to_res < threshold:
             level_type = "RESISTANCE"
@@ -301,3 +804,50 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         "invalidation_price": round(invalidation_price, 6) if invalidation_price else 0.0,
         "invalidation_time": stored.get('invalidation_info', {}).get('time', '') if stored and stored.get('invalidation_info') else ''
     }, None
+
+
+def _process_symbol_tf(symbol: str, tf: str):
+    if is_unsupported(symbol):
+        return None, "UNSUPPORTED"
+    df = fetch_ohlcv(symbol, tf)
+    if df.empty:
+        return None, "DATA UNAVAILABLE"
+    return analyze_level_battle(df, symbol, tf)
+
+
+def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
+    results = []
+    diagnostics = {
+        "total_scanned": 0,
+        "passed": 0,
+        "unsupported": 0,
+        "failed_logic": 0,
+        "displayed": 0,
+        "rejections": {}
+    }
+
+    tfs_to_run = ["5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
+
+    for sym in symbols:
+        for tf in tfs_to_run:
+            diagnostics["total_scanned"] += 1
+            match, err = _process_symbol_tf(sym, tf)
+            if match:
+                diagnostics["passed"] += 1
+                results.append(match)
+            elif err == "UNSUPPORTED":
+                diagnostics["unsupported"] += 1
+            else:
+                diagnostics["failed_logic"] += 1
+                diagnostics["rejections"][err] = diagnostics["rejections"].get(err, 0) + 1
+
+    def sort_key(item):
+        if item.get("winner") == "BUYERS":
+            return 1
+        elif item.get("winner") == "SELLERS":
+            return 0
+        else:
+            return -1
+    results.sort(key=sort_key, reverse=True)
+    diagnostics["displayed"] = len(results)
+    return results, diagnostics
