@@ -6,9 +6,9 @@ import threading
 from collections import defaultdict
 
 # ===== CONFIGURATION =====
-DEBUG = True   # Set to True for detailed logging; keep it on for now
-INVALIDATION_RATIO = 0.015   # 1.5% of range width (was 2%)
-STRONG_INVALIDATION_RATIO = 0.05
+DEBUG = True
+INVALIDATION_RATIO = 0.001          # 0.1% of range width – very sensitive
+STRONG_INVALIDATION_RATIO = 0.01
 BODY_RATIO_THRESHOLD = 0.75
 # =========================
 
@@ -18,8 +18,6 @@ HEADERS = {
 
 UNSUPPORTED_SYMBOLS = set()
 UNSUPPORTED_LOCK = threading.Lock()
-
-# ===== RANGE STATE — PERSISTENT STORAGE =====
 RANGE_STATE = {}
 RANGE_STATE_LOCK = threading.Lock()
 
@@ -35,7 +33,6 @@ def mark_unsupported(symbol):
 
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
-    """PRIMARY: OKX, FALLBACK: MEXC"""
     if is_unsupported(symbol):
         return pd.DataFrame()
 
@@ -69,7 +66,6 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     except Exception:
         pass
 
-    # MEXC fallback
     mexc_sym = clean_sym
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
@@ -483,18 +479,27 @@ def is_range_invalidated(existing_range, df,
     above_strong = last_row['close'] > resistance + strong_margin
     below_strong = last_row['close'] < support - strong_margin
 
+    # === UNCONDITIONAL LOG ===
+    print(f"[INVALIDATION] close={last_row['close']:.2f}, resistance={resistance:.2f}, margin={normal_margin:.2f}")
+    print(f"  above_normal={above_normal}, below_normal={below_normal}, above_strong={above_strong}, below_strong={below_strong}")
+    # =========================
+
     if above_strong or below_strong:
         existing_range['consecutive_outside_closes'] = 2
+        print("  → STRONG displacement, invalidating")
         return True
 
     if is_strong_displacement(last_row, support, resistance, strong_margin, body_ratio_threshold):
         existing_range['consecutive_outside_closes'] = 2
+        print("  → STRONG displacement (body), invalidating")
         return True
 
     if above_normal or below_normal:
         existing_range['consecutive_outside_closes'] = existing_range.get('consecutive_outside_closes', 0) + 1
+        print(f"  → outside close, count={existing_range['consecutive_outside_closes']}")
     else:
         existing_range['consecutive_outside_closes'] = 0
+        print("  → inside close, resetting count")
 
     return existing_range['consecutive_outside_closes'] >= 2
 
@@ -713,12 +718,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     }, None
 
 
-# ============================================================
-# 6. PROCESSOR AND PIPELINE (FIXED – added missing function)
-# ============================================================
-
 def _process_symbol_tf(symbol: str, tf: str):
-    """Process a single symbol and timeframe combination."""
     if is_unsupported(symbol):
         return None, "UNSUPPORTED"
     df = fetch_ohlcv(symbol, tf)
