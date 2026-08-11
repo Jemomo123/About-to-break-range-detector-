@@ -8,7 +8,7 @@ from collections import defaultdict
 # ===== CONFIGURATION =====
 DEBUG = True
 INVALIDATION_RATIO = 0.001          # 0.1% of range width – very sensitive
-STRONG_INVALIDATION_RATIO = 0.01
+STRONG_INVALIDATION_RATIO = 0.01    # 1% of range width – immediate invalidation
 BODY_RATIO_THRESHOLD = 0.75
 # =========================
 
@@ -484,6 +484,7 @@ def is_range_invalidated(existing_range, df,
     print(f"  above_normal={above_normal}, below_normal={below_normal}, above_strong={above_strong}, below_strong={below_strong}")
     # =========================
 
+    # --- NEW: Immediate invalidation if close is outside strong margin ---
     if above_strong or below_strong:
         existing_range['consecutive_outside_closes'] = 2
         print("  → STRONG displacement, invalidating")
