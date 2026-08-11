@@ -7,8 +7,8 @@ from collections import defaultdict
 
 # ===== CONFIGURATION =====
 DEBUG = True
-INVALIDATION_RATIO = 0.001          # 0.1% of range width – very sensitive
-STRONG_INVALIDATION_RATIO = 0.01    # 1% of range width – immediate invalidation
+INVALIDATION_RATIO = 0.001
+STRONG_INVALIDATION_RATIO = 0.01
 BODY_RATIO_THRESHOLD = 0.75
 # =========================
 
@@ -462,13 +462,13 @@ def is_range_invalidated(existing_range, df,
                          strong_ratio=STRONG_INVALIDATION_RATIO,
                          body_ratio_threshold=BODY_RATIO_THRESHOLD):
     if not existing_range:
-        return False
+        return False, None, None
 
     support = existing_range['support']
     resistance = existing_range['resistance']
     range_width = resistance - support
     if range_width <= 0:
-        return False
+        return False, None, None
 
     normal_margin = range_width * invalidation_ratio
     strong_margin = range_width * strong_ratio
@@ -484,25 +484,27 @@ def is_range_invalidated(existing_range, df,
     print(f"  above_normal={above_normal}, below_normal={below_normal}, above_strong={above_strong}, below_strong={below_strong}")
     # =========================
 
-    # --- NEW: Immediate invalidation if close is outside strong margin ---
     if above_strong or below_strong:
-        existing_range['consecutive_outside_closes'] = 2
-        print("  → STRONG displacement, invalidating")
-        return True
+        direction = "UPSIDE" if above_strong else "DOWNSIDE"
+        price = last_row['close']
+        return True, direction, price
 
     if is_strong_displacement(last_row, support, resistance, strong_margin, body_ratio_threshold):
-        existing_range['consecutive_outside_closes'] = 2
-        print("  → STRONG displacement (body), invalidating")
-        return True
+        direction = "UPSIDE" if last_row['close'] > resistance else "DOWNSIDE"
+        price = last_row['close']
+        return True, direction, price
 
     if above_normal or below_normal:
         existing_range['consecutive_outside_closes'] = existing_range.get('consecutive_outside_closes', 0) + 1
-        print(f"  → outside close, count={existing_range['consecutive_outside_closes']}")
+        if existing_range['consecutive_outside_closes'] >= 2:
+            direction = "UPSIDE" if above_normal else "DOWNSIDE"
+            price = last_row['close']
+            return True, direction, price
+        else:
+            return False, None, None
     else:
         existing_range['consecutive_outside_closes'] = 0
-        print("  → inside close, resetting count")
-
-    return existing_range['consecutive_outside_closes'] >= 2
+        return False, None, None
 
 
 def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
@@ -554,20 +556,28 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
             candidate = None
 
     existing = get_existing_range(symbol, timeframe)
-    active_support = None
-    active_resistance = None
+
+    # ---- State Machine ----
+    active_support = 0.0
+    active_resistance = 0.0
     active_status = "NO VALID RANGE"
     active_pattern = "NO CLEAR RANGE"
     decision = None
     reason = None
     range_invalidated = False
+    invalidation_direction = "NONE"
+    invalidation_price = 0.0
+    previous_support = 0.0
+    previous_resistance = 0.0
 
     if existing is None:
+        # No range exists → store first valid candidate
         if candidate is not None:
             candidate['range_start_index'] = len(df) - 1
             candidate['range_age'] = 0
             candidate['range_last_validated'] = len(df) - 1
             candidate['consecutive_outside_closes'] = 0
+            candidate['invalidation_info'] = None
             set_range(symbol, timeframe, candidate)
             active_support = candidate['support']
             active_resistance = candidate['resistance']
@@ -583,53 +593,65 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
             decision = "NONE"
             reason = "no candidate"
     else:
-        invalidated = is_range_invalidated(existing, df)
+        # Check invalidation
+        invalidated, direction, price = is_range_invalidated(existing, df)
         range_invalidated = invalidated
+
         if invalidated:
-            if candidate is not None:
-                candidate['range_start_index'] = len(df) - 1
-                candidate['range_age'] = 0
-                candidate['range_last_validated'] = len(df) - 1
-                candidate['consecutive_outside_closes'] = 0
-                set_range(symbol, timeframe, candidate)
-                active_support = candidate['support']
-                active_resistance = candidate['resistance']
-                active_status = candidate['range_status']
-                active_pattern = candidate['pattern_type']
-                decision = "REPLACED"
-                reason = f"range invalidated after {existing.get('consecutive_outside_closes',0)} outside closes"
-            else:
-                set_range(symbol, timeframe, None)
-                active_support = 0.0
-                active_resistance = 0.0
-                active_status = "NO VALID RANGE"
-                active_pattern = "NO CLEAR RANGE"
-                decision = "INVALIDATED"
-                reason = "range invalidated with no replacement candidate"
+            # --- Invalidation occurred ---
+            previous_support = existing['support']
+            previous_resistance = existing['resistance']
+            invalidation_direction = direction
+            invalidation_price = price
+
+            # Update existing state to INVALIDATED
+            existing['range_status'] = "INVALIDATED"
+            existing['invalidation_info'] = {
+                'direction': direction,
+                'price': price,
+                'candle_index': len(df) - 1,
+                'time': datetime.now(timezone.utc).isoformat()
+            }
+            set_range(symbol, timeframe, existing)
+
+            # Active range becomes empty
+            active_support = 0.0
+            active_resistance = 0.0
+            active_status = "INVALIDATED"
+            active_pattern = "NO CLEAR RANGE"
+            decision = "INVALIDATED"
+            reason = f"range invalidated, direction {direction} at price {price:.2f}"
+            # Candidate is discarded (do NOT store)
+
         else:
+            # --- Existing range is still valid ---
             if existing['range_status'] == 'PROVISIONAL' and candidate is not None and candidate['range_status'] == 'STRUCTURAL':
                 if (candidate['support_touches'] >= 3 and
                     candidate['resistance_touches'] >= 3 and
                     candidate.get('is_accepted', False)):
+                    # Upgrade
                     candidate['range_age'] = existing.get('range_age', 0)
                     candidate['range_start_index'] = existing.get('range_start_index', len(df) - 1)
                     candidate['range_last_validated'] = len(df) - 1
                     candidate['consecutive_outside_closes'] = 0
+                    candidate['invalidation_info'] = None
                     set_range(symbol, timeframe, candidate)
                     active_support = candidate['support']
                     active_resistance = candidate['resistance']
                     active_status = 'STRUCTURAL'
                     active_pattern = candidate['pattern_type']
                     decision = "UPGRADED"
-                    reason = "provisional upgraded to structural with sufficient evidence"
+                    reason = "provisional upgraded to structural"
                 else:
+                    # Keep existing provisional
                     active_support = existing['support']
                     active_resistance = existing['resistance']
                     active_status = existing['range_status']
                     active_pattern = existing.get('pattern_type', 'CONSOLIDATION')
                     decision = "KEPT"
-                    reason = "existing provisional remains (candidate lacks sufficient evidence)"
+                    reason = "existing provisional remains"
             else:
+                # Keep existing range (hysteresis)
                 active_support = existing['support']
                 active_resistance = existing['resistance']
                 active_status = existing['range_status']
@@ -637,17 +659,54 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 decision = "KEPT"
                 reason = f"existing {active_status} range still valid"
 
-        if decision in ['KEPT', 'UPGRADED', 'STORED']:
-            stored = get_existing_range(symbol, timeframe)
-            if stored is not None:
-                stored['range_age'] = stored.get('range_age', 0) + 1
-                stored['range_last_validated'] = len(df) - 1
-                set_range(symbol, timeframe, stored)
+            # Update age for kept/upgraded ranges
+            if decision in ['KEPT', 'UPGRADED']:
+                stored = get_existing_range(symbol, timeframe)
+                if stored is not None:
+                    stored['range_age'] = stored.get('range_age', 0) + 1
+                    stored['range_last_validated'] = len(df) - 1
+                    set_range(symbol, timeframe, stored)
 
+    # ---- After decision, if we are INVALIDATED and new candle has arrived, try to establish new range ----
+    # Check if we are in INVALIDATED state and the candle index is beyond the invalidation candle.
+    stored = get_existing_range(symbol, timeframe)
+    if stored is not None and stored.get('range_status') == 'INVALIDATED':
+        invalidation_info = stored.get('invalidation_info')
+        if invalidation_info is not None:
+            invalidation_candle = invalidation_info.get('candle_index', 0)
+            if len(df) - 1 > invalidation_candle:
+                # At least one candle after invalidation → try to accept new range
+                if candidate is not None and candidate.get('range_status') == 'STRUCTURAL':
+                    candidate['range_start_index'] = len(df) - 1
+                    candidate['range_age'] = 0
+                    candidate['range_last_validated'] = len(df) - 1
+                    candidate['consecutive_outside_closes'] = 0
+                    candidate['invalidation_info'] = None
+                    set_range(symbol, timeframe, candidate)
+                    active_support = candidate['support']
+                    active_resistance = candidate['resistance']
+                    active_status = candidate['range_status']
+                    active_pattern = candidate['pattern_type']
+                    decision = "NEW_RANGE"
+                    reason = "new structural range established after invalidation"
+                else:
+                    # Still no new range, keep INVALIDATED
+                    active_support = 0.0
+                    active_resistance = 0.0
+                    active_status = "INVALIDATED"
+                    active_pattern = "NO CLEAR RANGE"
+            else:
+                # Still the same candle, keep INVALIDATED
+                active_support = 0.0
+                active_resistance = 0.0
+                active_status = "INVALIDATED"
+                active_pattern = "NO CLEAR RANGE"
+
+    # ---- Penetration detection (unchanged) ----
     penetration_type = "NONE"
     penetration_explanation = ""
     if active_support is not None and active_support > 0 and active_resistance is not None and active_resistance > 0:
-        if not range_invalidated:
+        if not range_invalidated and active_status != "INVALIDATED":
             if last_row['low'] < active_support and last_row['close'] >= active_support:
                 penetration_type = "SUPPORT PENETRATION"
                 penetration_explanation = (f"Support penetrated: candle low ({last_row['low']:.2f}) traded below "
@@ -657,6 +716,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 penetration_explanation = (f"Resistance penetrated: candle high ({last_row['high']:.2f}) traded above "
                                            f"active resistance ({active_resistance:.2f}) but closed back below it.")
 
+    # ---- Logging ----
     if DEBUG:
         print(f"RANGE DECISION {symbol} {timeframe}")
         print(f"  Candidate: {candidate['support'] if candidate else None} / {candidate['resistance'] if candidate else None} ({candidate['range_status'] if candidate else 'NONE'})")
@@ -669,8 +729,11 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         print(f"  Penetration: {penetration_type}")
         if penetration_explanation:
             print(f"  Explanation: {penetration_explanation}")
+        if invalidation_direction != "NONE":
+            print(f"  Invalidation: {invalidation_direction} at {invalidation_price:.2f}")
         print("---")
 
+    # ---- Battle logic (uses active range) ----
     dist_to_res = (active_resistance - curr_close) / curr_close * 100 if active_resistance and active_resistance > 0 else 100
     dist_to_sup = (curr_close - active_support) / curr_close * 100 if active_support and active_support > 0 else 100
     threshold = 5.0
@@ -715,7 +778,13 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         "range_status": active_status,
         "last_updated": last_updated,
         "penetration_type": penetration_type,
-        "penetration_explanation": penetration_explanation
+        "penetration_explanation": penetration_explanation,
+        # ---- New fields for invalidation ----
+        "previous_support": round(previous_support, 6) if previous_support else 0.0,
+        "previous_resistance": round(previous_resistance, 6) if previous_resistance else 0.0,
+        "invalidation_direction": invalidation_direction,
+        "invalidation_price": round(invalidation_price, 6) if invalidation_price else 0.0,
+        "invalidation_time": stored.get('invalidation_info', {}).get('time', '') if stored and stored.get('invalidation_info') else ''
     }, None
 
 
