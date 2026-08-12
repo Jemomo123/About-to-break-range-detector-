@@ -81,7 +81,6 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     'volCcy', 'volCcyQuote', 'confirm'
                 ])
                 df = df.iloc[::-1].reset_index(drop=True)
-                # FIX: make timestamp UTC-aware
                 df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
@@ -130,7 +129,6 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     df = pd.DataFrame(parsed, columns=[
                         'timestamp', 'open', 'high', 'low', 'close', 'volume'
                     ])
-                    # MEXC timestamp is in milliseconds
                     df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
@@ -141,21 +139,31 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     return pd.DataFrame()
 
 
+# ===== IMPROVED COMPLETED-CANDLE HANDLING =====
 def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
     """Return the index of the last completed candle based on timestamp."""
+    # Safety: if no data or no timestamp column, use last candle
     if df.empty or 'timestamp_dt' not in df.columns:
-        # Fallback: assume the last candle is completed
+        print(f"[WARN] No timestamp_dt column, using last candle")
         return len(df) - 1
 
-    last_ts = df['timestamp_dt'].iloc[-1]
-    now = datetime.now(timezone.utc)
-    tf_seconds = get_timeframe_seconds(timeframe)
+    try:
+        last_ts = df['timestamp_dt'].iloc[-1]
+        now = datetime.now(timezone.utc)
+        tf_seconds = get_timeframe_seconds(timeframe)
 
-    # If the last candle started less than the timeframe duration ago, it is incomplete.
-    # Use the previous candle.
-    if (now - last_ts).total_seconds() < tf_seconds * 0.9:  # 0.9 margin
-        return len(df) - 2 if len(df) >= 2 else 0
-    else:
+        # Use a 50% margin instead of 90% to be more tolerant
+        elapsed = (now - last_ts).total_seconds()
+        if elapsed < tf_seconds * 0.5:
+            # Last candle is likely incomplete, use previous
+            idx = len(df) - 2 if len(df) >= 2 else 0
+            print(f"[COMPLETED] Using previous candle at index {idx} for {timeframe} (elapsed={elapsed:.0f}s, tf={tf_seconds}s)")
+            return idx
+        else:
+            print(f"[COMPLETED] Using last candle at index {len(df)-1} for {timeframe} (elapsed={elapsed:.0f}s, tf={tf_seconds}s)")
+            return len(df) - 1
+    except Exception as e:
+        print(f"[ERROR] get_completed_candle_index failed: {e}, using last candle")
         return len(df) - 1
 
 
@@ -503,8 +511,8 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
 
     # ---- Determine completed candle index ----
     completed_idx = get_completed_candle_index(df, timeframe)
-    if completed_idx < 0:
-        print(f"[WARN] No completed candle found for {symbol} {timeframe}, using latest.")
+    if completed_idx < 0 or completed_idx >= len(df):
+        print(f"[WARN] Invalid completed_idx {completed_idx}, using last candle")
         completed_idx = len(df) - 1
 
     # Use only up to the completed index for all calculations
