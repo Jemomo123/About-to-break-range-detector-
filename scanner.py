@@ -154,17 +154,29 @@ def analyze_symbol_structure(df_raw, symbol, timeframe):
         distance_pct = round((dist_to_sup / current_price) * 100, 2)
 
     decimals = 4 if current_price < 1 else 2
+    c_price = round(current_price, decimals)
+    s_level = round(support_level, decimals)
+    r_level = round(resistance_level, decimals)
+    l_price = round(level_price, decimals)
 
     return {
         "symbol": symbol,
         "timeframe": timeframe,
-        "price": round(current_price, decimals),
-        "support": round(support_level, decimals),
-        "resistance": round(resistance_level, decimals),
+        # Supply both keys so frontend template reads price cleanly
+        "price": c_price,
+        "current_price": c_price,
+        "support": s_level,
+        "resistance": r_level,
         "testing_level": testing_level,
-        "level_price": round(level_price, decimals),
+        "level_price": l_price,
         "distance_pct": distance_pct,
+        "dist_pct": distance_pct,
         "updated_at": datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
+        # Top-level battle attributes
+        "side": side,
+        "signal": signal,
+        "reason": reason,
+        # Nested battle attribute dictionary
         "battle": {
             "side": side,
             "signal": signal,
@@ -183,6 +195,6 @@ def _process_symbol_tf(symbol, timeframe):
         if result is None:
             return None, f"Structure analysis failed for {symbol}"
             
-        return result, None  # Unpacks cleanly into (data, err)
+        return result, None
     except Exception as e:
         return None, str(e)
