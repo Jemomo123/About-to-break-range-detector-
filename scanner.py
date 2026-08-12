@@ -53,6 +53,7 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 
+# ===== STRENGTHENED TIMESTAMP PARSING =====
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     if is_unsupported(symbol):
         return pd.DataFrame()
@@ -83,13 +84,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
             )
 
             if code == "0" and isinstance(data, list) and len(data) > 0:
-                # ----- TIMESTAMP DIAGNOSTIC -----
-                if symbol == "ZECUSDT" and timeframe == "5M":
-                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe}")
-                    print(f"[TIMESTAMP DEBUG] first raw row = {data[0] if data else None}")
-                    print(f"[TIMESTAMP DEBUG] raw timestamp = {data[0][0] if data else None}")
-                    print(f"[TIMESTAMP DEBUG] timestamp type = {type(data[0][0]) if data else None}")
-
+                # ---- Strengthen timestamp parsing ----
                 # Create DataFrame from the raw data
                 df = pd.DataFrame(data, columns=[
                     'timestamp', 'open', 'high', 'low', 'close', 'volume',
@@ -97,38 +92,37 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 ])
                 df = df.iloc[::-1].reset_index(drop=True)
 
-                # ---- Robust timestamp conversion ----
-                # Convert timestamp column to numeric (it may be string or int)
+                # Convert timestamp to numeric (string or int)
                 df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
-                # Drop rows with invalid timestamp numeric conversion
+                # Drop rows with non-numeric timestamp
                 df = df.dropna(subset=['timestamp'])
                 if df.empty:
-                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} all timestamp values are non-numeric")
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} all timestamps non-numeric")
+                    # log first few raw values for debugging
+                    if data:
+                        print(f"[TIMESTAMP DEBUG] sample raw timestamps: {data[0][0]}, {data[1][0] if len(data)>1 else 'N/A'}")
                     return pd.DataFrame()
 
-                # Convert to datetime (assume milliseconds)
+                # Convert to datetime (unit = milliseconds)
                 df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
-                # Count valid/invalid
                 valid_count = df['timestamp_dt'].notna().sum()
                 invalid_count = df['timestamp_dt'].isna().sum()
                 print(
                     f"[TIMESTAMP DEBUG] {symbol} {timeframe} "
-                    f"valid={valid_count} "
-                    f"invalid={invalid_count} "
-                    f"first={df['timestamp_dt'].iloc[0] if valid_count > 0 else None} "
-                    f"last={df['timestamp_dt'].iloc[-1] if valid_count > 0 else None}"
+                    f"valid={valid_count} invalid={invalid_count} "
+                    f"first={df['timestamp_dt'].iloc[0] if valid_count>0 else None} "
+                    f"last={df['timestamp_dt'].iloc[-1] if valid_count>0 else None}"
                 )
-                # Drop rows with invalid timestamp (NaT)
+                # Drop invalid timestamp rows
                 df = df.dropna(subset=['timestamp_dt'])
                 if df.empty:
                     print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} all timestamps invalid, dropping")
                     return pd.DataFrame()
 
-                # Convert OHLCV columns to float
+                # Convert OHLCV to float
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
 
-                # ----- DIAGNOSTIC PRINT BEFORE RETURN -----
                 print(
                     f"[OKX DEBUG] {symbol} {timeframe} "
                     f"RETURNING DF rows={len(df)} "
@@ -169,12 +163,20 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
                 df = df.dropna(subset=['timestamp'])
                 if df.empty:
-                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} (SWAP) all timestamp values non-numeric")
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} (SWAP) all timestamps non-numeric")
                     return pd.DataFrame()
                 df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
+                valid_count = df['timestamp_dt'].notna().sum()
+                invalid_count = df['timestamp_dt'].isna().sum()
+                print(
+                    f"[TIMESTAMP DEBUG] {symbol} {timeframe} (SWAP) "
+                    f"valid={valid_count} invalid={invalid_count} "
+                    f"first={df['timestamp_dt'].iloc[0] if valid_count>0 else None} "
+                    f"last={df['timestamp_dt'].iloc[-1] if valid_count>0 else None}"
+                )
                 df = df.dropna(subset=['timestamp_dt'])
                 if df.empty:
-                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} (SWAP) all timestamps invalid")
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} (SWAP) all timestamps invalid, dropping")
                     return pd.DataFrame()
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
@@ -214,12 +216,18 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
                     df = df.dropna(subset=['timestamp'])
                     if df.empty:
-                        print(f"[MEXC] {symbol} {timeframe} all timestamp values non-numeric")
+                        print(f"[MEXC] {symbol} {timeframe} all timestamps non-numeric")
                         return pd.DataFrame()
                     df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
+                    valid_count = df['timestamp_dt'].notna().sum()
+                    invalid_count = df['timestamp_dt'].isna().sum()
+                    print(
+                        f"[TIMESTAMP DEBUG] {symbol} {timeframe} (MEXC) "
+                        f"valid={valid_count} invalid={invalid_count}"
+                    )
                     df = df.dropna(subset=['timestamp_dt'])
                     if df.empty:
-                        print(f"[MEXC] {symbol} {timeframe} all timestamps invalid")
+                        print(f"[MEXC] {symbol} {timeframe} all timestamps invalid, dropping")
                         return pd.DataFrame()
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
@@ -236,30 +244,43 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     return pd.DataFrame()
 
 
+# ===== CORRECT COMPLETED CANDLE LOGIC =====
 def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
+    """
+    Return the index of the latest completed candle.
+    A candle is completed when its close time <= current UTC time.
+    Candle close time = open time + timeframe duration.
+    """
     if df.empty or 'timestamp_dt' not in df.columns:
         print(f"[WARN] No timestamp_dt column, using last candle")
         return len(df) - 1
 
-    if timeframe in ["1H", "4H"]:
-        print(f"[COMPLETED] Forcing last candle for {timeframe} (index {len(df)-1})")
-        return len(df) - 1
+    now = datetime.now(timezone.utc)
+    tf_seconds = get_timeframe_seconds(timeframe)
 
-    try:
-        last_ts = df['timestamp_dt'].iloc[-1]
-        now = datetime.now(timezone.utc)
-        tf_seconds = get_timeframe_seconds(timeframe)
+    # Iterate from the end backwards to find the latest completed candle
+    for i in range(len(df) - 1, -1, -1):
+        open_time = df['timestamp_dt'].iloc[i]
+        close_time = open_time + timedelta(seconds=tf_seconds)
+        if close_time <= now:
+            # This candle is completed
+            # Log the decision
+            print(f"[COMPLETED DEBUG] {symbol if 'symbol' in locals() else '?'} {timeframe if 'timeframe' in locals() else '?'}")
+            print(f"  now={now.isoformat()}")
+            print(f"  latest_open={df['timestamp_dt'].iloc[-1].isoformat()}")
+            print(f"  latest_close={(df['timestamp_dt'].iloc[-1] + timedelta(seconds=tf_seconds)).isoformat()}")
+            print(f"  selected_index={i}")
+            print(f"  selected_open={open_time.isoformat()}")
+            print(f"  selected_close={close_time.isoformat()}")
+            if i == len(df) - 1:
+                print(f"  reason=latest candle is completed")
+            else:
+                print(f"  reason=latest candle still forming, using previous")
+            return i
 
-        if (now - last_ts).total_seconds() < tf_seconds * 0.5:
-            idx = len(df) - 2 if len(df) >= 2 else 0
-            print(f"[COMPLETED] Using previous candle at index {idx} for {timeframe}")
-            return idx
-        else:
-            print(f"[COMPLETED] Using last candle at index {len(df)-1} for {timeframe}")
-            return len(df) - 1
-    except Exception as e:
-        print(f"[ERROR] get_completed_candle_index failed: {e}, using last candle")
-        return len(df) - 1
+    # No completed candle found – fallback to the last (or second last)
+    print(f"[WARN] No completed candle found, using last")
+    return len(df) - 1
 
 
 # ---- Helper Functions (unchanged) ----
@@ -601,30 +622,33 @@ def classify_pattern(df, support, resistance):
 
 
 def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
-    # ----- RANGE ENTRY DEBUG -----
     print(f"[RANGE ENTRY] {symbol} {timeframe} rows={len(df)}")
 
     if df.empty or len(df) < 30:
         return None, "INSUFFICIENT DATA"
 
+    # ---- 1. Select completed candle ----
     completed_idx = get_completed_candle_index(df, timeframe)
     if completed_idx < 0 or completed_idx >= len(df):
         print(f"[WARN] Invalid completed_idx {completed_idx}, using last candle")
         completed_idx = len(df) - 1
 
+    # ---- 2. Extract data from the completed candle ----
     curr_close = float(df['close'].iloc[completed_idx])
-    last_row = df.iloc[completed_idx]
+    last_row = df.iloc[completed_idx]  # for penetration detection
 
     highs = df['high'].values
     lows = df['low'].values
     closes = df['close'].values
 
+    # ---- 3. Candidate range detection ----
     support_struct, resistance_struct, sup_touches, res_touches, is_accepted, acceptance_rate, _ = find_structural_levels(
         highs=highs, lows=lows, closes=closes,
         lookback=40, tolerance_pct=0.7, min_touches=2, acceptance_threshold=60.0
     )
 
     candidate = None
+    source = None
     if support_struct is not None and resistance_struct is not None and is_accepted:
         range_width = (resistance_struct - support_struct) / support_struct * 100 if support_struct > 0 else 0
         candidate = {
@@ -637,6 +661,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
             'pattern_type': classify_pattern(df, support_struct, resistance_struct),
             'acceptance_rate': acceptance_rate,
         }
+        source = "STRUCTURAL"
     else:
         support_simple, resistance_simple, pattern_type_simple, valid = detect_range_simple(df, lookback=30)
         if valid and support_simple is not None and resistance_simple is not None:
@@ -652,11 +677,18 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 'pattern_type': pattern_type_simple,
                 'acceptance_rate': acceptance,
             }
+            source = "PROVISIONAL"
         else:
             candidate = None
+            source = "NONE"
 
+    # ---- 4. Log source ----
+    print(f"[RANGE SOURCE] {symbol} {timeframe} = {source}")
+
+    # ---- 5. Existing range ----
     existing = get_existing_range(symbol, timeframe)
 
+    # ---- 6. Decision logic ----
     active_support = 0.0
     active_resistance = 0.0
     active_status = "NO VALID RANGE"
@@ -665,6 +697,16 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     invalidation_price = 0.0
     previous_support = 0.0
     previous_resistance = 0.0
+
+    # Validate candidate range before using it
+    if candidate is not None:
+        support_val = candidate['support']
+        resistance_val = candidate['resistance']
+        if not (support_val > 0 and resistance_val > 0 and resistance_val > support_val):
+            print(f"[RANGE INVALID] {symbol} {timeframe}")
+            print(f"  support={support_val:.8f} resistance={resistance_val:.8f}")
+            print(f"  reason=non-positive or inverted range")
+            candidate = None
 
     if existing is None:
         if candidate is not None:
@@ -714,6 +756,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 active_status = "INVALIDATED"
                 active_pattern = "NO CLEAR RANGE"
         else:
+            # Range is active – compare close against stored levels
             if support <= curr_close <= resistance:
                 active_support = support
                 active_resistance = resistance
@@ -745,16 +788,18 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 active_status = "INVALIDATED"
                 active_pattern = "NO CLEAR RANGE"
 
+    # ---- 7. Penetration detection (using the same completed candle) ----
     penetration_type = "NONE"
     penetration_explanation = ""
     if active_status != "INVALIDATED" and active_support > 0 and active_resistance > 0:
         if last_row['low'] < active_support and last_row['close'] >= active_support:
             penetration_type = "SUPPORT PENETRATION"
-            penetration_explanation = f"Support penetrated: candle low ({last_row['low']:.2f}) traded below active support ({active_support:.2f}) but closed back above it."
+            penetration_explanation = f"Support penetrated: candle low ({last_row['low']:.8f}) traded below active support ({active_support:.8f}) but closed back above it."
         elif last_row['high'] > active_resistance and last_row['close'] <= active_resistance:
             penetration_type = "RESISTANCE PENETRATION"
-            penetration_explanation = f"Resistance penetrated: candle high ({last_row['high']:.2f}) traded above active resistance ({active_resistance:.2f}) but closed back below it."
+            penetration_explanation = f"Resistance penetrated: candle high ({last_row['high']:.8f}) traded above active resistance ({active_resistance:.8f}) but closed back below it."
 
+    # ---- 8. Battle logic (using the same completed candle for proximity) ----
     if active_support > 0 and active_resistance > 0:
         dist_to_res = (active_resistance - curr_close) / curr_close * 100
         dist_to_sup = (curr_close - active_support) / curr_close * 100
@@ -781,16 +826,23 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         distance = 0.0
         result = {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "No active range."}
 
+    # ---- 9. Enhanced logging ----
     if DEBUG:
         print(f"RANGE DECISION {symbol} {timeframe}")
-        print(f"  Active range: {active_support:.2f} / {active_resistance:.2f}")
-        print(f"  Current close: {curr_close:.2f}")
-        print(f"  Status: {active_status}")
+        if active_support > 0 and active_resistance > 0:
+            range_width_pct = ((active_resistance - active_support) / active_support * 100) if active_support > 0 else 0
+            print(f"  Active range: {active_support:.8f} / {active_resistance:.8f}")
+            print(f"  Current close: {curr_close:.8f}")
+            print(f"  Range width: {range_width_pct:.4f}%")
+            print(f"  Status: {active_status}")
+            print(f"  Pattern: {active_pattern}")
+        else:
+            print(f"  Active range: N/A / N/A")
         print(f"  Penetration: {penetration_type}")
         if penetration_explanation:
             print(f"  Explanation: {penetration_explanation}")
         if invalidation_direction != "NONE":
-            print(f"  Invalidation: {invalidation_direction} at {invalidation_price:.2f}")
+            print(f"  Invalidation: {invalidation_direction} at {invalidation_price:.8f}")
         print("---")
 
     last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
