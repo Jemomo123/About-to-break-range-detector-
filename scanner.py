@@ -54,6 +54,7 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 
+# ===== IMPROVED FETCH WITH LOGGING =====
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     """OKX primary (spot + swap), MEXC fallback. No Binance."""
     if is_unsupported(symbol):
@@ -69,8 +70,10 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     # ---- 1. OKX Spot ----
     okx_spot_sym = f"{clean_sym[:-4]}-USDT"
     okx_spot_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_spot_sym}&bar={okx_bar}&limit={limit}"
+    print(f"[OKX SPOT] {symbol} {timeframe}: {okx_spot_url}")
     try:
         resp = requests.get(okx_spot_url, headers=HEADERS, timeout=8)
+        print(f"[OKX SPOT] {symbol} {timeframe} HTTP {resp.status_code}")
         if resp.status_code == 200:
             res_json = resp.json()
             code = res_json.get("code")
@@ -84,17 +87,22 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
+                print(f"[OKX SPOT] {symbol} {timeframe} SUCCESS, {len(df)} candles")
                 return df
-            elif code == "51001":
-                pass
-    except Exception:
-        pass
+            else:
+                print(f"[OKX SPOT] {symbol} {timeframe} empty or code {code}")
+        else:
+            print(f"[OKX SPOT] {symbol} {timeframe} HTTP error")
+    except Exception as e:
+        print(f"[OKX SPOT] {symbol} {timeframe} exception: {e}")
 
     # ---- 2. OKX Swap ----
     okx_swap_sym = f"{clean_sym[:-4]}-USDT-SWAP"
     okx_swap_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_swap_sym}&bar={okx_bar}&limit={limit}"
+    print(f"[OKX SWAP] {symbol} {timeframe}: {okx_swap_url}")
     try:
         resp = requests.get(okx_swap_url, headers=HEADERS, timeout=8)
+        print(f"[OKX SWAP] {symbol} {timeframe} HTTP {resp.status_code}")
         if resp.status_code == 200:
             res_json = resp.json()
             code = res_json.get("code")
@@ -108,16 +116,23 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
+                print(f"[OKX SWAP] {symbol} {timeframe} SUCCESS, {len(df)} candles")
                 return df
-    except Exception:
-        pass
+            else:
+                print(f"[OKX SWAP] {symbol} {timeframe} empty or code {code}")
+        else:
+            print(f"[OKX SWAP] {symbol} {timeframe} HTTP error")
+    except Exception as e:
+        print(f"[OKX SWAP] {symbol} {timeframe} exception: {e}")
 
     # ---- 3. MEXC Fallback ----
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
     mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={clean_sym}&interval={mexc_bar}&limit={limit}"
+    print(f"[MEXC] {symbol} {timeframe}: {mexc_url}")
     try:
         resp = requests.get(mexc_url, headers=HEADERS, timeout=8)
+        print(f"[MEXC] {symbol} {timeframe} HTTP {resp.status_code}")
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
@@ -132,19 +147,29 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
+                    print(f"[MEXC] {symbol} {timeframe} SUCCESS, {len(df)} candles")
                     return df
-    except Exception:
-        pass
+            else:
+                print(f"[MEXC] {symbol} {timeframe} empty data")
+        else:
+            print(f"[MEXC] {symbol} {timeframe} HTTP error")
+    except Exception as e:
+        print(f"[MEXC] {symbol} {timeframe} exception: {e}")
 
+    print(f"[WARN] All sources failed for {symbol} {timeframe}")
     return pd.DataFrame()
 
 
 # ===== IMPROVED COMPLETED-CANDLE HANDLING =====
 def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
     """Return the index of the last completed candle based on timestamp."""
-    # Safety: if no data or no timestamp column, use last candle
     if df.empty or 'timestamp_dt' not in df.columns:
         print(f"[WARN] No timestamp_dt column, using last candle")
+        return len(df) - 1
+
+    # For 1H and 4H, use the last candle (less strict)
+    if timeframe in ["1H", "4H"]:
+        print(f"[COMPLETED] Forcing last candle for {timeframe} (index {len(df)-1})")
         return len(df) - 1
 
     try:
@@ -152,15 +177,13 @@ def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
         now = datetime.now(timezone.utc)
         tf_seconds = get_timeframe_seconds(timeframe)
 
-        # Use a 50% margin instead of 90% to be more tolerant
-        elapsed = (now - last_ts).total_seconds()
-        if elapsed < tf_seconds * 0.5:
-            # Last candle is likely incomplete, use previous
+        # Use 50% margin for smaller timeframes
+        if (now - last_ts).total_seconds() < tf_seconds * 0.5:
             idx = len(df) - 2 if len(df) >= 2 else 0
-            print(f"[COMPLETED] Using previous candle at index {idx} for {timeframe} (elapsed={elapsed:.0f}s, tf={tf_seconds}s)")
+            print(f"[COMPLETED] Using previous candle at index {idx} for {timeframe}")
             return idx
         else:
-            print(f"[COMPLETED] Using last candle at index {len(df)-1} for {timeframe} (elapsed={elapsed:.0f}s, tf={tf_seconds}s)")
+            print(f"[COMPLETED] Using last candle at index {len(df)-1} for {timeframe}")
             return len(df) - 1
     except Exception as e:
         print(f"[ERROR] get_completed_candle_index failed: {e}, using last candle")
