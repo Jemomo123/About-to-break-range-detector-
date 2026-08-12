@@ -53,6 +53,7 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 
+# ===== FETCH WITH DIAGNOSTIC LOGS =====
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     if is_unsupported(symbol):
         return pd.DataFrame()
@@ -75,6 +76,13 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
             res_json = resp.json()
             code = res_json.get("code")
             data = res_json.get("data", [])
+            # ----- DIAGNOSTIC PRINT -----
+            print(
+                f"[OKX DEBUG] {symbol} {timeframe} "
+                f"code={code} "
+                f"data_type={type(data).__name__} "
+                f"data_len={len(data) if isinstance(data, list) else 'N/A'}"
+            )
             if code == "0" and isinstance(data, list) and len(data) > 0:
                 df = pd.DataFrame(data, columns=[
                     'timestamp', 'open', 'high', 'low', 'close', 'volume',
@@ -88,6 +96,12 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     return pd.DataFrame()
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
+                # ----- DIAGNOSTIC PRINT BEFORE RETURN -----
+                print(
+                    f"[OKX DEBUG] {symbol} {timeframe} "
+                    f"RETURNING DF rows={len(df)} "
+                    f"columns={list(df.columns)}"
+                )
                 print(f"[OKX SPOT] {symbol} {timeframe} SUCCESS, {len(df)} candles")
                 return df
             elif code == "51001":
@@ -110,6 +124,12 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
             res_json = resp.json()
             code = res_json.get("code")
             data = res_json.get("data", [])
+            print(
+                f"[OKX DEBUG] {symbol} {timeframe} (SWAP) "
+                f"code={code} "
+                f"data_type={type(data).__name__} "
+                f"data_len={len(data) if isinstance(data, list) else 'N/A'}"
+            )
             if code == "0" and isinstance(data, list) and len(data) > 0:
                 df = pd.DataFrame(data, columns=[
                     'timestamp', 'open', 'high', 'low', 'close', 'volume',
@@ -123,6 +143,11 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     return pd.DataFrame()
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
+                print(
+                    f"[OKX DEBUG] {symbol} {timeframe} (SWAP) "
+                    f"RETURNING DF rows={len(df)} "
+                    f"columns={list(df.columns)}"
+                )
                 print(f"[OKX SWAP] {symbol} {timeframe} SUCCESS, {len(df)} candles")
                 return df
             else:
@@ -176,7 +201,6 @@ def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
         print(f"[WARN] No timestamp_dt column, using last candle")
         return len(df) - 1
 
-    # For 1H and 4H, use the last candle (less strict)
     if timeframe in ["1H", "4H"]:
         print(f"[COMPLETED] Forcing last candle for {timeframe} (index {len(df)-1})")
         return len(df) - 1
@@ -755,11 +779,19 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
 
 
 def _process_symbol_tf(symbol: str, tf: str):
+    # ----- DIAGNOSTIC PRINT BEFORE FETCH -----
+    print(f"[PIPELINE DEBUG] {symbol} {tf} calling fetch_ohlcv()")
     if is_unsupported(symbol):
         return None, "UNSUPPORTED"
     df = fetch_ohlcv(symbol, tf)
+    # ----- DIAGNOSTIC PRINT AFTER FETCH -----
+    print(
+        f"[PIPELINE DEBUG] {symbol} {tf} "
+        f"fetch returned rows={len(df)} empty={df.empty}"
+    )
     if df.empty:
         return None, "DATA UNAVAILABLE"
+    print(f"[PIPELINE DEBUG] {symbol} {tf} ENTERING analyze_level_battle()")
     return analyze_level_battle(df, symbol, tf)
 
 
