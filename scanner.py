@@ -1,249 +1,131 @@
-import threading
 import numpy as np
 import pandas as pd
-import requests
+from datetime import datetime, timezone
 
-# ===== CONFIGURATION =====
-DEBUG = True
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-}
+def find_pivots(df, window=3):
+    """Identifies local swing highs and swing lows."""
+    df = df.copy()
+    df['pivot_high'] = False
+    df['pivot_low'] = False
+    
+    for i in range(window, len(df) - window):
+        high_window = df['high'].iloc[i - window : i + window + 1]
+        low_window = df['low'].iloc[i - window : i + window + 1]
+        
+        if df['high'].iloc[i] == high_window.max():
+            df.loc[df.index[i], 'pivot_high'] = True
+            
+        if df['low'].iloc[i] == low_window.min():
+            df.loc[df.index[i], 'pivot_low'] = True
+            
+    return df
 
-UNSUPPORTED_SYMBOLS = set()
-UNSUPPORTED_LOCK = threading.Lock()
-
-
-def is_unsupported(symbol: str) -> bool:
-    with UNSUPPORTED_LOCK:
-        return symbol in UNSUPPORTED_SYMBOLS
-
-
-def mark_unsupported(symbol: str):
-    with UNSUPPORTED_LOCK:
-        UNSUPPORTED_SYMBOLS.add(symbol)
-
-
-def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100) -> pd.DataFrame:
-    """Fetches OHLCV data with strict 3s timeouts and failover safety."""
-    if is_unsupported(symbol):
-        return pd.DataFrame()
-
-    clean_sym = symbol.replace("_", "").replace("-", "").upper()
-    if not clean_sym.endswith("USDT"):
-        clean_sym += "USDT"
-
-    # 1. Primary Attempt: OKX
-    okx_sym = f"{clean_sym[:-4]}-USDT"
-    okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
-    okx_bar = okx_tf_map.get(timeframe.upper(), "15m")
-    okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
-
-    try:
-        resp = requests.get(okx_url, headers=HEADERS, timeout=3)
-        if resp.status_code == 200:
-            res_json = resp.json()
-            if res_json.get("code") == "0" and res_json.get("data"):
-                df = pd.DataFrame(res_json["data"], columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'volCcy', 'volCcyQuote', 'confirm'
-                ])
-                df = df.iloc[::-1].reset_index(drop=True)
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = df[col].astype(float)
-                return df
-            elif res_json.get("code") == "51001":
-                mark_unsupported(symbol)
-                return pd.DataFrame()
-    except Exception:
-        pass
-
-    # 2. Failover Attempt: MEXC
-    mexc_sym = clean_sym
-    mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
-    mexc_bar = mexc_tf_map.get(timeframe.upper(), "15m")
-    mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={mexc_sym}&interval={mexc_bar}&limit={limit}"
-
-    try:
-        resp = requests.get(mexc_url, headers=HEADERS, timeout=3)
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, list) and len(data) > 0:
-                parsed = [row[:6] for row in data if len(row) >= 6]
-                if parsed:
-                    df = pd.DataFrame(parsed, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                    for col in ['open', 'high', 'low', 'close', 'volume']:
-                        df[col] = df[col].astype(float)
-                    return df
-    except Exception:
-        pass
-
-    return pd.DataFrame()
-
-
-def find_validated_range(df: pd.DataFrame, lookback=40):
-    """Detects horizontal ranges purely through price containment and touches."""
-    try:
-        if df.empty or len(df) < lookback:
-            return None
-
-        recent_df = df.tail(lookback).copy()
-        highs = recent_df['high'].values
-        lows = recent_df['low'].values
-        closes = recent_df['close'].values
-
-        p_high = float(np.percentile(highs, 95))
-        p_low = float(np.percentile(lows, 5))
-
-        v_high = p_high if np.sum(highs > p_high) <= 1 else float(np.max(highs))
-        v_low = p_low if np.sum(lows < p_low) <= 1 else float(np.min(lows))
-
-        r_height = v_high - v_low
-        if r_height <= 0 or v_low <= 0:
-            return None
-
-        range_width_pct = (r_height / v_low) * 100.0
-        if range_width_pct < 0.3 or range_width_pct > 20.0:
-            return None
-
-        # Time-separated touch verification
-        touch_tolerance = r_height * 0.12
-        upper_touches, lower_touches = 0, 0
-        last_upper_idx, last_lower_idx = -10, -10
-
-        for i in range(len(highs)):
-            if (v_high - highs[i]) <= touch_tolerance and (i - last_upper_idx >= 3):
-                upper_touches += 1
-                last_upper_idx = i
-            if (lows[i] - v_low) <= touch_tolerance and (i - last_lower_idx >= 3):
-                lower_touches += 1
-                last_lower_idx = i
-
-        if upper_touches < 2 or lower_touches < 2:
-            return None
-
-        c_price = closes[-1]
-        if c_price < v_low or c_price > v_high:
-            return None
-
-        return {
-            'support': v_low,
-            'resistance': v_high,
-            'support_touches': lower_touches,
-            'resistance_touches': upper_touches,
-            'range_status': 'VALIDATED',
-            'range_width_percent': round(range_width_pct, 2)
-        }
-    except Exception:
+def analyze_symbol_structure(df_raw, symbol, timeframe):
+    """
+    Analyzes price structure for:
+    1. Pure Range (Flat Support + Flat Resistance)
+    2. Ascending Triangle (Flat Resistance + Higher Lows)
+    3. Descending Triangle (Flat Support + Lower Highs)
+    """
+    if df_raw is None or len(df_raw) < 30:
         return None
+        
+    df = find_pivots(df_raw.copy())
+    recent = df.tail(40)
+    
+    current_price = float(recent['close'].iloc[-1])
+    
+    # Get recent pivot points
+    pivot_highs = recent[recent['pivot_high']]
+    pivot_lows = recent[recent['pivot_low']]
+    
+    # Default levels based on maximum extremes
+    support_level = float(recent['low'].min())
+    resistance_level = float(recent['high'].max())
+    
+    side = "NEUTRAL"
+    signal = "RANGE BOUND"
+    reason = "Price is consolidating inside horizontal boundaries."
+    
+    # 1. Check for Flat Horizontal Resistance (Ceiling)
+    flat_resistance = False
+    if len(pivot_highs) >= 2:
+        high_vals = pivot_highs['high'].values[-3:]
+        max_h, min_h = np.max(high_vals), np.min(high_vals)
+        # If peaks are within 0.4% tolerance, resistance is flat
+        if (max_h - min_h) / max_h <= 0.004:
+            flat_resistance = True
+            resistance_level = float(np.mean(high_vals))
 
+    # 2. Check for Flat Horizontal Support (Floor)
+    flat_support = False
+    if len(pivot_lows) >= 2:
+        low_vals = pivot_lows['low'].values[-3:]
+        max_l, min_l = np.max(low_vals), np.min(low_vals)
+        # If troughs are within 0.4% tolerance, support is flat
+        if (max_l - min_l) / min_l <= 0.004:
+            flat_support = True
+            support_level = float(np.mean(low_vals))
 
-def evaluate_support_battle(df: pd.DataFrame, support: float):
-    try:
-        if df.empty or support <= 0:
-            return {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "No data"}
+    # Pattern Detection & Battle Logic
+    if flat_resistance and len(pivot_lows) >= 2:
+        low_vals = pivot_lows['low'].values
+        # Check for Higher Lows -> Ascending Triangle
+        if len(low_vals) >= 2 and low_vals[-1] > low_vals[0]:
+            side = "BUYERS"
+            signal = "BREAKOUT IMMINENT"
+            reason = "Buyers are winning at resistance; breakout pressure is building."
+            support_level = float(low_vals[-1]) # Set support to latest higher low
 
-        c_price = float(df.iloc[-1]['close'])
-        if c_price < support:
-            return {"side": "SELLERS", "signal": "BREAKDOWN CONFIRMED", "score": 10, "reason": "Price closed below support."}
+    elif flat_support and len(pivot_highs) >= 2:
+        high_vals = pivot_highs['high'].values
+        # Check for Lower Highs -> Descending Triangle
+        if len(high_vals) >= 2 and high_vals[-1] < high_vals[0]:
+            side = "SELLERS"
+            signal = "BREAKDOWN IMMINENT"
+            reason = "Sellers pressing support; breakdown pressure is building."
+            resistance_level = float(high_vals[-1]) # Set resistance to latest lower high
 
-        recent = df.tail(6)
-        buyer_score, seller_score = 0, 0
-
-        for _, row in recent.iterrows():
-            c_range = row['high'] - row['low']
-            if c_range == 0:
-                continue
-            close_pos = (row['close'] - row['low']) / c_range
-            if row['close'] > row['open'] and close_pos > 0.6:
-                buyer_score += 2
-            elif row['close'] < row['open'] and close_pos < 0.4:
-                seller_score += 2
-
-        if seller_score > buyer_score:
-            return {"side": "SELLERS", "signal": "BREAKDOWN IMMINENT", "score": seller_score, "reason": "Selling pressure at support."}
-        elif buyer_score > seller_score:
-            return {"side": "BUYERS", "signal": "SUPPORT HOLDING", "score": buyer_score, "reason": "Buyers defending support."}
-
-        return {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "Balanced at support."}
-    except Exception:
-        return {"side": "NEUTRAL", "signal": "ERROR", "score": 0, "reason": "Evaluation failed"}
-
-
-def evaluate_resistance_battle(df: pd.DataFrame, resistance: float):
-    try:
-        if df.empty or resistance <= 0:
-            return {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "No data"}
-
-        c_price = float(df.iloc[-1]['close'])
-        if c_price > resistance:
-            return {"side": "BUYERS", "signal": "BREAKOUT CONFIRMED", "score": 10, "reason": "Price closed above resistance."}
-
-        recent = df.tail(6)
-        buyer_score, seller_score = 0, 0
-
-        for _, row in recent.iterrows():
-            c_range = row['high'] - row['low']
-            if c_range == 0:
-                continue
-            close_pos = (row['close'] - row['low']) / c_range
-            if row['close'] > row['open'] and close_pos > 0.6:
-                buyer_score += 2
-            elif row['close'] < row['open'] and close_pos < 0.4:
-                seller_score += 2
-
-        if buyer_score > seller_score:
-            return {"side": "BUYERS", "signal": "BREAKOUT IMMINENT", "score": buyer_score, "reason": "Buying pressure at resistance."}
-        elif seller_score > buyer_score:
-            return {"side": "SELLERS", "signal": "RESISTANCE HOLDING", "score": seller_score, "reason": "Sellers defending resistance."}
-
-        return {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "Balanced at resistance."}
-    except Exception:
-        return {"side": "NEUTRAL", "signal": "ERROR", "score": 0, "reason": "Evaluation failed"}
-
-
-def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
-    """Executes range analysis strictly based on price action boundaries."""
-    try:
-        if df.empty or len(df) < 30:
-            return None, "INSUFFICIENT DATA"
-
-        val_range = find_validated_range(df, lookback=40)
-        if val_range is None:
-            return None, "NO VALID RANGE"
-
-        c_price = float(df.iloc[-1]['close'])
-        support = val_range['support']
-        resistance = val_range['resistance']
-
-        if abs(c_price - support) < abs(c_price - resistance):
-            battle_res = evaluate_support_battle(df, support)
+    elif flat_resistance or flat_support:
+        # Standard horizontal range close to boundary
+        if abs(current_price - resistance_level) < abs(current_price - support_level):
+            side = "BUYERS"
+            signal = "TESTING RESISTANCE"
+            reason = "Price is pressing flat resistance ceiling."
         else:
-            battle_res = evaluate_resistance_battle(df, resistance)
+            side = "BUYERS"
+            signal = "SUPPORT HOLDING"
+            reason = "Price is holding flat support floor."
 
-        return {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "price": c_price,
-            "support": support,
-            "resistance": resistance,
-            "range_data": val_range,
-            "battle": battle_res
-        }, "SUCCESS"
-    except Exception:
-        return None, "ERROR"
+    # Distance calculations
+    dist_to_res = abs(current_price - resistance_level)
+    dist_to_sup = abs(current_price - support_level)
+    
+    if dist_to_res < dist_to_sup:
+        testing_level = "RESISTANCE"
+        level_price = resistance_level
+        distance_pct = round((dist_to_res / current_price) * 100, 2)
+    else:
+        testing_level = "SUPPORT"
+        level_price = support_level
+        distance_pct = round((dist_to_sup / current_price) * 100, 2)
 
+    # Format decimals based on price scale
+    decimals = 4 if current_price < 1 else 2
 
-def _process_symbol_tf(symbol: str, timeframe: str):
-    """Fail-safe worker function. Always returns a 2-element tuple (result, status)."""
-    try:
-        if is_unsupported(symbol):
-            return None, "UNSUPPORTED"
-
-        df = fetch_ohlcv(symbol, timeframe)
-        if df.empty:
-            return None, "FETCH_FAILED"
-
-        result, status = analyze_level_battle(df, symbol, timeframe)
-        return result, status
-    except Exception as e:
-        return None, f"EXCEPTION: {str(e)}"
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "price": round(current_price, decimals),
+        "support": round(support_level, decimals),
+        "resistance": round(resistance_level, decimals),
+        "testing_level": testing_level,
+        "level_price": round(level_price, decimals),
+        "distance_pct": distance_pct,
+        "updated_at": datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
+        "battle": {
+            "side": side,
+            "signal": signal,
+            "reason": reason
+        }
+    }
