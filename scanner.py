@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 from datetime import datetime, timezone
 
-# Required imports for app.py
+# Required exports for app.py
 UNSUPPORTED_SYMBOLS = set()
 
 def is_unsupported(symbol):
@@ -73,8 +73,8 @@ def analyze_symbol_structure(df_raw, symbol, timeframe):
     """
     Analyzes price structure for:
     1. Pure Range (Flat Support + Flat Resistance)
-    2. Ascending Triangle (Flat Resistance + Rising Support)
-    3. Descending Triangle (Flat Support + Falling Resistance)
+    2. Ascending Triangle (Flat Resistance + Higher Lows)
+    3. Descending Triangle (Flat Support + Lower Highs)
     """
     if df_raw is None or len(df_raw) < 20:
         return None
@@ -173,8 +173,16 @@ def analyze_symbol_structure(df_raw, symbol, timeframe):
     }
 
 def _process_symbol_tf(symbol, timeframe):
-    """Main worker entrypoint called directly by app.py."""
-    df = fetch_klines(symbol, timeframe)
-    if df is None or df.empty:
-        return None
-    return analyze_symbol_structure(df, symbol, timeframe)
+    """Main worker entrypoint expected by app.py (returns tuple: data, error)."""
+    try:
+        df = fetch_klines(symbol, timeframe)
+        if df is None or df.empty:
+            return None, f"Failed to fetch klines for {symbol}"
+            
+        result = analyze_symbol_structure(df, symbol, timeframe)
+        if result is None:
+            return None, f"Structure analysis failed for {symbol}"
+            
+        return result, None  # Unpacks cleanly into (data, err)
+    except Exception as e:
+        return None, str(e)
