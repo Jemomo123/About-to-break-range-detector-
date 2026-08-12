@@ -1,6 +1,55 @@
 import numpy as np
 import pandas as pd
+import requests
 from datetime import datetime, timezone
+
+# Required imports for app.py
+UNSUPPORTED_SYMBOLS = set()
+
+def is_unsupported(symbol):
+    return symbol in UNSUPPORTED_SYMBOLS
+
+def fetch_klines(symbol, timeframe="15m", limit=60):
+    """Fetches market candles from public REST API."""
+    tf_map = {
+        "5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h",
+        "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"
+    }
+    interval = tf_map.get(timeframe, "15m")
+    
+    # Try Futures endpoint first
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    try:
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            df = pd.DataFrame(data, columns=[
+                'open_time', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'qav', 'num_trades', 'taker_base_vol', 'taker_quote_vol', 'ignore'
+            ])
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = df[col].astype(float)
+            return df
+    except Exception:
+        pass
+
+    # Fallback to Spot endpoint
+    url_spot = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    try:
+        resp = requests.get(url_spot, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            df = pd.DataFrame(data, columns=[
+                'open_time', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'qav', 'num_trades', 'taker_base_vol', 'taker_quote_vol', 'ignore'
+            ])
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = df[col].astype(float)
+            return df
+    except Exception:
+        pass
+
+    return None
 
 def find_pivots(df, window=3):
     """Identifies local swing highs and swing lows."""
@@ -24,22 +73,20 @@ def analyze_symbol_structure(df_raw, symbol, timeframe):
     """
     Analyzes price structure for:
     1. Pure Range (Flat Support + Flat Resistance)
-    2. Ascending Triangle (Flat Resistance + Higher Lows)
-    3. Descending Triangle (Flat Support + Lower Highs)
+    2. Ascending Triangle (Flat Resistance + Rising Support)
+    3. Descending Triangle (Flat Support + Falling Resistance)
     """
-    if df_raw is None or len(df_raw) < 30:
+    if df_raw is None or len(df_raw) < 20:
         return None
         
-    df = find_pivots(df_raw.copy())
+    df = find_pivots(df_raw)
     recent = df.tail(40)
     
     current_price = float(recent['close'].iloc[-1])
     
-    # Get recent pivot points
     pivot_highs = recent[recent['pivot_high']]
     pivot_lows = recent[recent['pivot_low']]
     
-    # Default levels based on maximum extremes
     support_level = float(recent['low'].min())
     resistance_level = float(recent['high'].max())
     
@@ -47,47 +94,43 @@ def analyze_symbol_structure(df_raw, symbol, timeframe):
     signal = "RANGE BOUND"
     reason = "Price is consolidating inside horizontal boundaries."
     
-    # 1. Check for Flat Horizontal Resistance (Ceiling)
+    # Check for Flat Horizontal Resistance Ceiling
     flat_resistance = False
     if len(pivot_highs) >= 2:
         high_vals = pivot_highs['high'].values[-3:]
         max_h, min_h = np.max(high_vals), np.min(high_vals)
-        # If peaks are within 0.4% tolerance, resistance is flat
-        if (max_h - min_h) / max_h <= 0.004:
+        if (max_h - min_h) / max_h <= 0.005:
             flat_resistance = True
             resistance_level = float(np.mean(high_vals))
 
-    # 2. Check for Flat Horizontal Support (Floor)
+    # Check for Flat Horizontal Support Floor
     flat_support = False
     if len(pivot_lows) >= 2:
         low_vals = pivot_lows['low'].values[-3:]
         max_l, min_l = np.max(low_vals), np.min(low_vals)
-        # If troughs are within 0.4% tolerance, support is flat
-        if (max_l - min_l) / min_l <= 0.004:
+        if (max_l - min_l) / max_l <= 0.005:
             flat_support = True
             support_level = float(np.mean(low_vals))
 
-    # Pattern Detection & Battle Logic
+    # Ascending Triangle: Flat Resistance Ceiling + Higher Lows
     if flat_resistance and len(pivot_lows) >= 2:
         low_vals = pivot_lows['low'].values
-        # Check for Higher Lows -> Ascending Triangle
         if len(low_vals) >= 2 and low_vals[-1] > low_vals[0]:
             side = "BUYERS"
             signal = "BREAKOUT IMMINENT"
             reason = "Buyers are winning at resistance; breakout pressure is building."
-            support_level = float(low_vals[-1]) # Set support to latest higher low
+            support_level = float(low_vals[-1])
 
+    # Descending Triangle: Flat Support Floor + Lower Highs
     elif flat_support and len(pivot_highs) >= 2:
         high_vals = pivot_highs['high'].values
-        # Check for Lower Highs -> Descending Triangle
         if len(high_vals) >= 2 and high_vals[-1] < high_vals[0]:
             side = "SELLERS"
             signal = "BREAKDOWN IMMINENT"
             reason = "Sellers pressing support; breakdown pressure is building."
-            resistance_level = float(high_vals[-1]) # Set resistance to latest lower high
+            resistance_level = float(high_vals[-1])
 
     elif flat_resistance or flat_support:
-        # Standard horizontal range close to boundary
         if abs(current_price - resistance_level) < abs(current_price - support_level):
             side = "BUYERS"
             signal = "TESTING RESISTANCE"
@@ -97,7 +140,7 @@ def analyze_symbol_structure(df_raw, symbol, timeframe):
             signal = "SUPPORT HOLDING"
             reason = "Price is holding flat support floor."
 
-    # Distance calculations
+    # Level & distance math
     dist_to_res = abs(current_price - resistance_level)
     dist_to_sup = abs(current_price - support_level)
     
@@ -110,7 +153,6 @@ def analyze_symbol_structure(df_raw, symbol, timeframe):
         level_price = support_level
         distance_pct = round((dist_to_sup / current_price) * 100, 2)
 
-    # Format decimals based on price scale
     decimals = 4 if current_price < 1 else 2
 
     return {
@@ -129,3 +171,10 @@ def analyze_symbol_structure(df_raw, symbol, timeframe):
             "reason": reason
         }
     }
+
+def _process_symbol_tf(symbol, timeframe):
+    """Main worker entrypoint called directly by app.py."""
+    df = fetch_klines(symbol, timeframe)
+    if df is None or df.empty:
+        return None
+    return analyze_symbol_structure(df, symbol, timeframe)
