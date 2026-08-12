@@ -53,7 +53,6 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 
-# ===== FETCH WITH DIAGNOSTIC LOGS =====
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     if is_unsupported(symbol):
         return pd.DataFrame()
@@ -76,26 +75,59 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
             res_json = resp.json()
             code = res_json.get("code")
             data = res_json.get("data", [])
-            # ----- DIAGNOSTIC PRINT -----
             print(
                 f"[OKX DEBUG] {symbol} {timeframe} "
                 f"code={code} "
                 f"data_type={type(data).__name__} "
                 f"data_len={len(data) if isinstance(data, list) else 'N/A'}"
             )
+
             if code == "0" and isinstance(data, list) and len(data) > 0:
+                # ----- TIMESTAMP DIAGNOSTIC -----
+                if symbol == "ZECUSDT" and timeframe == "5M":
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe}")
+                    print(f"[TIMESTAMP DEBUG] first raw row = {data[0] if data else None}")
+                    print(f"[TIMESTAMP DEBUG] raw timestamp = {data[0][0] if data else None}")
+                    print(f"[TIMESTAMP DEBUG] timestamp type = {type(data[0][0]) if data else None}")
+
+                # Create DataFrame from the raw data
                 df = pd.DataFrame(data, columns=[
                     'timestamp', 'open', 'high', 'low', 'close', 'volume',
                     'volCcy', 'volCcyQuote', 'confirm'
                 ])
                 df = df.iloc[::-1].reset_index(drop=True)
+
+                # ---- Robust timestamp conversion ----
+                # Convert timestamp column to numeric (it may be string or int)
+                df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
+                # Drop rows with invalid timestamp numeric conversion
+                df = df.dropna(subset=['timestamp'])
+                if df.empty:
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} all timestamp values are non-numeric")
+                    return pd.DataFrame()
+
+                # Convert to datetime (assume milliseconds)
                 df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
+                # Count valid/invalid
+                valid_count = df['timestamp_dt'].notna().sum()
+                invalid_count = df['timestamp_dt'].isna().sum()
+                print(
+                    f"[TIMESTAMP DEBUG] {symbol} {timeframe} "
+                    f"valid={valid_count} "
+                    f"invalid={invalid_count} "
+                    f"first={df['timestamp_dt'].iloc[0] if valid_count > 0 else None} "
+                    f"last={df['timestamp_dt'].iloc[-1] if valid_count > 0 else None}"
+                )
+                # Drop rows with invalid timestamp (NaT)
                 df = df.dropna(subset=['timestamp_dt'])
                 if df.empty:
-                    print(f"[OKX SPOT] {symbol} {timeframe} all timestamps invalid, dropping")
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} all timestamps invalid, dropping")
                     return pd.DataFrame()
+
+                # Convert OHLCV columns to float
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
+
                 # ----- DIAGNOSTIC PRINT BEFORE RETURN -----
                 print(
                     f"[OKX DEBUG] {symbol} {timeframe} "
@@ -104,8 +136,6 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 )
                 print(f"[OKX SPOT] {symbol} {timeframe} SUCCESS, {len(df)} candles")
                 return df
-            elif code == "51001":
-                print(f"[OKX SPOT] {symbol} {timeframe} unsupported (51001)")
             else:
                 print(f"[OKX SPOT] {symbol} {timeframe} empty or code {code}")
         else:
@@ -136,10 +166,15 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     'volCcy', 'volCcyQuote', 'confirm'
                 ])
                 df = df.iloc[::-1].reset_index(drop=True)
+                df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
+                df = df.dropna(subset=['timestamp'])
+                if df.empty:
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} (SWAP) all timestamp values non-numeric")
+                    return pd.DataFrame()
                 df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
                 df = df.dropna(subset=['timestamp_dt'])
                 if df.empty:
-                    print(f"[OKX SWAP] {symbol} {timeframe} all timestamps invalid, dropping")
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} (SWAP) all timestamps invalid")
                     return pd.DataFrame()
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
@@ -176,10 +211,15 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     df = pd.DataFrame(parsed, columns=[
                         'timestamp', 'open', 'high', 'low', 'close', 'volume'
                     ])
+                    df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
+                    df = df.dropna(subset=['timestamp'])
+                    if df.empty:
+                        print(f"[MEXC] {symbol} {timeframe} all timestamp values non-numeric")
+                        return pd.DataFrame()
                     df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
                     df = df.dropna(subset=['timestamp_dt'])
                     if df.empty:
-                        print(f"[MEXC] {symbol} {timeframe} all timestamps invalid, dropping")
+                        print(f"[MEXC] {symbol} {timeframe} all timestamps invalid")
                         return pd.DataFrame()
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
@@ -561,6 +601,9 @@ def classify_pattern(df, support, resistance):
 
 
 def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
+    # ----- RANGE ENTRY DEBUG -----
+    print(f"[RANGE ENTRY] {symbol} {timeframe} rows={len(df)}")
+
     if df.empty or len(df) < 30:
         return None, "INSUFFICIENT DATA"
 
@@ -779,19 +822,17 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
 
 
 def _process_symbol_tf(symbol: str, tf: str):
-    # ----- DIAGNOSTIC PRINT BEFORE FETCH -----
     print(f"[PIPELINE DEBUG] {symbol} {tf} calling fetch_ohlcv()")
     if is_unsupported(symbol):
         return None, "UNSUPPORTED"
     df = fetch_ohlcv(symbol, tf)
-    # ----- DIAGNOSTIC PRINT AFTER FETCH -----
     print(
         f"[PIPELINE DEBUG] {symbol} {tf} "
         f"fetch returned rows={len(df)} empty={df.empty}"
     )
     if df.empty:
         return None, "DATA UNAVAILABLE"
-    print(f"[PIPELINE DEBUG] {symbol} {tf} ENTERING analyze_level_battle()")
+    print(f"[PIPELINE DEBUG] {symbol} {tf} ENTERING analyze_level_battle rows={len(df)} empty={df.empty}")
     return analyze_level_battle(df, symbol, tf)
 
 
