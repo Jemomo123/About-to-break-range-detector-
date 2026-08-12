@@ -6,7 +6,7 @@ import threading
 
 # ===== CONFIGURATION =====
 DEBUG = True
-PROXIMITY_THRESHOLD = 1.5  # 1.5% – battle logic only runs within this %
+PROXIMITY_THRESHOLD = 1.5
 # =========================
 
 HEADERS = {
@@ -27,6 +27,7 @@ def mark_unsupported(symbol):
         UNSUPPORTED_SYMBOLS.add(symbol)
 
 
+# ===== OKX Primary with Both Spot and Swap =====
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     if is_unsupported(symbol):
         return pd.DataFrame()
@@ -35,13 +36,14 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     if not clean_sym.endswith("USDT"):
         clean_sym += "USDT"
 
-    okx_sym = f"{clean_sym[:-4]}-USDT"
+    # ---- 1. Try OKX Spot (BTC-USDT) ----
+    okx_spot_sym = f"{clean_sym[:-4]}-USDT"
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
     okx_bar = okx_tf_map.get(timeframe, "15m")
-
-    okx_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={okx_bar}&limit={limit}"
+    okx_spot_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_spot_sym}&bar={okx_bar}&limit={limit}"
+    print(f"[OKX SPOT] Fetching {clean_sym} {timeframe} from {okx_spot_url}")
     try:
-        resp = requests.get(okx_url, headers=HEADERS, timeout=10)
+        resp = requests.get(okx_spot_url, headers=HEADERS, timeout=8)
         if resp.status_code == 200:
             res_json = resp.json()
             code = res_json.get("code")
@@ -54,19 +56,50 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 df = df.iloc[::-1].reset_index(drop=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
+                print(f"[OKX SPOT] Downloaded {len(df)} candles for {clean_sym}")
                 return df
-            elif code == "51001":
-                mark_unsupported(symbol)
-                return pd.DataFrame()
-    except Exception:
-        pass
+            else:
+                print(f"[OKX SPOT] Empty data or code {code} for {clean_sym}")
+        else:
+            print(f"[OKX SPOT] HTTP {resp.status_code} for {clean_sym}")
+    except Exception as e:
+        print(f"[OKX SPOT] Exception: {e}")
 
+    # ---- 2. Try OKX Swap (BTC-USDT-SWAP) ----
+    okx_swap_sym = f"{clean_sym[:-4]}-USDT-SWAP"
+    okx_swap_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_swap_sym}&bar={okx_bar}&limit={limit}"
+    print(f"[OKX SWAP] Fetching {clean_sym} {timeframe} from {okx_swap_url}")
+    try:
+        resp = requests.get(okx_swap_url, headers=HEADERS, timeout=8)
+        if resp.status_code == 200:
+            res_json = resp.json()
+            code = res_json.get("code")
+            data = res_json.get("data", [])
+            if code == "0" and isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data, columns=[
+                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                    'volCcy', 'volCcyQuote', 'confirm'
+                ])
+                df = df.iloc[::-1].reset_index(drop=True)
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = df[col].astype(float)
+                print(f"[OKX SWAP] Downloaded {len(df)} candles for {clean_sym}")
+                return df
+            else:
+                print(f"[OKX SWAP] Empty data or code {code} for {clean_sym}")
+        else:
+            print(f"[OKX SWAP] HTTP {resp.status_code} for {clean_sym}")
+    except Exception as e:
+        print(f"[OKX SWAP] Exception: {e}")
+
+    # ---- 3. Fallback: MEXC ----
     mexc_sym = clean_sym
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
     mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={mexc_sym}&interval={mexc_bar}&limit={limit}"
+    print(f"[MEXC] Fetching {clean_sym} {timeframe}")
     try:
-        resp = requests.get(mexc_url, headers=HEADERS, timeout=10)
+        resp = requests.get(mexc_url, headers=HEADERS, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
@@ -80,12 +113,22 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     ])
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
+                    print(f"[MEXC] Downloaded {len(df)} candles for {clean_sym}")
                     return df
-    except Exception:
-        pass
+            else:
+                print(f"[MEXC] Empty data for {clean_sym}")
+        else:
+            print(f"[MEXC] HTTP {resp.status_code} for {clean_sym}")
+    except Exception as e:
+        print(f"[MEXC] Exception: {e}")
 
+    print(f"[WARN] All sources failed for {symbol} {timeframe}")
     return pd.DataFrame()
 
+
+# ---- The rest of the functions are unchanged from the previous clean version ----
+# (find_swings, cluster_prices, detect_range_simple, etc.)
+# They are identical to the previous working version before the Binance change.
 
 def find_swings(highs, lows, lookback=5):
     swing_highs = []
