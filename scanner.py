@@ -44,7 +44,6 @@ def set_range(symbol, timeframe, range_data):
 
 
 def get_timeframe_seconds(timeframe: str) -> int:
-    """Convert timeframe string to seconds."""
     mapping = {
         "5M": 300,
         "15M": 900,
@@ -54,9 +53,7 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 
-# ===== IMPROVED FETCH WITH LOGGING =====
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
-    """OKX primary (spot + swap), MEXC fallback. No Binance."""
     if is_unsupported(symbol):
         return pd.DataFrame()
 
@@ -84,11 +81,17 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     'volCcy', 'volCcyQuote', 'confirm'
                 ])
                 df = df.iloc[::-1].reset_index(drop=True)
-                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
+                df = df.dropna(subset=['timestamp_dt'])
+                if df.empty:
+                    print(f"[OKX SPOT] {symbol} {timeframe} all timestamps invalid, dropping")
+                    return pd.DataFrame()
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
                 print(f"[OKX SPOT] {symbol} {timeframe} SUCCESS, {len(df)} candles")
                 return df
+            elif code == "51001":
+                print(f"[OKX SPOT] {symbol} {timeframe} unsupported (51001)")
             else:
                 print(f"[OKX SPOT] {symbol} {timeframe} empty or code {code}")
         else:
@@ -113,7 +116,11 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     'volCcy', 'volCcyQuote', 'confirm'
                 ])
                 df = df.iloc[::-1].reset_index(drop=True)
-                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
+                df = df.dropna(subset=['timestamp_dt'])
+                if df.empty:
+                    print(f"[OKX SWAP] {symbol} {timeframe} all timestamps invalid, dropping")
+                    return pd.DataFrame()
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
                 print(f"[OKX SWAP] {symbol} {timeframe} SUCCESS, {len(df)} candles")
@@ -125,8 +132,8 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     except Exception as e:
         print(f"[OKX SWAP] {symbol} {timeframe} exception: {e}")
 
-    # ---- 3. MEXC Fallback ----
-    mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h"}
+    # ---- 3. MEXC Fallback (60m for 1H) ----
+    mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "60m", "4H": "4h"}
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
     mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={clean_sym}&interval={mexc_bar}&limit={limit}"
     print(f"[MEXC] {symbol} {timeframe}: {mexc_url}")
@@ -144,7 +151,11 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     df = pd.DataFrame(parsed, columns=[
                         'timestamp', 'open', 'high', 'low', 'close', 'volume'
                     ])
-                    df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                    df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
+                    df = df.dropna(subset=['timestamp_dt'])
+                    if df.empty:
+                        print(f"[MEXC] {symbol} {timeframe} all timestamps invalid, dropping")
+                        return pd.DataFrame()
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
                     print(f"[MEXC] {symbol} {timeframe} SUCCESS, {len(df)} candles")
@@ -160,9 +171,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     return pd.DataFrame()
 
 
-# ===== IMPROVED COMPLETED-CANDLE HANDLING =====
 def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
-    """Return the index of the last completed candle based on timestamp."""
     if df.empty or 'timestamp_dt' not in df.columns:
         print(f"[WARN] No timestamp_dt column, using last candle")
         return len(df) - 1
@@ -177,7 +186,6 @@ def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
         now = datetime.now(timezone.utc)
         tf_seconds = get_timeframe_seconds(timeframe)
 
-        # Use 50% margin for smaller timeframes
         if (now - last_ts).total_seconds() < tf_seconds * 0.5:
             idx = len(df) - 2 if len(df) >= 2 else 0
             print(f"[COMPLETED] Using previous candle at index {idx} for {timeframe}")
@@ -532,21 +540,18 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     if df.empty or len(df) < 30:
         return None, "INSUFFICIENT DATA"
 
-    # ---- Determine completed candle index ----
     completed_idx = get_completed_candle_index(df, timeframe)
     if completed_idx < 0 or completed_idx >= len(df):
         print(f"[WARN] Invalid completed_idx {completed_idx}, using last candle")
         completed_idx = len(df) - 1
 
-    # Use only up to the completed index for all calculations
     curr_close = float(df['close'].iloc[completed_idx])
-    last_row = df.iloc[completed_idx]  # for penetration detection
+    last_row = df.iloc[completed_idx]
 
     highs = df['high'].values
     lows = df['low'].values
     closes = df['close'].values
 
-    # ---- 1. Detect candidate range using all available data ----
     support_struct, resistance_struct, sup_touches, res_touches, is_accepted, acceptance_rate, _ = find_structural_levels(
         highs=highs, lows=lows, closes=closes,
         lookback=40, tolerance_pct=0.7, min_touches=2, acceptance_threshold=60.0
@@ -583,10 +588,8 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         else:
             candidate = None
 
-    # ---- 2. Get existing stored range ----
     existing = get_existing_range(symbol, timeframe)
 
-    # ---- 3. Decision logic ----
     active_support = 0.0
     active_resistance = 0.0
     active_status = "NO VALID RANGE"
@@ -597,7 +600,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     previous_resistance = 0.0
 
     if existing is None:
-        # No range stored – try to establish one
         if candidate is not None:
             candidate['range_start_index'] = completed_idx
             candidate['range_age'] = 0
@@ -615,13 +617,11 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
             active_status = "NO VALID RANGE"
             active_pattern = "NO CLEAR RANGE"
     else:
-        # Existing range exists – use it for monitoring
         support = existing['support']
         resistance = existing['resistance']
         range_status = existing.get('range_status', 'STRUCTURAL')
         invalidation_info = existing.get('invalidation_info')
 
-        # Check if already invalidated
         if range_status == 'INVALIDATED':
             invalidation_candle = invalidation_info.get('candle_index', 0) if invalidation_info else 0
             if completed_idx > invalidation_candle + 1:
@@ -647,13 +647,11 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 active_status = "INVALIDATED"
                 active_pattern = "NO CLEAR RANGE"
         else:
-            # Range is active – compare close against stored levels
             if support <= curr_close <= resistance:
                 active_support = support
                 active_resistance = resistance
                 active_status = range_status
                 active_pattern = existing.get('pattern_type', 'CONSOLIDATION')
-                # Update age only if a new completed candle has been processed
                 last_processed = existing.get('last_processed_candle_index', -1)
                 if completed_idx != last_processed:
                     existing['range_age'] = existing.get('range_age', 0) + 1
@@ -680,7 +678,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 active_status = "INVALIDATED"
                 active_pattern = "NO CLEAR RANGE"
 
-    # ---- Penetration detection (only for active ranges) ----
     penetration_type = "NONE"
     penetration_explanation = ""
     if active_status != "INVALIDATED" and active_support > 0 and active_resistance > 0:
@@ -691,7 +688,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
             penetration_type = "RESISTANCE PENETRATION"
             penetration_explanation = f"Resistance penetrated: candle high ({last_row['high']:.2f}) traded above active resistance ({active_resistance:.2f}) but closed back below it."
 
-    # ---- Battle logic (only when active range exists) ----
     if active_support > 0 and active_resistance > 0:
         dist_to_res = (active_resistance - curr_close) / curr_close * 100
         dist_to_sup = (curr_close - active_support) / curr_close * 100
@@ -718,7 +714,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         distance = 0.0
         result = {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "No active range."}
 
-    # ---- Logging ----
     if DEBUG:
         print(f"RANGE DECISION {symbol} {timeframe}")
         print(f"  Active range: {active_support:.2f} / {active_resistance:.2f}")
