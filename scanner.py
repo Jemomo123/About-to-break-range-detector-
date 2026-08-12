@@ -12,9 +12,6 @@ HEADERS = {
 UNSUPPORTED_SYMBOLS = set()
 UNSUPPORTED_LOCK = threading.Lock()
 
-RANGE_STATE = {}
-RANGE_STATE_LOCK = threading.Lock()
-
 
 def is_unsupported(symbol: str) -> bool:
     with UNSUPPORTED_LOCK:
@@ -27,7 +24,7 @@ def mark_unsupported(symbol: str):
 
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100) -> pd.DataFrame:
-    """Fetches OHLCV data with strict 3s timeouts and fallback safety."""
+    """Fetches OHLCV data with strict 3s timeouts and failover safety."""
     if is_unsupported(symbol):
         return pd.DataFrame()
 
@@ -83,32 +80,8 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 100) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def is_actively_trending(df: pd.DataFrame, sma_fast=20, sma_slow=50) -> bool:
-    """Safe trend filter that doesn't crash on short DataFrames."""
-    try:
-        if df.empty or len(df) < sma_slow:
-            return False
-
-        closes = df['close']
-        sma20 = closes.rolling(sma_fast).mean().dropna().values
-        sma50 = closes.rolling(sma_slow).mean().dropna().values
-
-        if len(sma20) < 5 or len(sma50) < 1:
-            return False
-
-        sma20_slope = (sma20[-1] - sma20[-5]) / sma20[-5] * 100.0 if sma20[-5] > 0 else 0
-        c_price = closes.iloc[-1]
-
-        is_markdown = (sma20_slope < -0.3) and (c_price < sma20[-1]) and (sma20[-1] < sma50[-1])
-        is_markup = (sma20_slope > 0.3) and (c_price > sma20[-1]) and (sma20[-1] > sma50[-1])
-
-        return is_markdown or is_markup
-    except Exception:
-        return False
-
-
 def find_validated_range(df: pd.DataFrame, lookback=40):
-    """Detects ranges safely without index errors."""
+    """Detects horizontal ranges purely through price containment and touches."""
     try:
         if df.empty or len(df) < lookback:
             return None
@@ -229,13 +202,10 @@ def evaluate_resistance_battle(df: pd.DataFrame, resistance: float):
 
 
 def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
-    """Executes main scanner logic safely."""
+    """Executes range analysis strictly based on price action boundaries."""
     try:
         if df.empty or len(df) < 30:
             return None, "INSUFFICIENT DATA"
-
-        if is_actively_trending(df):
-            return None, "TRENDING / NO RANGE"
 
         val_range = find_validated_range(df, lookback=40)
         if val_range is None:
@@ -264,10 +234,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
 
 
 def _process_symbol_tf(symbol: str, timeframe: str):
-    """
-    Fail-safe worker function. 
-    Guarantees returning a (result, status) tuple to prevent unpack errors in app.py.
-    """
+    """Fail-safe worker function. Always returns a 2-element tuple (result, status)."""
     try:
         if is_unsupported(symbol):
             return None, "UNSUPPORTED"
