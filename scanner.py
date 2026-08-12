@@ -1,4 +1,3 @@
-
 import requests
 import pandas as pd
 import numpy as np
@@ -538,8 +537,8 @@ def classify_pattern(df, support, resistance):
         return "CONSOLIDATION"
 
 
-def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
-    print(f"[RANGE ENTRY] {symbol} {timeframe} rows={len(df)}")
+def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id: str = None):
+    print(f"[RANGE ENTRY] {symbol} {timeframe} scan_id={scan_id} rows={len(df)}")
 
     if df.empty or len(df) < 30:
         return None, "INSUFFICIENT DATA"
@@ -600,7 +599,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
             candidate = None
             source = "NONE"
 
-    print(f"[RANGE SOURCE] {symbol} {timeframe} = {source}")
+    print(f"[RANGE SOURCE] {symbol} {timeframe} scan_id={scan_id} = {source}")
 
     # ---- 4. Validate candidate range ----
     is_valid = False
@@ -609,12 +608,12 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         resistance_val = candidate['resistance']
         if support_val > 0 and resistance_val > 0 and resistance_val > support_val:
             range_width_pct = ((resistance_val - support_val) / support_val) * 100
-            if range_width_pct > 0.000001:  # min meaningful width
+            if range_width_pct > 0.000001:
                 is_valid = True
             else:
-                print(f"[RANGE INVALID] {symbol} {timeframe} width too small: {range_width_pct:.8f}%")
+                print(f"[RANGE INVALID] {symbol} {timeframe} scan_id={scan_id} width too small: {range_width_pct:.8f}%")
         else:
-            print(f"[RANGE INVALID] {symbol} {timeframe} non-positive or inverted range: support={support_val:.8f}, resistance={resistance_val:.8f}")
+            print(f"[RANGE INVALID] {symbol} {timeframe} scan_id={scan_id} non-positive or inverted range: support={support_val:.8f}, resistance={resistance_val:.8f}")
 
     if not is_valid:
         candidate = None
@@ -752,28 +751,42 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         result = {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "No active range."}
 
     # ---- 9. Enhanced logging ----
-    if DEBUG:
-        range_width_pct = ((active_resistance - active_support) / active_support * 100) if active_support > 0 and active_resistance > 0 else 0
-        print(f"[RANGE DECISION] {symbol} {timeframe}")
-        print(f"  source={source if source else 'NONE'}")
-        print(f"  selected_candle={selected_candle_time.isoformat()}")
-        print(f"  range_low={active_support:.8f}")
-        print(f"  range_high={active_resistance:.8f}")
-        print(f"  current_close={curr_close:.8f}")
-        print(f"  width_pct={range_width_pct:.4f}%")
-        print(f"  status={active_status}")
-        print(f"  pattern={active_pattern.replace(' ', '_') if active_pattern else 'NONE'}")
-        print(f"  penetration={penetration_type}")
-        if penetration_explanation:
-            print(f"  penetration_detail={penetration_explanation}")
-        if invalidation_direction != "NONE":
-            print(f"  invalidation={invalidation_direction} at {invalidation_price:.8f}")
-        print("---")
+    range_width_pct = ((active_resistance - active_support) / active_support * 100) if active_support > 0 and active_resistance > 0 else 0
+
+    print(f"[RANGE DECISION] {symbol} {timeframe} scan_id={scan_id}")
+    print(f"  source={source if source else 'NONE'}")
+    print(f"  selected_candle={selected_candle_time.isoformat()}")
+    print(f"  range_low={active_support:.8f}")
+    print(f"  range_high={active_resistance:.8f}")
+    print(f"  current_close={curr_close:.8f}")
+    print(f"  width_pct={range_width_pct:.4f}%")
+    print(f"  status={active_status}")
+    print(f"  pattern={active_pattern.replace(' ', '_') if active_pattern else 'NONE'}")
+    print(f"  penetration={penetration_type}")
+    if penetration_explanation:
+        print(f"  penetration_detail={penetration_explanation}")
+    if invalidation_direction != "NONE":
+        print(f"  invalidation={invalidation_direction} at {invalidation_price:.8f}")
+    print("---")
+
+    # ---- 10. FINAL SIGNAL ----
+    print(f"[FINAL SIGNAL] {symbol} {timeframe} scan_id={scan_id}")
+    print(f"  range_low={active_support:.8f}")
+    print(f"  range_high={active_resistance:.8f}")
+    print(f"  current_close={curr_close:.8f}")
+    print(f"  support={active_support:.8f}")
+    print(f"  resistance={active_resistance:.8f}")
+    print(f"  penetration={penetration_type}")
+    print(f"  battle={result['side']}")
+    print(f"  decision={result['signal']}")
+    print(f"  alert={result['reason']}")
+    print("---")
 
     last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     clean_display = symbol.replace("-", "").replace("_", "").upper()
 
-    return {
+    # ---- 11. Build result dictionary ----
+    result_dict = {
         "symbol": clean_display,
         "timeframe": timeframe,
         "curr_close": round(curr_close, 6),
@@ -795,23 +808,41 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         "invalidation_direction": invalidation_direction,
         "invalidation_price": round(invalidation_price, 6) if invalidation_price else 0.0,
         "invalidation_time": existing.get('invalidation_info', {}).get('time', '') if existing and existing.get('invalidation_info') else ''
-    }, None
+    }
+
+    # ---- 12. API RESULT ----
+    print(f"[API RESULT] {symbol} {timeframe} scan_id={scan_id}")
+    print(f"  price={result_dict['curr_close']:.6f}")
+    print(f"  support={result_dict['support']:.6f}")
+    print(f"  resistance={result_dict['resistance']:.6f}")
+    print(f"  decision={result_dict['signal']}")
+    print(f"  alert={result_dict['explanation']}")
+    print(f"  range_low={result_dict['support']:.6f}")
+    print(f"  range_high={result_dict['resistance']:.6f}")
+    print(f"  range_status={result_dict['range_status']}")
+    print(f"  range_source={source if source else 'NONE'}")
+    print("---")
+
+    return result_dict, None
 
 
-def _process_symbol_tf(symbol: str, tf: str):
-    print(f"[PIPELINE DEBUG] {symbol} {tf} calling fetch_ohlcv()")
+def _process_symbol_tf(symbol: str, tf: str, scan_id: str = None):
+    print(f"[PIPELINE DEBUG] {symbol} {tf} scan_id={scan_id} calling fetch_ohlcv()")
     if is_unsupported(symbol):
         return None, "UNSUPPORTED"
     df = fetch_ohlcv(symbol, tf)
-    print(f"[PIPELINE DEBUG] {symbol} {tf} fetch returned rows={len(df)} empty={df.empty}")
+    print(f"[PIPELINE DEBUG] {symbol} {tf} scan_id={scan_id} fetch returned rows={len(df)} empty={df.empty}")
     if df.empty:
         return None, "DATA UNAVAILABLE"
-    print(f"[PIPELINE DEBUG] {symbol} {tf} ENTERING analyze_level_battle")
-    return analyze_level_battle(df, symbol, tf)
+    print(f"[PIPELINE DEBUG] {symbol} {tf} scan_id={scan_id} ENTERING analyze_level_battle")
+    return analyze_level_battle(df, symbol, tf, scan_id)
 
 
 def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
-    # We'll run each timeframe separately and collect summaries
+    # Generate a scan_id for this scan cycle
+    scan_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"[SCAN START] scan_id={scan_id}")
+
     tfs_to_run = ["5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
     all_results = []
     diagnostics = {
@@ -831,7 +862,7 @@ def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
         tf_results = []
         for sym in symbols:
             diagnostics["total_scanned"] += 1
-            match, err = _process_symbol_tf(sym, tf)
+            match, err = _process_symbol_tf(sym, tf, scan_id)
             if match:
                 diagnostics["passed"] += 1
                 tf_results.append(match)
@@ -859,7 +890,7 @@ def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
 
         # Log summary for this timeframe
         if tf in summary:
-            print(f"[RANGE SUMMARY] {tf}")
+            print(f"[RANGE SUMMARY] {tf} scan_id={scan_id}")
             print(f"  total_symbols={len(symbols)}")
             print(f"  valid_ranges={summary[tf]['valid']}")
             print(f"  invalid_ranges={summary[tf]['invalid']}")
