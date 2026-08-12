@@ -81,8 +81,8 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     'volCcy', 'volCcyQuote', 'confirm'
                 ])
                 df = df.iloc[::-1].reset_index(drop=True)
-                # Convert timestamp to datetime for completion check
-                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms')
+                # FIX: make timestamp UTC-aware
+                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
                 return df
@@ -106,7 +106,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     'volCcy', 'volCcyQuote', 'confirm'
                 ])
                 df = df.iloc[::-1].reset_index(drop=True)
-                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms')
+                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
                 return df
@@ -131,7 +131,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                         'timestamp', 'open', 'high', 'low', 'close', 'volume'
                     ])
                     # MEXC timestamp is in milliseconds
-                    df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms')
+                    df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
                     return df
@@ -504,14 +504,10 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
     # ---- Determine completed candle index ----
     completed_idx = get_completed_candle_index(df, timeframe)
     if completed_idx < 0:
-        # If no completed candle, use second last? Actually we should not proceed.
-        # We'll use the last but we'll log a warning.
         print(f"[WARN] No completed candle found for {symbol} {timeframe}, using latest.")
         completed_idx = len(df) - 1
 
     # Use only up to the completed index for all calculations
-    # But we still need full df for structural detection (it uses recent window)
-    # For curr_close and last_row we use the completed candle
     curr_close = float(df['close'].iloc[completed_idx])
     last_row = df.iloc[completed_idx]  # for penetration detection
 
@@ -596,11 +592,9 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
 
         # Check if already invalidated
         if range_status == 'INVALIDATED':
-            # Range is invalidated – wait for new structural range
             invalidation_candle = invalidation_info.get('candle_index', 0) if invalidation_info else 0
-            if completed_idx > invalidation_candle + 1:  # at least one completed candle after invalidation
+            if completed_idx > invalidation_candle + 1:
                 if candidate is not None and candidate.get('range_status') == 'STRUCTURAL':
-                    # New structural range detected after invalidation – accept it
                     candidate['range_start_index'] = completed_idx
                     candidate['range_age'] = 0
                     candidate['last_processed_candle_index'] = completed_idx
@@ -612,13 +606,11 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                     active_status = candidate['range_status']
                     active_pattern = candidate['pattern_type']
                 else:
-                    # Still invalidated
                     active_support = 0.0
                     active_resistance = 0.0
                     active_status = "INVALIDATED"
                     active_pattern = "NO CLEAR RANGE"
             else:
-                # Too soon after invalidation – stay invalidated
                 active_support = 0.0
                 active_resistance = 0.0
                 active_status = "INVALIDATED"
@@ -626,7 +618,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
         else:
             # Range is active – compare close against stored levels
             if support <= curr_close <= resistance:
-                # Price inside – keep active
                 active_support = support
                 active_resistance = resistance
                 active_status = range_status
@@ -634,13 +625,11 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str):
                 # Update age only if a new completed candle has been processed
                 last_processed = existing.get('last_processed_candle_index', -1)
                 if completed_idx != last_processed:
-                    # New candle detected
                     existing['range_age'] = existing.get('range_age', 0) + 1
                     existing['last_processed_candle_index'] = completed_idx
                 existing['range_last_validated'] = completed_idx
                 set_range(symbol, timeframe, existing)
             else:
-                # Price outside – invalidate immediately
                 invalidation_direction = "UPSIDE" if curr_close > resistance else "DOWNSIDE"
                 invalidation_price = curr_close
                 previous_support = support
