@@ -3,6 +3,7 @@ import threading
 from flask import Flask, render_template, request, jsonify
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from scanner import _process_symbol_tf, run_scanner_pipeline
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 
@@ -132,21 +133,19 @@ def sort_results(items):
     return sorted(items, key=sort_key)
 
 def generate_alignment_explanation(symbol, active_tf):
-    # ... (keep your existing alignment logic)
+    # Keep your existing alignment logic
     return "Alignment explanation"
 
 @app.route("/")
 def index():
-    # ---- FIX: get selected timeframe from URL, default to 15M ----
+    # Read selected timeframe from URL, default to 15M
     selected_tf = request.args.get("tf", "15M").upper()
     print(f"[ROUTE] Selected timeframe = {selected_tf}")
 
-    # ---- FIX: pass the selected timeframe to the scanner ----
-    # For the active range (watchlist), we still use the active_tf for cache lookup
-    active_tf = "15M" if selected_tf == "ALL" else selected_tf
-
     # Run the scanner pipeline only for the selected timeframe
     scanner_results, diagnostics = run_scanner_pipeline(DEFAULT_WATCHLIST, timeframe=selected_tf)
+
+    active_tf = "15M" if selected_tf == "ALL" else selected_tf
 
     # Build watchlist rows from cache (for the active timeframe)
     watchlist_rows = []
@@ -188,8 +187,6 @@ def index():
     watchlist_rows = sort_results(watchlist_rows)
 
     # scanner_results already contains the results for the selected timeframe
-    # If selected_tf == "ALL", scanner_results has all timeframes; else only the selected one.
-    # We can still use scanner_results directly.
     return render_template(
         "index.html",
         selected_tf=selected_tf,
