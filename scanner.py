@@ -1,4 +1,4 @@
-# ===== scanner.py – DIAGNOSTIC VERSION =====
+# ===== scanner.py – FINAL DIAGNOSTIC =====
 # Only BTCUSDT, ETHUSDT, SOLUSDT on 15M are scanned.
 # Uses ONLY OKX Futures (Swap) – no fallback.
 # Hard timeouts and detailed logging added.
@@ -32,8 +32,8 @@ CACHE = {}
 CACHE_LOCK = threading.Lock()
 SCAN_READY = False
 
-# ---- FULL WATCHLIST (kept for reference) ----
-FULL_WATCHLIST = [
+# ---- FULL WATCHLIST (required for app.py) ----
+DEFAULT_WATCHLIST = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", 
     "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", 
     "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", 
@@ -72,12 +72,6 @@ def get_timeframe_seconds(timeframe: str) -> int:
 # DIAGNOSTIC FETCH – ONLY OKX FUTURES, NO FALLBACK
 # =============================================================
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
-    """
-    Diagnostic fetch: only OKX Futures (Swap) endpoint.
-    No fallback to Spot or MEXC.
-    Hard timeout (connect=5s, read=10s).
-    Detailed logging for every stage.
-    """
     if is_unsupported(symbol):
         return pd.DataFrame()
 
@@ -90,13 +84,11 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
     okx_bar = okx_tf_map.get(timeframe, "15m")
 
-    # ---- ONLY OKX SWAP (FUTURES) ----
     okx_swap_sym = f"{clean_sym[:-4]}-USDT-SWAP"
     okx_swap_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_swap_sym}&bar={okx_bar}&limit={limit}"
     print(f"[OKX FUTURES URL] {symbol} {timeframe}: {okx_swap_url}")
 
     try:
-        # Explicit timeouts: connect=5s, read=10s
         resp = requests.get(okx_swap_url, headers=HEADERS, timeout=(5, 10))
         print(f"[OKX FUTURES REQUEST SENT] {symbol} {timeframe}")
         print(f"[OKX FUTURES RESPONSE] {symbol} {timeframe} status={resp.status_code}")
@@ -149,14 +141,15 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
         print(f"[OKX FUTURES ERROR] {symbol} {timeframe}: {e}")
         return pd.DataFrame()
 
-# ---- The rest of the helper functions (unchanged) ----
-# ... (all existing functions: find_swings, cluster_prices, calculate_acceptance_rate,
-#      find_structural_levels, detect_range_simple, calculate_candle_pressure,
-#      get_volume_confirmation, evaluate_resistance_battle, evaluate_support_battle,
-#      classify_pattern, analyze_level_battle, _process_symbol_tf)
+# ---- The rest of the helper functions (unchanged from your original) ----
+# They are identical to the original scanner.py. For brevity, they are not repeated here,
+# but they must be present in the final file. This includes:
+# find_swings, cluster_prices, calculate_acceptance_rate,
+# find_structural_levels, detect_range_simple, calculate_candle_pressure,
+# get_volume_confirmation, evaluate_resistance_battle, evaluate_support_battle,
+# classify_pattern, analyze_level_battle, _process_symbol_tf.
 #
-# They are identical to the original scanner.py. For brevity, we assume they are present.
-# The only changes are the fetch_ohlcv function above and the worker loop below.
+# They remain exactly as they were in your production version.
 
 # ---- WORKER WITH DIAGNOSTIC SCOPE ----
 def _process_symbol_tf(symbol: str, tf: str):
@@ -201,7 +194,6 @@ def update_cache_job():
                         else:
                             print(f"[CACHE SKIP] {sym}_{tf}: {err}")
                         print(f"[PROGRESS] {tf} {processed}/{total_symbols} symbols processed")
-                        # Set SCAN_READY after the first successful result
                         if not SCAN_READY and res:
                             SCAN_READY = True
                             print(">>> SCAN_READY = True")
