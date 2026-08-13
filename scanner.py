@@ -1,7 +1,7 @@
-# ===== scanner.py – FINAL WORKING VERSION (WITH FALLBACK) =====
-# OKX Spot primary, OKX Swap secondary, MEXC fallback.
-# Hard timeouts and detailed logging.
-# All detection logic untouched.
+# ===== scanner.py – DIAGNOSTIC: OKX SPOT ONLY =====
+# Tests whether Render can reach OKX Spot.
+# Only BTCUSDT, ETHUSDT, SOLUSDT on 15M.
+# No fallback. Hard timeout. Detailed logging.
 
 import requests
 import pandas as pd
@@ -31,7 +31,7 @@ CACHE = {}
 CACHE_LOCK = threading.Lock()
 SCAN_READY = False
 
-# ---- FULL WATCHLIST ----
+# ---- FULL WATCHLIST (required for app.py) ----
 DEFAULT_WATCHLIST = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", 
     "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", 
@@ -39,6 +39,10 @@ DEFAULT_WATCHLIST = [
     "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", 
     "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"
 ]
+
+# ---- DIAGNOSTIC SCOPE (only these are scanned) ----
+DIAG_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+DIAG_TIMEFRAMES = ["15M"]
 
 # ---- HELPER FUNCTIONS (unchanged) ----
 def is_unsupported(symbol):
@@ -64,13 +68,13 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 # =============================================================
-# FETCH WITH FALLBACK AND TIMEOUT
+# DIAGNOSTIC FETCH – ONLY OKX SPOT
 # =============================================================
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     if is_unsupported(symbol):
         return pd.DataFrame()
 
-    print(f"[FETCH START] {symbol} {timeframe}")
+    print(f"[REQUEST START] {symbol} {timeframe}")
 
     clean_sym = symbol.replace("_", "").replace("-", "").upper()
     if not clean_sym.endswith("USDT"):
@@ -79,7 +83,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     okx_tf_map = {"5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H"}
     okx_bar = okx_tf_map.get(timeframe, "15m")
 
-    # ---- 1. OKX Spot ----
+    # ---- ONLY OKX SPOT ----
     okx_spot_sym = f"{clean_sym[:-4]}-USDT"
     okx_spot_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_spot_sym}&bar={okx_bar}&limit={limit}"
     print(f"[OKX SPOT URL] {symbol} {timeframe}: {okx_spot_url}")
@@ -87,138 +91,74 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     try:
         resp = requests.get(okx_spot_url, headers=HEADERS, timeout=(5, 10))
         print(f"[HTTP RESPONSE] {symbol} {timeframe} status={resp.status_code}")
+        print(f"[RESPONSE LENGTH] {symbol} {timeframe} bytes={len(resp.content)}")
+
         if resp.status_code == 200:
-            res_json = resp.json()
-            code = res_json.get("code")
-            data = res_json.get("data", [])
-            if code == "0" and isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data, columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'volCcy', 'volCcyQuote', 'confirm'
-                ])
-                df = df.iloc[::-1].reset_index(drop=True)
-                df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
-                df = df.dropna(subset=['timestamp'])
-                if df.empty:
-                    print(f"[FETCH ERROR] {symbol} {timeframe} all timestamps non-numeric")
-                    return pd.DataFrame()
-                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
-                valid_count = df['timestamp_dt'].notna().sum()
-                if valid_count == 0:
-                    print(f"[FETCH ERROR] {symbol} {timeframe} all timestamps invalid")
-                    return pd.DataFrame()
-                df = df.dropna(subset=['timestamp_dt'])
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = df[col].astype(float)
-                print(f"[FETCH SUCCESS] {symbol} {timeframe} candles={len(df)}")
-                return df
-            else:
-                print(f"[FETCH ERROR] {symbol} {timeframe} empty or code {code}")
-        else:
-            print(f"[FETCH ERROR] {symbol} {timeframe} HTTP {resp.status_code}")
-    except requests.exceptions.Timeout as e:
-        print(f"[OKX TIMEOUT] {symbol} {timeframe}: {e} -> trying swap...")
-    except Exception as e:
-        print(f"[FETCH ERROR] {symbol} {timeframe}: {e}")
-
-    # ---- 2. OKX Swap ----
-    okx_swap_sym = f"{clean_sym[:-4]}-USDT-SWAP"
-    okx_swap_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_swap_sym}&bar={okx_bar}&limit={limit}"
-    print(f"[OKX SWAP URL] {symbol} {timeframe}: {okx_swap_url}")
-
-    try:
-        resp = requests.get(okx_swap_url, headers=HEADERS, timeout=(5, 10))
-        print(f"[HTTP RESPONSE SWAP] {symbol} {timeframe} status={resp.status_code}")
-        if resp.status_code == 200:
-            res_json = resp.json()
-            code = res_json.get("code")
-            data = res_json.get("data", [])
-            if code == "0" and isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data, columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'volCcy', 'volCcyQuote', 'confirm'
-                ])
-                df = df.iloc[::-1].reset_index(drop=True)
-                df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
-                df = df.dropna(subset=['timestamp'])
-                if df.empty:
-                    print(f"[FETCH ERROR] {symbol} {timeframe} all timestamps non-numeric")
-                    return pd.DataFrame()
-                df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
-                valid_count = df['timestamp_dt'].notna().sum()
-                if valid_count == 0:
-                    print(f"[FETCH ERROR] {symbol} {timeframe} all timestamps invalid")
-                    return pd.DataFrame()
-                df = df.dropna(subset=['timestamp_dt'])
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = df[col].astype(float)
-                print(f"[FETCH SUCCESS] {symbol} {timeframe} candles={len(df)}")
-                return df
-            else:
-                print(f"[FETCH ERROR] {symbol} {timeframe} empty or code {code}")
-        else:
-            print(f"[FETCH ERROR] {symbol} {timeframe} HTTP {resp.status_code}")
-    except requests.exceptions.Timeout as e:
-        print(f"[OKX SWAP TIMEOUT] {symbol} {timeframe}: {e} -> trying MEXC...")
-    except Exception as e:
-        print(f"[FETCH ERROR] {symbol} {timeframe}: {e}")
-
-    # ---- 3. MEXC Fallback ----
-    mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "60m", "4H": "4h"}
-    mexc_bar = mexc_tf_map.get(timeframe, "15m")
-    mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={clean_sym}&interval={mexc_bar}&limit={limit}"
-    print(f"[MEXC URL] {symbol} {timeframe}: {mexc_url}")
-
-    try:
-        resp = requests.get(mexc_url, headers=HEADERS, timeout=(5, 10))
-        print(f"[HTTP RESPONSE MEXC] {symbol} {timeframe} status={resp.status_code}")
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, list) and len(data) > 0:
-                parsed = []
-                for row in data:
-                    if len(row) >= 6:
-                        parsed.append(row[:6])
-                if parsed:
-                    df = pd.DataFrame(parsed, columns=[
-                        'timestamp', 'open', 'high', 'low', 'close', 'volume'
+            try:
+                res_json = resp.json()
+                print(f"[JSON PARSED] {symbol} {timeframe}")
+                code = res_json.get("code")
+                data = res_json.get("data", [])
+                if code == "0" and isinstance(data, list) and len(data) > 0:
+                    df = pd.DataFrame(data, columns=[
+                        'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                        'volCcy', 'volCcyQuote', 'confirm'
                     ])
+                    df = df.iloc[::-1].reset_index(drop=True)
                     df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
                     df = df.dropna(subset=['timestamp'])
                     if df.empty:
+                        print(f"[ERROR] {symbol} {timeframe} all timestamps non-numeric")
                         return pd.DataFrame()
                     df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
-                    df = df.dropna(subset=['timestamp_dt'])
-                    if df.empty:
+                    valid_count = df['timestamp_dt'].notna().sum()
+                    if valid_count == 0:
+                        print(f"[ERROR] {symbol} {timeframe} all timestamps invalid")
                         return pd.DataFrame()
+                    df = df.dropna(subset=['timestamp_dt'])
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
-                    print(f"[FETCH SUCCESS] {symbol} {timeframe} candles={len(df)}")
+                    print(f"[CANDLE COUNT] {symbol} {timeframe} candles={len(df)}")
+                    print(f"[SUCCESS] {symbol} {timeframe}")
                     return df
-            else:
-                print(f"[FETCH ERROR] {symbol} {timeframe} empty data")
+                else:
+                    print(f"[ERROR] {symbol} {timeframe} empty or code {code}")
+                    return pd.DataFrame()
+            except Exception as e:
+                print(f"[JSON ERROR] {symbol} {timeframe}: {e}")
+                return pd.DataFrame()
         else:
-            print(f"[FETCH ERROR] {symbol} {timeframe} HTTP {resp.status_code}")
+            print(f"[HTTP ERROR] {symbol} {timeframe} status={resp.status_code}")
+            return pd.DataFrame()
+    except requests.exceptions.Timeout as e:
+        print(f"[TIMEOUT] {symbol} {timeframe}: {e}")
+        return pd.DataFrame()
+    except requests.exceptions.ConnectionError as e:
+        print(f"[CONNECTION ERROR] {symbol} {timeframe}: {e}")
+        return pd.DataFrame()
     except Exception as e:
-        print(f"[FETCH ERROR] {symbol} {timeframe}: {e}")
+        print(f"[ERROR] {symbol} {timeframe}: {e}")
+        return pd.DataFrame()
 
-    print(f"[FETCH FAILED] {symbol} {timeframe} all sources failed")
-    return pd.DataFrame()
-
-# ---- The rest of the helper functions (unchanged) ----
+# ---- The rest of the helper functions (unchanged from your original) ----
+# They are identical to the original scanner.py. For brevity, they are not repeated here,
+# but they must be present in the final file. This includes:
 # find_swings, cluster_prices, calculate_acceptance_rate,
 # find_structural_levels, detect_range_simple, calculate_candle_pressure,
 # get_volume_confirmation, evaluate_resistance_battle, evaluate_support_battle,
-# classify_pattern, analyze_level_battle, _process_symbol_tf
-# They are identical to the original scanner.py. For brevity, they are not repeated here.
+# classify_pattern, analyze_level_battle, _process_symbol_tf.
+#
+# They remain exactly as they were in your production version.
 
-# ---- WORKER WITH FULL WATCHLIST AND 15M FIRST ----
+# ---- WORKER WITH DIAGNOSTIC SCOPE ----
 def _process_symbol_tf(symbol: str, tf: str):
     print(f"[PROCESSING START] {symbol} {tf}")
     if is_unsupported(symbol):
+        print(f"[PROCESSING ERROR] {symbol} {tf} unsupported")
         return None, "UNSUPPORTED"
     df = fetch_ohlcv(symbol, tf)
     if df.empty:
+        print(f"[PROCESSING ERROR] {symbol} {tf} no data")
         return None, "DATA UNAVAILABLE"
     result, err = analyze_level_battle(df, symbol, tf)
     if result:
@@ -229,32 +169,36 @@ def _process_symbol_tf(symbol: str, tf: str):
 
 def update_cache_job():
     global SCAN_READY
-    print(">>> BACKGROUND SCANNER STARTED")
-    print(">>> SCAN ORDER: 15M -> 5M -> 1H -> 4H")
-    first_cycle = True
+    print(">>> BACKGROUND SCANNER STARTED (DIAGNOSTIC – SPOT ONLY)")
+    print(">>> SYMBOLS: BTCUSDT, ETHUSDT, SOLUSDT")
+    print(">>> TIMEFRAMES: 15M")
+    total_symbols = len(DIAG_SYMBOLS)
+    processed = 0
+
     while True:
         try:
-            for tf in ["15M", "5M", "1H", "4H"]:
+            for tf in DIAG_TIMEFRAMES:
                 print(f">>> Scanning {tf}...")
-                tasks = [sym for sym in DEFAULT_WATCHLIST]
-                with ThreadPoolExecutor(max_workers=10) as executor:
+                tasks = [sym for sym in DIAG_SYMBOLS]
+                with ThreadPoolExecutor(max_workers=3) as executor:
                     future_map = {executor.submit(_process_symbol_tf, sym, tf): sym for sym in tasks}
                     for future in as_completed(future_map):
                         sym = future_map[future]
+                        processed += 1
                         res, err = future.result()
                         if res:
                             with CACHE_LOCK:
                                 CACHE[f"{sym}_{tf}"] = res
-                                print(f"[CACHE] Stored {sym} {tf}")
+                                print(f"[CACHE WRITE] {sym}_{tf}")
                         else:
-                            print(f"[CACHE] Failed {sym} {tf}: {err}")
+                            print(f"[CACHE SKIP] {sym}_{tf}: {err}")
+                        print(f"[PROGRESS] {tf} {processed}/{total_symbols} symbols processed")
+                        if not SCAN_READY and res:
+                            SCAN_READY = True
+                            print(">>> SCAN_READY = True")
                 print(f">>> Completed {tf}")
-                if first_cycle and tf == "15M":
-                    SCAN_READY = True
-                    print(">>> SCAN_READY = True (15M data ready)")
-                time.sleep(1)
-            first_cycle = False
-            print(">>> Cycle complete. Sleeping 15s...")
+                time.sleep(2)
+            print(">>> DIAGNOSTIC CYCLE COMPLETE. Sleeping 15s...")
             time.sleep(15)
         except Exception as e:
             print(f"!!! Worker exception: {e}")
@@ -262,6 +206,7 @@ def update_cache_job():
 
 # ---- Start function for app.py ----
 def start_authoritative_scanner():
+    """Start the diagnostic scanner (OKX Spot only)."""
     thread = threading.Thread(target=update_cache_job, daemon=True)
     thread.start()
-    print(">>> Authoritative scanner started.")
+    print(">>> Authoritative scanner started (diagnostic mode).")
