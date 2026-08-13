@@ -1,126 +1,24 @@
 import time
 import threading
 from flask import Flask, render_template, request, jsonify
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from scanner import _process_symbol_tf
-from datetime import datetime, timezone
+from scanner import CACHE, CACHE_LOCK, SCAN_READY, start_authoritative_scanner, DEFAULT_WATCHLIST, _process_symbol_tf
+import datetime
 
 app = Flask(__name__)
 
-DEFAULT_WATCHLIST = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", 
-    "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", 
-    "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", 
-    "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", 
-    "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"
-]
+# ---- The only authoritative scanner worker starts once ----
+# This will be called when the module is imported, but we use a flag to ensure only one.
+# We wrap it in a function that starts it in a daemon thread.
+def start_scanner_worker():
+    import threading
+    thread = threading.Thread(target=start_authoritative_scanner, daemon=True)
+    thread.start()
 
+# Start the worker when app starts
+start_scanner_worker()
+
+# ---- Routes ----
 WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEFAULT_WATCHLIST]
-
-CACHE = {}
-CACHE_LOCK = threading.Lock()
-_worker_thread_started = False
-SCAN_READY = False
-
-scan_status = {
-    "state": "INITIALIZING",
-    "current_symbol": "",
-    "current_timeframe": "",
-    "last_update": "",
-    "symbols_scanned": 0,
-    "total_symbols": len(DEFAULT_WATCHLIST),
-    "recently_scanned": [],
-    "cache_size": 0
-}
-
-def fetch_single_safe(sym, tf):
-    global scan_status
-    try:
-        scan_status["current_symbol"] = sym
-        scan_status["current_timeframe"] = tf
-        match, err = _process_symbol_tf(sym, tf)
-        if match:
-            return match
-        else:
-            return {
-                "symbol": sym,
-                "timeframe": tf,
-                "curr_close": "Unavailable",
-                "support": "N/A",
-                "resistance": "N/A",
-                "range_width": 0.0,
-                "pattern_type": "N/A",
-                "direction_label": "Unavailable",
-                "break_direction": "NEUTRAL",
-                "break_symbol": "⏳",
-                "readiness_score": 0,
-                "readiness_display": "0%",
-                "distance_to_resistance": 0.0,
-                "distance_to_support": 0.0,
-                "volume_label": "N/A",
-                "confidence": "N/A",
-                "status_label": "N/A",
-                "touches": 0,
-                "last_updated": "--:--:-- UTC"
-            }
-    except Exception as e:
-        print(f"Fetch error for {sym} {tf}: {e}")
-        return None
-
-def update_cache_job():
-    global SCAN_READY, scan_status
-    print(">>> BACKGROUND SCANNER STARTED")
-    scan_status["state"] = "SCANNING"
-    first_data_received = False
-    scanned_in_cycle = []
-    
-    while True:
-        try:
-            for tf in ["5M", "15M", "1H", "4H"]:
-                print(f">>> Scanning {tf}...")
-                scan_status["current_timeframe"] = tf
-                tasks = [sym for sym in DEFAULT_WATCHLIST]
-                with ThreadPoolExecutor(max_workers=10) as executor:
-                    future_map = {executor.submit(fetch_single_safe, sym, tf): sym for sym in tasks}
-                    for future in as_completed(future_map):
-                        sym = future_map[future]
-                        res = future.result()
-                        if res:
-                            with CACHE_LOCK:
-                                CACHE[f"{sym}_{tf}"] = res
-                                scan_status["symbols_scanned"] += 1
-                                scan_status["current_symbol"] = sym
-                                scan_status["last_update"] = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-                                scan_status["cache_size"] = len(CACHE)
-                                
-                                scanned_in_cycle.append(sym)
-                                if len(scanned_in_cycle) > 10:
-                                    scanned_in_cycle.pop(0)
-                                scan_status["recently_scanned"] = scanned_in_cycle.copy()
-                                
-                                if not first_data_received:
-                                    first_data_received = True
-                                    SCAN_READY = True
-                                    scan_status["state"] = "LIVE"
-                                    print(f">>> SCAN_READY = True (first data: {sym} {tf})")
-                                print(f"[CACHE] Stored {sym} {tf} (Cache size: {len(CACHE)})")
-                print(f">>> Completed {tf}")
-                time.sleep(1)
-            
-            print(">>> Cycle complete. Sleeping 15s...")
-            time.sleep(15)
-        except Exception as e:
-            print(f"!!! Worker exception: {e}")
-            time.sleep(5)
-
-@app.before_request
-def start_background_worker():
-    global _worker_thread_started
-    if not _worker_thread_started:
-        thread = threading.Thread(target=update_cache_job, daemon=True)
-        thread.start()
-        _worker_thread_started = True
-        print(">>> Background worker thread launched.")
 
 def sort_results(items):
     tf_priority = {"5M": 0, "15M": 1, "1H": 2, "4H": 3}
@@ -133,7 +31,7 @@ def sort_results(items):
     return sorted(items, key=sort_key)
 
 def generate_alignment_explanation(symbol, active_tf):
-    # Keep your existing alignment logic
+    # Placeholder
     return "Alignment explanation"
 
 @app.route("/")
@@ -142,6 +40,16 @@ def index():
     print(f"[ROUTE] Selected timeframe = {selected_tf}")
 
     active_tf = "15M" if selected_tf == "ALL" else selected_tf
+
+    # ---- Fallback: if active_tf has no data, use first available ----
+    with CACHE_LOCK:
+        has_data = any(key.endswith(f"_{active_tf}") for key in CACHE)
+        if not has_data:
+            for tf in ["5M", "15M", "1H", "4H"]:
+                if any(key.endswith(f"_{tf}") for key in CACHE):
+                    active_tf = tf
+                    print(f"[ROUTE] No data for {selected_tf}, falling back to {tf}")
+                    break
 
     watchlist_rows = []
     is_loading = not SCAN_READY
@@ -179,11 +87,9 @@ def index():
                     "alignment_explanation": "Waiting for data..."
                 })
 
-    # ---- FIX: Display ALL cached symbols in the scanner results, not only those with score > 0 ----
     scanner_results = watchlist_rows.copy()
     scanner_results = sort_results(scanner_results)
 
-    # Diagnostics
     passed = sum(1 for r in scanner_results if r.get("readiness_score", 0) > 0)
     diagnostics = {
         "total_symbols": len(WATCHLIST),
@@ -201,7 +107,13 @@ def index():
         watchlist_rows=watchlist_rows,
         rows=scanner_results,
         is_loading=is_loading,
-        scan_status=scan_status,
+        scan_status={
+            "state": "LIVE" if SCAN_READY else "INITIALIZING",
+            "total_symbols": len(WATCHLIST),
+            "symbols_scanned": len(CACHE),
+            "cache_size": len(CACHE),
+            "last_update": datetime.datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+        },
         diagnostics=diagnostics
     )
 
