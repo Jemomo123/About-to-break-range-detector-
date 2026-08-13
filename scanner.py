@@ -34,8 +34,6 @@ DEFAULT_WATCHLIST = [
 ]
 
 # ---- TEMPORARY DIAGNOSTIC SCOPE ----
-# Only these symbols and timeframe will be scanned.
-# Restore full watchlist after successful 15M test.
 DIAG_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 DIAG_TIMEFRAMES = ["15M"]
 
@@ -180,10 +178,6 @@ def update_cache_job():
                             SCAN_READY = True
                             print(">>> SCAN_READY = True")
                 print(f">>> Completed {tf}")
-                # After completing all three symbols, we can stop the loop for diagnostic
-                # But we keep looping to allow repeated tests if needed.
-                # For production, we would restore the full watchlist.
-                # For now, we sleep and repeat.
                 time.sleep(2)
             print(">>> DIAGNOSTIC CYCLE COMPLETE. Sleeping 15s...")
             time.sleep(15)
@@ -191,6 +185,13 @@ def update_cache_job():
             print(f"!!! Worker exception: {e}")
             time.sleep(5)
 
-# ---- Start the worker ----
-# The worker is started from app.py's before_request or directly.
-# We'll keep the same mechanism as before.
+# ---- Start function for app.py ----
+def start_authoritative_scanner():
+    """Start the diagnostic scanner. This matches the signature expected by app.py."""
+    # Use a daemon thread so it doesn't block the server.
+    thread = threading.Thread(target=update_cache_job, daemon=True)
+    thread.start()
+    print(">>> Authoritative scanner started (diagnostic mode).")
+
+# ---- The worker is started from app.py via start_authoritative_scanner ----
+# No other startup code here.
