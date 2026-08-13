@@ -54,7 +54,6 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 
-# ---- FETCH (unchanged) ----
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150, scan_id: str = None):
     if is_unsupported(symbol):
         return pd.DataFrame()
@@ -183,7 +182,6 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150, scan_id: str = No
     return pd.DataFrame()
 
 
-# ---- COMPLETED CANDLE (unchanged) ----
 def get_completed_candle_index(df: pd.DataFrame, timeframe: str, scan_id: str = None):
     if df.empty or 'timestamp_dt' not in df.columns:
         return len(df) - 1
@@ -195,13 +193,12 @@ def get_completed_candle_index(df: pd.DataFrame, timeframe: str, scan_id: str = 
         open_time = df['timestamp_dt'].iloc[i]
         close_time = open_time + timedelta(seconds=tf_seconds)
         if close_time <= now:
+            # Log completion decision only for debugging; no need to print every time.
             return i
     return len(df) - 1
 
 
-# ---- Helper Functions (unchanged) ----
-# (omitted for brevity – keep all helpers as before)
-
+# ---- Helper functions (unchanged) ----
 def find_swings(highs, lows, lookback=5):
     swing_highs = []
     swing_lows = []
@@ -840,7 +837,7 @@ def _process_symbol_tf(symbol: str, tf: str, scan_id: str = None):
 
 
 def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
-    # ---- Generate scan_id once for this cycle ----
+    # ---- Generate a single scan_id for this entire cycle ----
     scan_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     print(f"[SCAN START] scan_id={scan_id}")
 
