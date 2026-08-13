@@ -54,8 +54,8 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 
-# ===== FETCH WITH TIMESTAMP PARSING =====
-def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
+# ---- FETCH (unchanged) ----
+def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150, scan_id: str = None):
     if is_unsupported(symbol):
         return pd.DataFrame()
 
@@ -69,10 +69,10 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     # ---- OKX Spot ----
     okx_spot_sym = f"{clean_sym[:-4]}-USDT"
     okx_spot_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_spot_sym}&bar={okx_bar}&limit={limit}"
-    print(f"[OKX SPOT] {symbol} {timeframe}: {okx_spot_url}")
+    print(f"[OKX SPOT] {symbol} {timeframe} scan_id={scan_id}: {okx_spot_url}")
     try:
         resp = requests.get(okx_spot_url, headers=HEADERS, timeout=8)
-        print(f"[OKX SPOT] {symbol} {timeframe} HTTP {resp.status_code}")
+        print(f"[OKX SPOT] {symbol} {timeframe} scan_id={scan_id} HTTP {resp.status_code}")
         if resp.status_code == 200:
             res_json = resp.json()
             code = res_json.get("code")
@@ -86,31 +86,31 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
                 df = df.dropna(subset=['timestamp'])
                 if df.empty:
-                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} all timestamps non-numeric")
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} scan_id={scan_id} all timestamps non-numeric")
                     return pd.DataFrame()
                 df['timestamp_dt'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True, errors='coerce')
                 valid_count = df['timestamp_dt'].notna().sum()
                 invalid_count = df['timestamp_dt'].isna().sum()
-                print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} valid={valid_count} invalid={invalid_count}")
+                print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} scan_id={scan_id} valid={valid_count} invalid={invalid_count}")
                 df = df.dropna(subset=['timestamp_dt'])
                 if df.empty:
-                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} all timestamps invalid, dropping")
+                    print(f"[TIMESTAMP DEBUG] {symbol} {timeframe} scan_id={scan_id} all timestamps invalid, dropping")
                     return pd.DataFrame()
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
-                print(f"[OKX SPOT] {symbol} {timeframe} SUCCESS, {len(df)} candles")
+                print(f"[OKX SPOT] {symbol} {timeframe} scan_id={scan_id} SUCCESS, {len(df)} candles")
                 return df
             else:
-                print(f"[OKX SPOT] {symbol} {timeframe} empty or code {code}")
+                print(f"[OKX SPOT] {symbol} {timeframe} scan_id={scan_id} empty or code {code}")
         else:
-            print(f"[OKX SPOT] {symbol} {timeframe} HTTP error")
+            print(f"[OKX SPOT] {symbol} {timeframe} scan_id={scan_id} HTTP error")
     except Exception as e:
-        print(f"[OKX SPOT] {symbol} {timeframe} exception: {e}")
+        print(f"[OKX SPOT] {symbol} {timeframe} scan_id={scan_id} exception: {e}")
 
     # ---- OKX Swap ----
     okx_swap_sym = f"{clean_sym[:-4]}-USDT-SWAP"
     okx_swap_url = f"https://www.okx.com/api/v5/market/candles?instId={okx_swap_sym}&bar={okx_bar}&limit={limit}"
-    print(f"[OKX SWAP] {symbol} {timeframe}: {okx_swap_url}")
+    print(f"[OKX SWAP] {symbol} {timeframe} scan_id={scan_id}: {okx_swap_url}")
     try:
         resp = requests.get(okx_swap_url, headers=HEADERS, timeout=8)
         if resp.status_code == 200:
@@ -133,20 +133,20 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                     return pd.DataFrame()
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
-                print(f"[OKX SWAP] {symbol} {timeframe} SUCCESS, {len(df)} candles")
+                print(f"[OKX SWAP] {symbol} {timeframe} scan_id={scan_id} SUCCESS, {len(df)} candles")
                 return df
             else:
-                print(f"[OKX SWAP] {symbol} {timeframe} empty or code {code}")
+                print(f"[OKX SWAP] {symbol} {timeframe} scan_id={scan_id} empty or code {code}")
         else:
-            print(f"[OKX SWAP] {symbol} {timeframe} HTTP error")
+            print(f"[OKX SWAP] {symbol} {timeframe} scan_id={scan_id} HTTP error")
     except Exception as e:
-        print(f"[OKX SWAP] {symbol} {timeframe} exception: {e}")
+        print(f"[OKX SWAP] {symbol} {timeframe} scan_id={scan_id} exception: {e}")
 
     # ---- MEXC Fallback ----
     mexc_tf_map = {"5M": "5m", "15M": "15m", "1H": "60m", "4H": "4h"}
     mexc_bar = mexc_tf_map.get(timeframe, "15m")
     mexc_url = f"https://api.mexc.com/api/v3/klines?symbol={clean_sym}&interval={mexc_bar}&limit={limit}"
-    print(f"[MEXC] {symbol} {timeframe}: {mexc_url}")
+    print(f"[MEXC] {symbol} {timeframe} scan_id={scan_id}: {mexc_url}")
     try:
         resp = requests.get(mexc_url, headers=HEADERS, timeout=8)
         if resp.status_code == 200:
@@ -170,21 +170,21 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                         return pd.DataFrame()
                     for col in ['open', 'high', 'low', 'close', 'volume']:
                         df[col] = df[col].astype(float)
-                    print(f"[MEXC] {symbol} {timeframe} SUCCESS, {len(df)} candles")
+                    print(f"[MEXC] {symbol} {timeframe} scan_id={scan_id} SUCCESS, {len(df)} candles")
                     return df
             else:
-                print(f"[MEXC] {symbol} {timeframe} empty data")
+                print(f"[MEXC] {symbol} {timeframe} scan_id={scan_id} empty data")
         else:
-            print(f"[MEXC] {symbol} {timeframe} HTTP error")
+            print(f"[MEXC] {symbol} {timeframe} scan_id={scan_id} HTTP error")
     except Exception as e:
-        print(f"[MEXC] {symbol} {timeframe} exception: {e}")
+        print(f"[MEXC] {symbol} {timeframe} scan_id={scan_id} exception: {e}")
 
-    print(f"[WARN] All sources failed for {symbol} {timeframe}")
+    print(f"[WARN] All sources failed for {symbol} {timeframe} scan_id={scan_id}")
     return pd.DataFrame()
 
 
-# ===== COMPLETED CANDLE LOGIC =====
-def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
+# ---- COMPLETED CANDLE (unchanged) ----
+def get_completed_candle_index(df: pd.DataFrame, timeframe: str, scan_id: str = None):
     if df.empty or 'timestamp_dt' not in df.columns:
         return len(df) - 1
 
@@ -200,6 +200,8 @@ def get_completed_candle_index(df: pd.DataFrame, timeframe: str) -> int:
 
 
 # ---- Helper Functions (unchanged) ----
+# (omitted for brevity – keep all helpers as before)
+
 def find_swings(highs, lows, lookback=5):
     swing_highs = []
     swing_lows = []
@@ -543,14 +545,14 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
     if df.empty or len(df) < 30:
         return None, "INSUFFICIENT DATA"
 
-    # ---- 1. Select completed candle ----
-    completed_idx = get_completed_candle_index(df, timeframe)
+    # ---- Select completed candle ----
+    completed_idx = get_completed_candle_index(df, timeframe, scan_id)
     if completed_idx < 0 or completed_idx >= len(df):
         completed_idx = len(df) - 1
 
     selected_candle_time = df['timestamp_dt'].iloc[completed_idx]
 
-    # ---- 2. Extract data from the completed candle ----
+    # ---- Extract data ----
     curr_close = float(df['close'].iloc[completed_idx])
     last_row = df.iloc[completed_idx]
 
@@ -558,7 +560,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
     lows = df['low'].values
     closes = df['close'].values
 
-    # ---- 3. Candidate range detection ----
+    # ---- Candidate range detection ----
     support_struct, resistance_struct, sup_touches, res_touches, is_accepted, acceptance_rate, _ = find_structural_levels(
         highs=highs, lows=lows, closes=closes,
         lookback=40, tolerance_pct=0.7, min_touches=2, acceptance_threshold=60.0
@@ -601,7 +603,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
 
     print(f"[RANGE SOURCE] {symbol} {timeframe} scan_id={scan_id} = {source}")
 
-    # ---- 4. Validate candidate range ----
+    # ---- Validate candidate range ----
     is_valid = False
     if candidate is not None:
         support_val = candidate['support']
@@ -619,10 +621,10 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
         candidate = None
         source = "INVALID_RANGE"
 
-    # ---- 5. Existing range ----
+    # ---- Existing range ----
     existing = get_existing_range(symbol, timeframe)
 
-    # ---- 6. Decision logic ----
+    # ---- Decision logic ----
     active_support = 0.0
     active_resistance = 0.0
     active_status = "NO VALID RANGE"
@@ -712,7 +714,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
                 active_status = "INVALIDATED"
                 active_pattern = "NO CLEAR RANGE"
 
-    # ---- 7. Penetration detection ----
+    # ---- Penetration ----
     penetration_type = "NONE"
     penetration_explanation = ""
     if active_status != "INVALIDATED" and active_support > 0 and active_resistance > 0:
@@ -723,7 +725,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
             penetration_type = "RESISTANCE PENETRATION"
             penetration_explanation = f"Resistance penetrated: candle high ({last_row['high']:.8f}) traded above active resistance ({active_resistance:.8f}) but closed back below it."
 
-    # ---- 8. Battle logic ----
+    # ---- Battle logic ----
     if active_support > 0 and active_resistance > 0:
         dist_to_res = (active_resistance - curr_close) / curr_close * 100
         dist_to_sup = (curr_close - active_support) / curr_close * 100
@@ -750,7 +752,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
         distance = 0.0
         result = {"side": "NEUTRAL", "signal": "NO CLEAR SIGNAL", "score": 0, "reason": "No active range."}
 
-    # ---- 9. Enhanced logging ----
+    # ---- Enhanced logging ----
     range_width_pct = ((active_resistance - active_support) / active_support * 100) if active_support > 0 and active_resistance > 0 else 0
 
     print(f"[RANGE DECISION] {symbol} {timeframe} scan_id={scan_id}")
@@ -769,7 +771,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
         print(f"  invalidation={invalidation_direction} at {invalidation_price:.8f}")
     print("---")
 
-    # ---- 10. FINAL SIGNAL ----
+    # ---- FINAL SIGNAL ----
     print(f"[FINAL SIGNAL] {symbol} {timeframe} scan_id={scan_id}")
     print(f"  range_low={active_support:.8f}")
     print(f"  range_high={active_resistance:.8f}")
@@ -785,7 +787,6 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
     last_updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     clean_display = symbol.replace("-", "").replace("_", "").upper()
 
-    # ---- 11. Build result dictionary ----
     result_dict = {
         "symbol": clean_display,
         "timeframe": timeframe,
@@ -810,7 +811,7 @@ def analyze_level_battle(df: pd.DataFrame, symbol: str, timeframe: str, scan_id:
         "invalidation_time": existing.get('invalidation_info', {}).get('time', '') if existing and existing.get('invalidation_info') else ''
     }
 
-    # ---- 12. API RESULT ----
+    # ---- API RESULT ----
     print(f"[API RESULT] {symbol} {timeframe} scan_id={scan_id}")
     print(f"  price={result_dict['curr_close']:.6f}")
     print(f"  support={result_dict['support']:.6f}")
@@ -830,7 +831,7 @@ def _process_symbol_tf(symbol: str, tf: str, scan_id: str = None):
     print(f"[PIPELINE DEBUG] {symbol} {tf} scan_id={scan_id} calling fetch_ohlcv()")
     if is_unsupported(symbol):
         return None, "UNSUPPORTED"
-    df = fetch_ohlcv(symbol, tf)
+    df = fetch_ohlcv(symbol, tf, scan_id=scan_id)
     print(f"[PIPELINE DEBUG] {symbol} {tf} scan_id={scan_id} fetch returned rows={len(df)} empty={df.empty}")
     if df.empty:
         return None, "DATA UNAVAILABLE"
@@ -839,8 +840,8 @@ def _process_symbol_tf(symbol: str, tf: str, scan_id: str = None):
 
 
 def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
-    # Generate a scan_id for this scan cycle
-    scan_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # ---- Generate scan_id once for this cycle ----
+    scan_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     print(f"[SCAN START] scan_id={scan_id}")
 
     tfs_to_run = ["5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
@@ -854,7 +855,6 @@ def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
         "rejections": {}
     }
 
-    # Per-timeframe summaries
     summary = defaultdict(lambda: {"valid": 0, "invalid": 0, "structural": 0, "provisional": 0,
                                    "breakout": 0, "breakdown": 0, "penetration": 0})
 
@@ -867,7 +867,6 @@ def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
                 diagnostics["passed"] += 1
                 tf_results.append(match)
                 all_results.append(match)
-                # Update summary
                 if match.get('range_status') in ['STRUCTURAL', 'PROVISIONAL']:
                     summary[tf]["valid"] += 1
                     if match.get('range_status') == 'STRUCTURAL':
@@ -889,19 +888,17 @@ def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
                 diagnostics["rejections"][err] = diagnostics["rejections"].get(err, 0) + 1
 
         # Log summary for this timeframe
-        if tf in summary:
-            print(f"[RANGE SUMMARY] {tf} scan_id={scan_id}")
-            print(f"  total_symbols={len(symbols)}")
-            print(f"  valid_ranges={summary[tf]['valid']}")
-            print(f"  invalid_ranges={summary[tf]['invalid']}")
-            print(f"  structural={summary[tf]['structural']}")
-            print(f"  provisional={summary[tf]['provisional']}")
-            print(f"  breakout={summary[tf]['breakout']}")
-            print(f"  breakdown={summary[tf]['breakdown']}")
-            print(f"  penetration={summary[tf]['penetration']}")
-            print("---")
+        print(f"[RANGE SUMMARY] {tf} scan_id={scan_id}")
+        print(f"  total_symbols={len(symbols)}")
+        print(f"  valid_ranges={summary[tf]['valid']}")
+        print(f"  invalid_ranges={summary[tf]['invalid']}")
+        print(f"  structural={summary[tf]['structural']}")
+        print(f"  provisional={summary[tf]['provisional']}")
+        print(f"  breakout={summary[tf]['breakout']}")
+        print(f"  breakdown={summary[tf]['breakdown']}")
+        print(f"  penetration={summary[tf]['penetration']}")
+        print("---")
 
-    # Sort all results
     def sort_key(item):
         if item.get("winner") == "BUYERS":
             return 1
