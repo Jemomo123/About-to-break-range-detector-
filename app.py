@@ -1,23 +1,22 @@
 import time
 import threading
 from flask import Flask, render_template, request, jsonify
-from scanner import CACHE, CACHE_LOCK, SCAN_READY, start_authoritative_scanner, DEFAULT_WATCHLIST, _process_symbol_tf
-import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from scanner import (
+    CACHE, CACHE_LOCK, SCAN_READY,
+    start_authoritative_scanner,
+    DEFAULT_WATCHLIST,
+    _process_symbol_tf
+)
 
 app = Flask(__name__)
 
-# ---- The only authoritative scanner worker starts once ----
-# This will be called when the module is imported, but we use a flag to ensure only one.
-# We wrap it in a function that starts it in a daemon thread.
-def start_scanner_worker():
-    import threading
-    thread = threading.Thread(target=start_authoritative_scanner, daemon=True)
-    thread.start()
+# ---- Start the single authoritative scanner worker ----
+# This runs once when the app starts; does NOT start on every request.
+start_authoritative_scanner()
 
-# Start the worker when app starts
-start_scanner_worker()
-
-# ---- Routes ----
+# ---- Watchlist (mirrors scanner's DEFAULT_WATCHLIST) ----
 WATCHLIST = [{"symbol": sym, "timeframe": "15M", "pinned": False} for sym in DEFAULT_WATCHLIST]
 
 def sort_results(items):
@@ -31,7 +30,7 @@ def sort_results(items):
     return sorted(items, key=sort_key)
 
 def generate_alignment_explanation(symbol, active_tf):
-    # Placeholder
+    # Placeholder – keep your existing alignment logic if you have it
     return "Alignment explanation"
 
 @app.route("/")
@@ -45,14 +44,14 @@ def index():
     with CACHE_LOCK:
         has_data = any(key.endswith(f"_{active_tf}") for key in CACHE)
         if not has_data:
-            for tf in ["5M", "15M", "1H", "4H"]:
+            for tf in ["15M", "5M", "1H", "4H"]:
                 if any(key.endswith(f"_{tf}") for key in CACHE):
                     active_tf = tf
                     print(f"[ROUTE] No data for {selected_tf}, falling back to {tf}")
                     break
 
     watchlist_rows = []
-    is_loading = not SCAN_READY
+    is_loading = not SCAN_READY   # SCAN_READY is set only after 15M is cached
 
     with CACHE_LOCK:
         for item in WATCHLIST:
@@ -101,19 +100,22 @@ def index():
         "cache_size": len(CACHE)
     }
 
+    # Build scan_status for the UI
+    scan_status = {
+        "state": "LIVE" if SCAN_READY else "INITIALIZING",
+        "total_symbols": len(WATCHLIST),
+        "symbols_scanned": len(CACHE),
+        "cache_size": len(CACHE),
+        "last_update": datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    }
+
     return render_template(
         "index.html",
         selected_tf=selected_tf,
         watchlist_rows=watchlist_rows,
         rows=scanner_results,
         is_loading=is_loading,
-        scan_status={
-            "state": "LIVE" if SCAN_READY else "INITIALIZING",
-            "total_symbols": len(WATCHLIST),
-            "symbols_scanned": len(CACHE),
-            "cache_size": len(CACHE),
-            "last_update": datetime.datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-        },
+        scan_status=scan_status,
         diagnostics=diagnostics
     )
 
