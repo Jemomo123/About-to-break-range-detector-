@@ -18,6 +18,17 @@ UNSUPPORTED_SYMBOLS = set()
 UNSUPPORTED_LOCK = threading.Lock()
 RANGE_STATE = {}
 RANGE_STATE_LOCK = threading.Lock()
+CACHE = {}
+CACHE_LOCK = threading.Lock()
+SCAN_READY = False
+
+DEFAULT_WATCHLIST = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", 
+    "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", 
+    "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", 
+    "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", 
+    "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"
+]
 
 
 def is_unsupported(symbol):
@@ -810,50 +821,13 @@ def _process_symbol_tf(symbol: str, tf: str):
     return analyze_level_battle(df, symbol, tf)
 
 
-def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
-    results = []
-    diagnostics = {
-        "total_scanned": 0,
-        "passed": 0,
-        "unsupported": 0,
-        "failed_logic": 0,
-        "displayed": 0,
-        "rejections": {}
-    }
-
-    tfs_to_run = ["5M", "15M", "1H", "4H"] if timeframe == "ALL" else [timeframe]
-
-    for sym in symbols:
-        for tf in tfs_to_run:
-            diagnostics["total_scanned"] += 1
-            match, err = _process_symbol_tf(sym, tf)
-            if match:
-                diagnostics["passed"] += 1
-                results.append(match)
-            elif err == "UNSUPPORTED":
-                diagnostics["unsupported"] += 1
-            else:
-                diagnostics["failed_logic"] += 1
-                diagnostics["rejections"][err] = diagnostics["rejections"].get(err, 0) + 1
-
-    def sort_key(item):
-        if item.get("winner") == "BUYERS":
-            return 1
-        elif item.get("winner") == "SELLERS":
-            return 0
-        else:
-            return -1
-    results.sort(key=sort_key, reverse=True)
-    diagnostics["displayed"] = len(results)
-    return results, diagnostics
-
-
 def update_cache_job():
     global SCAN_READY
     print(">>> BACKGROUND SCANNER STARTED")
-    # ---- FIX: 15M is scanned FIRST ----
+    first_cycle = True
     while True:
         try:
+            # ---- 15M SCANNED FIRST ----
             for tf in ["15M", "5M", "1H", "4H"]:
                 print(f">>> Scanning {tf}...")
                 tasks = [sym for sym in DEFAULT_WATCHLIST]
@@ -867,25 +841,13 @@ def update_cache_job():
                                 CACHE[f"{sym}_{tf}"] = res
                                 print(f"[CACHE] Stored {sym} {tf}")
                 print(f">>> Completed {tf}")
+                if first_cycle and tf == "15M":
+                    SCAN_READY = True
+                    print(">>> SCAN_READY = True (15M data ready)")
                 time.sleep(1)
+            first_cycle = False
             print(">>> Cycle complete. Sleeping 15s...")
             time.sleep(15)
         except Exception as e:
             print(f"!!! Worker exception: {e}")
             time.sleep(5)
-
-
-# ---- Background worker entry point ----
-# Note: The actual background worker is started from app.py before_request.
-# This function is called from there.
-
-CACHE = {}
-CACHE_LOCK = threading.Lock()
-SCAN_READY = False
-DEFAULT_WATCHLIST = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", 
-    "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", 
-    "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", 
-    "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", 
-    "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"
-]
