@@ -2,7 +2,7 @@ import time
 import threading
 from flask import Flask, render_template, request, jsonify
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from scanner import _process_symbol_tf, run_scanner_pipeline
+from scanner import _process_symbol_tf
 from datetime import datetime, timezone
 
 app = Flask(__name__)
@@ -142,13 +142,11 @@ def index():
     selected_tf = request.args.get("tf", "15M").upper()
     print(f"[ROUTE] Selected timeframe = {selected_tf}")
 
-    # Run the scanner pipeline only for the selected timeframe
-    scanner_results, diagnostics = run_scanner_pipeline(DEFAULT_WATCHLIST, timeframe=selected_tf)
-
     active_tf = "15M" if selected_tf == "ALL" else selected_tf
 
-    # Build watchlist rows from cache (for the active timeframe)
+    # Build watchlist rows and scanner results from CACHE
     watchlist_rows = []
+    scanner_results = []
     is_loading = not SCAN_READY
 
     with CACHE_LOCK:
@@ -159,6 +157,9 @@ def index():
                 match["pinned"] = item["pinned"]
                 match["alignment_explanation"] = generate_alignment_explanation(item["symbol"], active_tf)
                 watchlist_rows.append(match)
+                # Also add to scanner results if readiness > 0
+                if match.get("readiness_score", 0) > 0:
+                    scanner_results.append(match)
             else:
                 watchlist_rows.append({
                     "symbol": item["symbol"],
@@ -184,9 +185,21 @@ def index():
                     "alignment_explanation": "Waiting for data..."
                 })
 
+    # Sort watchlist and scanner results
     watchlist_rows = sort_results(watchlist_rows)
+    scanner_results = sort_results(scanner_results)
 
-    # scanner_results already contains the results for the selected timeframe
+    # Diagnostics (can be computed from cache)
+    diagnostics = {
+        "total_symbols": len(WATCHLIST),
+        "timeframes": 4,
+        "passed": len(scanner_results),
+        "unsupported": 0,
+        "failed_logic": 0,
+        "displayed": len(scanner_results),
+        "cache_size": len(CACHE)
+    }
+
     return render_template(
         "index.html",
         selected_tf=selected_tf,
