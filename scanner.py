@@ -191,6 +191,7 @@ def get_completed_candle_index(df: pd.DataFrame, timeframe: str, scan_id: str = 
     return len(df) - 1
 
 
+# ---- All helper functions (unchanged) ----
 def find_swings(highs, lows, lookback=5):
     swing_highs = []
     swing_lows = []
@@ -815,6 +816,7 @@ def _process_symbol_tf(symbol: str, tf: str, scan_id: str = None):
 
 
 def run_scanner_pipeline(symbols: list, timeframe: str = "ALL"):
+    # Generate scan_id once for this entire cycle
     scan_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     print(f"[SCAN START] scan_id={scan_id} input_timeframe={timeframe}")
 
