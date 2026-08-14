@@ -18,7 +18,9 @@ PROXIMITY_THRESHOLD = 1.5
 # =========================
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json',
+    'Accept-Language': 'en-US,en;q=0.9'
 }
 
 UNSUPPORTED_SYMBOLS = set()
@@ -56,12 +58,15 @@ def connectivity_probe():
     okx_bar = "15m"
     url = f"https://www.okx.com/api/v5/market/candles?instId={okx_spot_sym}&bar={okx_bar}&limit=150"
     print(f"[PROBE] URL: {url}")
-    print(f"[PROBE] Timeout: (5, 10)")
+    print(f"[PROBE] Timeout: 30 seconds")
+    
     try:
         print("[PROBE BEFORE REQUEST]")
-        resp = requests.get(url, headers=HEADERS, timeout=(5, 10))
+        # FIX: Changed timeout to a single 30-second total timeout
+        resp = requests.get(url, headers=HEADERS, timeout=30)
         print(f"[PROBE AFTER REQUEST] status={resp.status_code}")
         print(f"[PROBE] Response length: {len(resp.content)} bytes")
+        
         if resp.status_code == 200:
             try:
                 data = resp.json()
@@ -84,6 +89,7 @@ def connectivity_probe():
         else:
             print(f"[PROBE] HTTP error: {resp.status_code}")
             return False, f"http_{resp.status_code}"
+            
     except requests.exceptions.Timeout as e:
         print(f"[PROBE TIMEOUT] {e}")
         return False, "timeout"
@@ -94,23 +100,10 @@ def connectivity_probe():
         print(f"[PROBE UNEXPECTED ERROR] {e}")
         return False, f"exception_{e}"
 
-# ---- The rest of the helper functions (unchanged) ----
-# They are identical to the original scanner.py. For brevity, they are not repeated here.
-# But they must be present in the final file. This includes:
-# is_unsupported, mark_unsupported, get_existing_range, set_range,
-# get_timeframe_seconds, fetch_ohlcv (but fetch_ohlcv is not used in this diagnostic),
-# find_swings, cluster_prices, calculate_acceptance_rate,
-# find_structural_levels, detect_range_simple, calculate_candle_pressure,
-# get_volume_confirmation, evaluate_resistance_battle, evaluate_support_battle,
-# classify_pattern, analyze_level_battle, _process_symbol_tf.
-#
-# They remain exactly as they were in your production version.
-
 # ---- WORKER WITH ISOLATED TEST ----
 def _process_symbol_tf(symbol: str, tf: str):
     # For this diagnostic, we only process BTCUSDT 15M.
     # The connectivity probe already handles the HTTP request.
-    # This function is kept but will not be called because we restrict the worker.
     return None, "DISABLED"
 
 def update_cache_job():
@@ -123,13 +116,8 @@ def update_cache_job():
     
     if success:
         print(">>> PROBE RESULT: SUCCESS – OKX is reachable.")
-        # Now we can optionally run the full scanner, but for this test we stop.
-        # We will not proceed to the main loop.
         print(">>> Diagnostic complete. Exiting worker.")
-        # Set SCAN_READY to true so the dashboard shows Live (optional)
         SCAN_READY = True
-        # We can keep the worker alive doing nothing, or just return.
-        # For simplicity, we will keep it alive with a long sleep.
         while True:
             time.sleep(60)
     else:
