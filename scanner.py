@@ -1,6 +1,4 @@
-# ===== scanner.py – ISOLATED CONNECTIVITY PROBE =====
-# Tests ONLY BTCUSDT 15M with a single HTTP request.
-# All other logic is disabled. No changes to detection or UI.
+# ===== scanner.py – PROXY CONNECTIVITY PROBE =====
 
 import requests
 import pandas as pd
@@ -19,8 +17,7 @@ PROXIMITY_THRESHOLD = 1.5
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json',
-    'Accept-Language': 'en-US,en;q=0.9'
+    'Accept': 'application/json'
 }
 
 UNSUPPORTED_SYMBOLS = set()
@@ -43,45 +40,37 @@ DEFAULT_WATCHLIST = [
 ]
 
 # =============================================================
-# CONNECTIVITY PROBE – ONE REQUEST TO OKX SPOT
+# CONNECTIVITY PROBE – PROXY PASS THROUGH
 # =============================================================
 def connectivity_probe():
-    """
-    Single isolated HTTP request to OKX Spot for BTCUSDT 15M.
-    Logs every stage. Returns (success, status_code or error_message).
-    """
-    print("[PROBE] Starting connectivity probe...")
-    symbol = "BTCUSDT"
-    timeframe = "15M"
-    clean_sym = "BTCUSDT"
-    okx_spot_sym = "BTC-USDT"
-    okx_bar = "15m"
-    url = f"https://www.okx.com/api/v5/market/candles?instId={okx_spot_sym}&bar={okx_bar}&limit=150"
-    print(f"[PROBE] URL: {url}")
+    print("[PROBE] Starting connectivity probe (PROXY MODE)...")
+    
+    url = "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=15m&limit=150"
+    proxy_url = f"https://corsproxy.io/?{url}"
+    
+    print(f"[PROBE] PROXY URL: {proxy_url}")
     print(f"[PROBE] Timeout: 30 seconds")
     
     try:
         print("[PROBE BEFORE REQUEST]")
-        # FIX: Changed timeout to a single 30-second total timeout
-        resp = requests.get(url, headers=HEADERS, timeout=30)
+        resp = requests.get(proxy_url, headers=HEADERS, timeout=30)
         print(f"[PROBE AFTER REQUEST] status={resp.status_code}")
-        print(f"[PROBE] Response length: {len(resp.content)} bytes")
         
         if resp.status_code == 200:
             try:
                 data = resp.json()
-                print(f"[PROBE] JSON parsed successfully")
+                print(f"[PROBE] JSON parsed. Keys: {list(data.keys())}")
                 if isinstance(data, dict) and data.get("code") == "0":
                     candles = data.get("data", [])
                     print(f"[PROBE] Candle count: {len(candles)}")
                     if len(candles) > 0:
-                        print("[PROBE] SUCCESS – OKX responded with valid data.")
+                        print("[PROBE] SUCCESS – OKX data received via Proxy!")
                         return True, 200
                     else:
-                        print("[PROBE] ERROR – OKX returned empty data array.")
+                        print("[PROBE] ERROR – Empty data array.")
                         return False, "empty_data"
                 else:
-                    print(f"[PROBE] ERROR – unexpected JSON structure: {data.get('code')}")
+                    print(f"[PROBE] ERROR – Unexpected JSON code: {data.get('code')}")
                     return False, "json_error"
             except Exception as e:
                 print(f"[PROBE] JSON parse error: {e}")
@@ -102,27 +91,22 @@ def connectivity_probe():
 
 # ---- WORKER WITH ISOLATED TEST ----
 def _process_symbol_tf(symbol: str, tf: str):
-    # For this diagnostic, we only process BTCUSDT 15M.
-    # The connectivity probe already handles the HTTP request.
     return None, "DISABLED"
 
 def update_cache_job():
     global SCAN_READY
-    print(">>> BACKGROUND SCANNER STARTED (DIAGNOSTIC MODE)")
+    print(">>> BACKGROUND SCANNER STARTED (PROXY DIAGNOSTIC)")
     print(">>> RUNNING ISOLATED CONNECTIVITY PROBE...")
     
-    # ---- Run the probe ----
     success, result = connectivity_probe()
     
     if success:
-        print(">>> PROBE RESULT: SUCCESS – OKX is reachable.")
-        print(">>> Diagnostic complete. Exiting worker.")
+        print(">>> PROBE RESULT: SUCCESS – Proxy Bypass Works!")
         SCAN_READY = True
         while True:
             time.sleep(60)
     else:
         print(f">>> PROBE RESULT: FAILED – {result}")
-        print(">>> Diagnostic complete. Exiting worker.")
         SCAN_READY = False
         while True:
             time.sleep(60)
@@ -131,4 +115,4 @@ def update_cache_job():
 def start_authoritative_scanner():
     thread = threading.Thread(target=update_cache_job, daemon=True)
     thread.start()
-    print(">>> Authoritative scanner started (diagnostic mode).")
+    print(">>> Authoritative scanner started (proxy diagnostic mode).")
