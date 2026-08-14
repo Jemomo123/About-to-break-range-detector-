@@ -1,225 +1,142 @@
 #!/usr/bin/env python3
 """
-CURL NETWORK DIAGNOSTIC - OS-Level Connectivity Test
-Does NOT use Python requests library
-Replaces the old requests-based probe entirely
+FIXED CONNECTIVITY PROBE - Guaranteed to produce a definitive result
+Uses explicit try/except blocks and hard timeouts
 """
 
-import subprocess
+import requests
 import time
-import os
+import threading
 import sys
 from datetime import datetime
 
-def run_curl_diagnostic():
-    """Run OS-level curl tests against OKX and Google"""
-    
-    print(">>> CURL NETWORK DIAGNOSTIC DEPLOYED <<<")
-    print(f"[START] {datetime.now().isoformat()}")
-    print(f"[PID] {os.getpid()}")
-    print(f"[PYTHON] {sys.version}")
-    
-    # ============================================================
-    # TEST 1: OKX API
-    # ============================================================
-    print("\n" + "="*80)
-    print("TEST 1: OKX API")
-    print("="*80)
-    
-    okx_url = "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=15m&limit=150"
-    print(f"[URL] {okx_url}")
-    
-    curl_cmd = [
-        "curl",
-        "-v",
-        "--connect-timeout", "5",
-        "--max-time", "15",
-        okx_url
-    ]
-    
-    print(f"[CURL START] {datetime.now().isoformat()}")
-    print(f"[CURL COMMAND] {' '.join(curl_cmd)}")
+# Global flag to track probe completion
+probe_complete = False
+probe_result = None
+
+def run_probe_with_timeout():
+    """Run the probe with a hard timeout to prevent indefinite blocking"""
+    global probe_complete, probe_result
     
     try:
+        # ===== PROBE CONFIGURATION =====
+        URL = "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=15m&limit=150"
+        TIMEOUT_CONNECT = 5
+        TIMEOUT_READ = 10
+        
+        print(f"[PROBE] Starting connectivity probe...")
+        print(f"[PROBE] URL: {URL}")
+        print(f"[PROBE] Timeout: ({TIMEOUT_CONNECT}, {TIMEOUT_READ})")
+        print(f"[PROBE] PID: {threading.current_thread().ident}")
+        
+        # ===== EXECUTE REQUEST WITH EXPLICIT EXCEPTION HANDLING =====
+        print(f"[PROBE BEFORE REQUEST] {datetime.now().isoformat()}")
         start_time = time.time()
         
-        # Run curl with 20-second hard timeout
-        result = subprocess.run(
-            curl_cmd,
-            capture_output=True,
-            text=True,
-            timeout=20
-        )
-        
-        elapsed = time.time() - start_time
-        print(f"[CURL COMPLETE] {datetime.now().isoformat()} (elapsed: {elapsed:.2f}s)")
-        
-        # Combine stdout and stderr (curl outputs to stderr for verbose)
-        combined = result.stdout + result.stderr
-        
-        print("\n--- CURL OUTPUT (filtered) ---")
-        
-        # Extract key diagnostic lines
-        lines = combined.split('\n')
-        for line in lines:
-            line_lower = line.lower()
-            if any(key in line_lower for key in [
-                'resolving', 'connected', 'ssl', 'tls', 
-                'http/', 'content-length', 'curl', 'error',
-                'timed out', 'timeout', 'failed', 'unable',
-                'dns', 'certificate', 'handshake'
-            ]):
-                print(f"[CURL] {line.strip()}")
-        
-        print("\n--- DIAGNOSTIC SUMMARY ---")
-        
-        # DNS
-        if 'Resolving' in combined or 'resolving' in combined:
-            print("[DNS] ✅ DNS resolution attempted")
-            for line in lines:
-                if 'Resolving' in line or 'resolving' in line:
-                    print(f"  {line.strip()}")
-        else:
-            print("[DNS] ⚠️ DNS not detected in output")
-        
-        # TCP Connect
-        if 'Connected to' in combined:
-            print("[TCP CONNECT] ✅ Connection successful")
-            for line in lines:
-                if 'Connected to' in line:
-                    print(f"  {line.strip()}")
-        elif 'Failed to connect' in combined or 'Connection refused' in combined:
-            print("[TCP CONNECT] ❌ Connection failed")
-        else:
-            print("[TCP CONNECT] ⚠️ Connection status not detected")
-        
-        # TLS/SSL
-        if 'SSL' in combined or 'TLS' in combined:
-            print("[TLS HANDSHAKE] ✅ TLS handshake attempted")
-            for line in lines:
-                if 'SSL' in line or 'TLS' in line:
-                    print(f"  {line.strip()}")
-        else:
-            print("[TLS HANDSHAKE] ⚠️ TLS not detected in output")
-        
-        # HTTP Status
-        http_found = False
-        for line in lines:
-            if 'HTTP/' in line:
-                print(f"[HTTP STATUS] {line.strip()}")
-                http_found = True
-        if not http_found:
-            print("[HTTP STATUS] ⚠️ HTTP status not detected")
-        
-        # Response Length
-        content_len_found = False
-        for line in lines:
-            if 'content-length' in line.lower():
-                print(f"[RESPONSE LENGTH] {line.strip()}")
-                content_len_found = True
-        if not content_len_found:
-            print("[RESPONSE LENGTH] ⚠️ Content-Length not detected")
-        
-        print(f"[CURL EXIT CODE] {result.returncode}")
-        
-        # Interpret exit code
-        if result.returncode == 0:
-            print("[RESULT] ✅ OKX request SUCCEEDED")
-        elif result.returncode == 28:
-            print("[RESULT] ❌ CURL TIMEOUT (exit code 28)")
-        elif result.returncode == 6:
-            print("[RESULT] ❌ DNS RESOLUTION FAILED (exit code 6)")
-        elif result.returncode == 7:
-            print("[RESULT] ❌ CONNECTION FAILED (exit code 7)")
-        elif result.returncode == 35:
-            print("[RESULT] ❌ SSL/TLS ERROR (exit code 35)")
-        else:
-            print(f"[RESULT] ⚠️ Unknown exit code: {result.returncode}")
+        try:
+            # Make the HTTP request
+            response = requests.get(
+                URL,
+                timeout=(TIMEOUT_CONNECT, TIMEOUT_READ),
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            )
+            
+            # ===== REQUEST SUCCEEDED =====
+            elapsed = time.time() - start_time
+            print(f"[PROBE AFTER REQUEST] {datetime.now().isoformat()}")
+            print(f"[PROBE] HTTP_STATUS={response.status_code}")
+            print(f"[PROBE] ELAPSED={elapsed:.2f}s")
+            print(f"[PROBE] RESPONSE_LENGTH={len(response.text)} bytes")
+            
+            # Check if we got valid JSON
+            try:
+                data = response.json()
+                if 'data' in data and data['data']:
+                    print(f"[PROBE] CANDLE_COUNT={len(data['data'])}")
+                    print(f"[PROBE] FIRST_CANDLE={data['data'][0]}")
+                    probe_result = "SUCCESS"
+                else:
+                    print(f"[PROBE] INVALID_RESPONSE - No data field or empty")
+                    probe_result = "INVALID_RESPONSE"
+            except Exception as json_err:
+                print(f"[PROBE] JSON_PARSE_ERROR: {type(json_err).__name__}: {json_err}")
+                print(f"[PROBE] RESPONSE_PREVIEW: {response.text[:200]}")
+                probe_result = "INVALID_RESPONSE"
+                
+        except requests.exceptions.Timeout as e:
+            # ===== TIMEOUT =====
+            elapsed = time.time() - start_time
+            print(f"[PROBE AFTER REQUEST] {datetime.now().isoformat()}")
+            print(f"[PROBE] ELAPSED={elapsed:.2f}s")
+            print(f"[PROBE TIMEOUT] {type(e).__name__}: {e}")
+            print(f"[PROBE] TIMEOUT_DETAIL: connect={TIMEOUT_CONNECT}s, read={TIMEOUT_READ}s")
+            probe_result = "TIMEOUT"
+            
+        except requests.exceptions.ConnectionError as e:
+            # ===== CONNECTION ERROR =====
+            elapsed = time.time() - start_time
+            print(f"[PROBE AFTER REQUEST] {datetime.now().isoformat()}")
+            print(f"[PROBE] ELAPSED={elapsed:.2f}s")
+            print(f"[PROBE CONNECTION ERROR] {type(e).__name__}: {e}")
+            probe_result = "CONNECTION_ERROR"
+            
+        except requests.exceptions.RequestException as e:
+            # ===== REQUESTS ERROR =====
+            elapsed = time.time() - start_time
+            print(f"[PROBE AFTER REQUEST] {datetime.now().isoformat()}")
+            print(f"[PROBE] ELAPSED={elapsed:.2f}s")
+            print(f"[PROBE REQUEST ERROR] {type(e).__name__}: {e}")
+            probe_result = "HTTP_ERROR"
+            
+        except Exception as e:
+            # ===== UNEXPECTED EXCEPTION =====
+            elapsed = time.time() - start_time
+            print(f"[PROBE AFTER REQUEST] {datetime.now().isoformat()}")
+            print(f"[PROBE] ELAPSED={elapsed:.2f}s")
+            print(f"[PROBE EXCEPTION] {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            probe_result = "EXCEPTION"
+            
+    except Exception as outer_e:
+        print(f"[PROBE] FATAL_ERROR: {type(outer_e).__name__}: {outer_e}")
+        probe_result = "FATAL"
     
-    except subprocess.TimeoutExpired:
-        print(f"[CURL HARD TIMEOUT] Subprocess killed after 20 seconds")
-        print("[RESULT] ❌ CURL HARD TIMEOUT - process terminated")
-        
-    except Exception as e:
-        print(f"[CURL EXCEPTION] {type(e).__name__}: {e}")
-        print("[RESULT] ❌ CURL EXCEPTION")
+    finally:
+        probe_complete = True
+        print(f"[PROBE RESULT] {probe_result}")
+        print(f"[PROBE] Completed at {datetime.now().isoformat()}")
+
+def run_diagnostic():
+    """Run the probe with a hard timeout wrapper to prevent hanging"""
+    print(">>> FIXED CONNECTIVITY PROBE DEPLOYED <<<")
+    print(f"[PROBE] Starting at {datetime.now().isoformat()}")
     
-    # ============================================================
-    # TEST 2: Google (Control)
-    # ============================================================
-    print("\n" + "="*80)
-    print("TEST 2: Google (Control)")
-    print("="*80)
+    # Start probe in a separate thread with hard timeout
+    probe_thread = threading.Thread(target=run_probe_with_timeout)
+    probe_thread.daemon = True  # Don't block Gunicorn
+    probe_thread.start()
     
-    google_url = "https://www.google.com"
-    print(f"[URL] {google_url}")
+    # Wait for completion with hard timeout
+    max_wait = 25  # 25 seconds max (enough for 15s request + buffer)
+    wait_interval = 0.5
+    waited = 0
     
-    curl_cmd2 = [
-        "curl",
-        "-v",
-        "--connect-timeout", "5",
-        "--max-time", "15",
-        google_url
-    ]
+    print(f"[PROBE] Waiting up to {max_wait}s for completion...")
     
-    print(f"[CURL START] {datetime.now().isoformat()}")
-    print(f"[CURL COMMAND] {' '.join(curl_cmd2)}")
+    while not probe_complete and waited < max_wait:
+        time.sleep(wait_interval)
+        waited += wait_interval
+        if int(waited) % 5 == 0:  # Log every 5 seconds
+            print(f"[PROBE] Still waiting... {waited:.1f}s elapsed")
     
-    try:
-        start_time = time.time()
-        
-        result2 = subprocess.run(
-            curl_cmd2,
-            capture_output=True,
-            text=True,
-            timeout=20
-        )
-        
-        elapsed = time.time() - start_time
-        print(f"[CURL COMPLETE] {datetime.now().isoformat()} (elapsed: {elapsed:.2f}s)")
-        
-        combined2 = result2.stdout + result2.stderr
-        
-        print("\n--- CURL OUTPUT (filtered) ---")
-        lines2 = combined2.split('\n')
-        for line in lines2:
-            line_lower = line.lower()
-            if any(key in line_lower for key in [
-                'resolving', 'connected', 'ssl', 'tls', 
-                'http/', 'content-length', 'curl', 'error'
-            ]):
-                print(f"[CURL] {line.strip()}")
-        
-        print("\n--- DIAGNOSTIC SUMMARY ---")
-        
-        if 'Connected to' in combined2:
-            print("[TCP CONNECT] ✅ Connected to Google")
-        
-        http_found = False
-        for line in lines2:
-            if 'HTTP/' in line:
-                print(f"[HTTP STATUS] {line.strip()}")
-                http_found = True
-        if not http_found:
-            print("[HTTP STATUS] ⚠️ HTTP status not detected")
-        
-        print(f"[CURL EXIT CODE] {result2.returncode}")
-        
-        if result2.returncode == 0:
-            print("[RESULT] ✅ Google request SUCCEEDED")
-        elif result2.returncode == 28:
-            print("[RESULT] ❌ Google TIMEOUT")
-        else:
-            print(f"[RESULT] ⚠️ Google exit code: {result2.returncode}")
+    if not probe_complete:
+        print(f"[PROBE] HARD TIMEOUT - Probe did not complete within {max_wait}s")
+        print(f"[PROBE RESULT] HARD_TIMEOUT")
+    else:
+        print(f"[PROBE] Probe completed in {waited:.1f}s")
     
-    except subprocess.TimeoutExpired:
-        print("[CURL HARD TIMEOUT] Google subprocess killed after 20 seconds")
-    except Exception as e:
-        print(f"[CURL EXCEPTION] {type(e).__name__}: {e}")
-    
-    print("\n" + "="*80)
-    print(">>> CURL NETWORK DIAGNOSTIC COMPLETE <<<")
-    print(f"[END] {datetime.now().isoformat()}")
+    print(f"[PROBE] Diagnostic complete at {datetime.now().isoformat()}")
 
 if __name__ == "__main__":
-    run_curl_diagnostic()
+    run_diagnostic()
