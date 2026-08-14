@@ -6,28 +6,46 @@
     <title>Range Detector</title>
     <style>
         body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
-        .container { max-width: 600px; margin: auto; }
+        .container { max-width: 650px; margin: auto; }
         .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
-        .header { display: flex; justify-content: space-between; font-weight: bold; }
-        .price { font-size: 1.2em; margin: 5px 0; }
-        .stats { display: flex; gap: 20px; font-size: 0.9em; color: #aaa; }
+        .header { display: flex; justify-content: space-between; font-weight: bold; align-items: center; }
+        .price { font-size: 1.4em; margin: 8px 0; font-weight: 600; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+        .stat-box { background: #11161c; padding: 8px; border-radius: 6px; }
+        .stat-box small { color: #888; display: block; font-size: 0.7em; }
+        .stat-box span { font-size: 1em; }
         .bar { height: 8px; border-radius: 4px; margin-top: 8px; display: flex; }
         .buy { background: #00c853; height: 100%; }
         .sell { background: #ff1744; height: 100%; }
+        .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.7em; font-weight: bold; text-transform: uppercase; }
+        .badge.bull { background: rgba(0, 200, 83, 0.2); color: #00c853; }
+        .badge.bear { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
+        .badge.neutral { background: #2d3748; color: #aaa; }
+        .debug-btn { background: none; border: 1px solid #333; color: #888; padding: 2px 8px; border-radius: 4px; cursor: pointer; margin-top: 10px; font-size: 0.8em; }
+        .debug-box { display: none; background: #0f1219; border: 1px solid #222; padding: 15px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 0.85em; line-height: 1.6; color: #b0b0b0; }
+        .debug-box.show { display: block; }
+        .debug-success { color: #00c853; }
+        .debug-fail { color: #ff1744; }
         .loading { color: #666; text-align: center; margin-top: 50px; }
-        .badge { background: #2d3748; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; }
+        .section-title { margin-top: 30px; border-bottom: 1px solid #222; padding-bottom: 10px; color: #aaa; }
+        .raw-table { width: 100%; font-size: 0.8em; border-collapse: collapse; margin-top: 15px; }
+        .raw-table td, .raw-table th { padding: 6px 4px; border-bottom: 1px solid #222; text-align: left; }
+        .raw-table th { color: #888; }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>📊 About to Break Range Detector</h2>
-        <div id="watchlist-container">
-            <div class="loading" id="loading-msg">🔄 Fetching live data from OKX...</div>
-        </div>
+        <p style="color: #888; font-size: 0.9em;">Logic Validation Mode - Raw calculations exposed</p>
+        <div id="watchlist-container"><div class="loading">🔄 Fetching live data from OKX...</div></div>
+        
+        <h3 class="section-title">📋 DEBUG: Raw Logic for All 25 Symbols</h3>
+        <div id="debug-table-container" style="overflow-x: auto;"></div>
     </div>
 
     <script>
-        const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT"];
+        // FULL WATCHLIST
+        const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
 
         async function fetchOKX(symbol) {
@@ -47,17 +65,33 @@
         }
 
         function analyze(candles, symbol) {
-            if (!candles || candles.length < 20) return null;
+            // Default return for strict validation
+            const base = { symbol, qualified: false, rejection_reason: "Insufficient data", 
+                           range_valid: false, price_pos: "N/A", dist_res: 0, dist_sup: 0, 
+                           range_wid: 0, buy_pct: 50, sell_pct: 50, direction: "NEUTRAL", 
+                           final_signal: "No Range Detected", current: 0, res: 0, sup: 0 };
+
+            if (!candles || candles.length < 20) return { ...base, rejection_reason: "Not enough candles (min 20)" };
+
             const highs = candles.map(c => c.high);
             const lows = candles.map(c => c.low);
             const resistance = Math.max(...highs);
             const support = Math.min(...lows);
             const current = candles[candles.length - 1].close;
             const range = resistance - support;
-            if (range <= 0) return null;
+            
+            // REJECTION 1: No Range
+            if (range <= 0) return { ...base, rejection_reason: "Range width is 0 or negative" };
+
+            // REJECTION 2: Range is too small (No valid structure). Using 0.5% of current price as minimum significant range.
+            const min_significant_range = current * 0.005;
+            if (range < min_significant_range) {
+                return { ...base, rejection_reason: `Range too narrow (${(range/current*100).toFixed(3)}% < 0.5% threshold)` };
+            }
 
             const distRes = ((resistance - current) / current) * 100;
             const distSup = ((current - support) / current) * 100;
+            const rangeWidthPct = (range / current) * 100;
             
             let buyVol = 0, sellVol = 0, totalVol = 0;
             candles.slice(-10).forEach(c => {
@@ -70,10 +104,63 @@
             const buyPct = totalVol > 0 ? (buyVol / totalVol * 100) : 50;
             const sellPct = 100 - buyPct;
 
+            // CLASSIFICATION LOGIC
+            let direction = "NEUTRAL";
+            let final_signal = "Consolidating";
+            let price_pos = "Middle of Range";
+
+            if (distRes < 2.0 && buyPct > 50) {
+                direction = "BULLISH";
+                final_signal = "About to Break RANGE UP";
+                price_pos = "At Resistance";
+            } else if (distSup < 2.0 && sellPct > 50) {
+                direction = "BEARISH";
+                final_signal = "About to Break RANGE DOWN";
+                price_pos = "At Support";
+            } else if (distRes < distSup) {
+                direction = "BULLISH";
+                final_signal = "Approaching Resistance";
+                price_pos = "Upper Range";
+            } else if (distSup < distRes) {
+                direction = "BEARISH";
+                final_signal = "Approaching Support";
+                price_pos = "Lower Range";
+            }
+
             return {
-                symbol, current, resistance, support, distRes, distSup,
-                buyPct: buyPct.toFixed(1), sellPct: sellPct.toFixed(1)
+                symbol, qualified: true, rejection_reason: "N/A",
+                current, resistance, support,
+                distRes: distRes.toFixed(2), distSup: distSup.toFixed(2),
+                rangeWidthPct: rangeWidthPct.toFixed(2),
+                buyPct: buyPct.toFixed(1), sellPct: sellPct.toFixed(1),
+                direction, final_signal, price_pos,
+                range_valid: true
             };
+        }
+
+        function renderDebugTable(allData) {
+            const container = document.getElementById("debug-table-container");
+            let html = `<table class="raw-table">
+                <tr><th>Symbol</th><th>Qualified</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Dist Sup%</th><th>Dist Res%</th><th>Buy%</th><th>Sell%</th><th>Direction</th><th>Reason</th></tr>`;
+            allData.forEach(d => {
+                const color = d.qualified ? "#00c853" : "#ff1744";
+                html += `<tr>
+                    <td><strong>${d.symbol}</strong></td>
+                    <td style="color:${color}">${d.qualified ? "✅ YES" : "❌ NO"}</td>
+                    <td>$${d.current.toFixed(2)}</td>
+                    <td>$${d.sup.toFixed(4)}</td>
+                    <td>$${d.res.toFixed(4)}</td>
+                    <td>${d.rangeWidthPct}%</td>
+                    <td>${d.distSup}%</td>
+                    <td>${d.distRes}%</td>
+                    <td>${d.buyPct}%</td>
+                    <td>${d.sellPct}%</td>
+                    <td>${d.direction}</td>
+                    <td style="font-size:0.9em; color:#888;">${d.qualified ? d.final_signal : d.rejection_reason}</td>
+                </tr>`;
+            });
+            html += `</table>`;
+            container.innerHTML = html;
         }
 
         async function loadAll() {
@@ -92,27 +179,51 @@
                 return;
             }
 
-            container.innerHTML = allData.map(d => `
-                <div class="card" style="border-left-color: ${d.buyPct > 50 ? '#00c853' : '#ff1744'};">
+            // RENDER CARDS (Only qualified ones for the UI)
+            const qualified = allData.filter(d => d.qualified);
+            container.innerHTML = qualified.map(d => `
+                <div class="card" style="border-left-color: ${d.direction === 'BULLISH' ? '#00c853' : d.direction === 'BEARISH' ? '#ff1744' : '#555'};">
                     <div class="header">
-                        <span>${d.symbol}</span>
-                        <span class="badge">${d.buyPct > 50 ? '🟢 BULLISH' : '🔴 BEARISH'}</span>
+                        <span style="font-size: 1.1em;">${d.symbol}</span>
+                        <span class="badge ${d.direction === 'BULLISH' ? 'bull' : d.direction === 'BEARISH' ? 'bear' : 'neutral'}">
+                            ${d.direction === 'BULLISH' ? '🟢' : d.direction === 'BEARISH' ? '🔴' : '⚪'} ${d.direction}
+                        </span>
                     </div>
-                    <div class="price">$${d.current.toFixed(4)}</div>
-                    <div class="stats">
-                        <span>🟩 Res: $${d.resistance.toFixed(4)} (${d.distRes.toFixed(1)}%)</span>
-                        <span>🟥 Sup: $${d.support.toFixed(4)} (${d.distSup.toFixed(1)}%)</span>
+                    <div class="price">$${d.current.toFixed(2)}</div>
+                    <div class="grid">
+                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">$${d.resistance.toFixed(4)}</span><br><small style="color:#666;">(${d.distRes}% away)</small></div>
+                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">$${d.support.toFixed(4)}</span><br><small style="color:#666;">(${d.distSup}% away)</small></div>
                     </div>
                     <div class="bar">
                         <div class="buy" style="width: ${d.buyPct}%;"></div>
                         <div class="sell" style="width: ${d.sellPct}%;"></div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.8em; margin-top: 4px; color: #aaa;">
-                        <span>🟢 Buy ${d.buyPct}%</span>
-                        <span>🔴 Sell ${d.sellPct}%</span>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-top: 5px; color: #aaa;">
+                        <span style="color:#00c853;">🟢 Buy ${d.buyPct}%</span>
+                        <span style="color:#ff1744;">🔴 Sell ${d.sellPct}%</span>
+                    </div>
+                    
+                    <button class="debug-btn" onclick="toggleDebug('${d.symbol}')">🔍 Show Logic Reason</button>
+                    <div id="debug-${d.symbol}" class="debug-box">
+                        <div style="color:${d.qualified ? '#00c853' : '#ff1744'}; font-weight:bold;">RANGE VALID = ${d.qualified ? "YES" : "NO"}</div>
+                        <div>PRICE POSITION = ${d.price_pos}</div>
+                        <div>DISTANCE TO RESISTANCE = ${d.distRes}%</div>
+                        <div>DISTANCE TO SUPPORT = ${d.distSup}%</div>
+                        <div>RANGE WIDTH = ${d.rangeWidthPct}%</div>
+                        <div>BUY/SELL PRESSURE = ${d.buyPct}% / ${d.sellPct}%</div>
+                        <div>DIRECTION = ${d.direction}</div>
+                        <div style="margin-top:5px; border-top:1px solid #222; padding-top:5px;">FINAL SIGNAL = <strong>${d.final_signal}</strong></div>
                     </div>
                 </div>
             `).join('');
+
+            // RENDER DEBUG TABLE
+            renderDebugTable(allData);
+        }
+
+        function toggleDebug(symbol) {
+            const box = document.getElementById(`debug-${symbol}`);
+            box.classList.toggle('show');
         }
 
         // Run immediately
