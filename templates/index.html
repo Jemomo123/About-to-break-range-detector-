@@ -3,498 +3,122 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ABOUT TO BREAK RANGE DETECTOR</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+    <title>Range Detector</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            background: #0a0e17;
-            color: #d1d9e6;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            padding: 10px 12px;
-            font-size: 13px;
-            line-height: 1.4;
-            min-height: 100vh;
-        }
-        .container { max-width: 1600px; margin: 0 auto; }
-
-        .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 8px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #1e293b;
-            margin-bottom: 12px;
-        }
-        .header-title {
-            font-weight: 800;
-            font-size: 1rem;
-            letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .status-badge {
-            background: #052e16; color: #4ade80;
-            border: 1px solid #166534;
-            border-radius: 100px;
-            padding: 2px 10px;
-            font-size: 0.55rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            animation: pulse-green 1.5s ease-in-out infinite;
-        }
-        .status-badge.scanning {
-            background: #451a03; color: #fb923c;
-            border-color: #78350f;
-            animation: pulse-orange 1s ease-in-out infinite;
-        }
-        @keyframes pulse-green { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
-        @keyframes pulse-orange { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .status-detail {
-            font-size: 0.6rem;
-            color: #64748b;
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        .status-detail span { white-space: nowrap; }
-        .status-detail .highlight { color: #94a3b8; font-weight: 600; }
-
-        .tf-pills {
-            display: flex;
-            gap: 3px;
-            background: #111927;
-            padding: 3px;
-            border-radius: 6px;
-            border: 1px solid #1e293b;
-        }
-        .tf-pill {
-            background: transparent;
-            border: none;
-            color: #64748b;
-            padding: 2px 10px;
-            border-radius: 4px;
-            font-size: 0.65rem;
-            font-weight: 600;
-            text-decoration: none;
-            transition: 0.15s;
-        }
-        .tf-pill:hover { color: #e2e8f0; background: #1e293b; }
-        .tf-pill.active { background: #2563eb; color: #fff; }
-
-        .watchlist-drawer {
-            background: #0f172a;
-            border: 1px solid #1e293b;
-            border-radius: 8px;
-            margin-bottom: 12px;
-            padding: 4px 8px;
-        }
-        .watchlist-drawer summary {
-            cursor: pointer;
-            color: #94a3b8;
-            font-size: 0.7rem;
-            font-weight: 600;
-            padding: 6px 4px;
-            list-style: none;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            user-select: none;
-        }
-        .watchlist-drawer summary::-webkit-details-marker { display: none; }
-        .watchlist-drawer summary:hover { color: #e2e8f0; }
-        .wl-icon { font-size: 0.6rem; color: #fbbf24; }
-        .wl-count { color: #475569; font-weight: 400; }
-        .wl-grid {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px 8px;
-            padding: 4px 0 8px 0;
-            max-height: 120px;
-            overflow-y: auto;
-        }
-        .wl-item {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-            background: #1a2332;
-            padding: 2px 6px 2px 4px;
-            border-radius: 4px;
-            font-size: 0.6rem;
-            font-weight: 600;
-        }
-        .wl-sym { color: #e2e8f0; }
-        .wl-tf { color: #64748b; font-weight: 400; font-size: 0.5rem; }
-        .wl-pin { background: none; border: none; color: #64748b; padding: 0 2px; font-size: 0.6rem; cursor: pointer; }
-        .wl-pin:hover { color: #fbbf24; }
-        .wl-pin.active { color: #fbbf24; }
-        .wl-remove { background: none; border: none; color: #475569; padding: 0 2px; font-size: 0.5rem; cursor: pointer; }
-        .wl-remove:hover { color: #f87171; }
-        .wl-add-area {
-            display: flex;
-            gap: 4px;
-            align-items: center;
-            margin-left: 4px;
-        }
-        .wl-add-input {
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 4px;
-            padding: 2px 6px;
-            color: #e2e8f0;
-            font-size: 0.6rem;
-            width: 80px;
-        }
-        .wl-add-input:focus { outline: none; border-color: #2563eb; }
-        .wl-add-btn {
-            background: #2563eb;
-            border: none;
-            color: #fff;
-            font-weight: 600;
-            padding: 2px 10px;
-            border-radius: 4px;
-            font-size: 0.6rem;
-            cursor: pointer;
-        }
-        .wl-add-btn:hover { background: #3b82f6; }
-
-        .card-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 10px;
-        }
-
-        .scan-card {
-            background: #0f172a;
-            border: 1px solid #1e293b;
-            border-radius: 8px;
-            padding: 12px 14px;
-            transition: all 0.2s ease;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .scan-card.card-buyers { border-left: 4px solid #00c897; }
-        .scan-card.card-sellers { border-left: 4px solid #f23645; }
-        .scan-card.card-neutral { border-left: 4px solid #334155; }
-        .scan-card:hover { border-color: #475569; background: #131d2e; }
-
-        .card-row { display: flex; justify-content: space-between; align-items: center; }
-        .card-row-center { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
-
-        .card-symbol { font-weight: 700; font-size: 1rem; color: #f1f5f9; }
-        .card-tf {
-            background: #1e293b; color: #94a3b8;
-            padding: 1px 6px; border-radius: 4px;
-            font-size: 0.55rem; font-weight: 600;
-            margin-left: 6px;
-        }
-        .card-level {
-            font-size: 0.6rem;
-            color: #94a3b8;
-            background: #1e293b;
-            padding: 1px 8px;
-            border-radius: 4px;
-        }
-        .card-updated { font-size: 0.5rem; color: #475569; font-weight: 400; }
-
-        .price-main { font-weight: 700; font-size: 1rem; color: #e2e8f0; }
-        .price-label { font-size: 0.5rem; color: #64748b; font-weight: 600; text-transform: uppercase; }
-        .price-value { font-weight: 600; font-size: 0.75rem; }
-        .price-value.sup { color: #4ade80; }
-        .price-value.res { color: #f87171; }
-
-        .winner-badge {
-            font-weight: 700;
-            font-size: 0.8rem;
-            padding: 2px 10px;
-            border-radius: 100px;
-            display: inline-block;
-        }
-        .winner-buyers { background: #064e3b; color: #4ade80; }
-        .winner-sellers { background: #7f1d1d; color: #f87171; }
-        .winner-neutral { background: #1e293b; color: #94a3b8; }
-
-        .signal-badge {
-            font-weight: 700;
-            font-size: 0.75rem;
-            padding: 2px 10px;
-            border-radius: 4px;
-            display: inline-block;
-        }
-        .signal-breakout { background: #064e3b; color: #34d399; }
-        .signal-breakdown { background: #7f1d1d; color: #f87171; }
-        .signal-holding { background: #78350f; color: #fbbf24; }
-        .signal-none { background: #1e293b; color: #64748b; }
-
-        .explanation-text {
-            font-size: 0.65rem;
-            color: #94a3b8;
-            font-style: italic;
-            border-top: 1px solid #1e293b;
-            padding-top: 4px;
-            margin-top: 2px;
-        }
-
-        .status-center {
-            grid-column: 1/-1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 60px 20px;
-            color: #64748b;
-            text-align: center;
-            gap: 12px;
-        }
-        .status-center .icon { font-size: 2rem; opacity: 0.6; }
-        .status-center .msg { font-size: 1rem; font-weight: 500; color: #94a3b8; }
-        .status-center .sub { font-size: 0.8rem; color: #475569; }
-        .spinner {
-            display: inline-block;
-            width: 24px;
-            height: 24px;
-            border: 3px solid #1e293b;
-            border-top-color: #60a5fa;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .skeleton-card {
-            background: #0f172a;
-            border: 1px solid #1e293b;
-            border-radius: 10px;
-            padding: 12px 14px;
-            height: 180px;
-            background-image: linear-gradient(90deg, #1a2332 25%, #243044 50%, #1a2332 75%);
-            background-size: 200% 100%;
-            animation: shimmer 1.5s infinite;
-        }
-        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-
-        .scanner-summary {
-            margin-top: 16px;
-            padding: 8px 12px;
-            background: #0f172a;
-            border-radius: 8px;
-            border: 1px solid #1e293b;
-            font-size: 0.65rem;
-            color: #94a3b8;
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-        .scanner-summary .stat { display: flex; align-items: center; gap: 4px; }
-        .scanner-summary .stat .num { color: #e2e8f0; font-weight: 600; }
-        .scanner-summary .stat .label { color: #64748b; }
-
-        @media (max-width: 600px) {
-            body { padding: 6px; font-size: 12px; }
-            .header-title { font-size: 0.85rem; }
-            .tf-pills { width: 100%; justify-content: space-between; }
-            .tf-pill { flex: 1; text-align: center; padding: 2px 4px; font-size: 0.6rem; }
-            .card-grid { grid-template-columns: 1fr; gap: 8px; }
-            .scan-card { padding: 10px 12px; }
-            .status-detail { font-size: 0.5rem; gap: 6px; }
-            .scanner-summary { font-size: 0.55rem; gap: 8px; }
-        }
+        body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
+        .container { max-width: 600px; margin: auto; }
+        .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
+        .header { display: flex; justify-content: space-between; font-weight: bold; }
+        .price { font-size: 1.2em; margin: 5px 0; }
+        .stats { display: flex; gap: 20px; font-size: 0.9em; color: #aaa; }
+        .bar { height: 8px; border-radius: 4px; margin-top: 8px; display: flex; }
+        .buy { background: #00c853; height: 100%; }
+        .sell { background: #ff1744; height: 100%; }
+        .loading { color: #666; text-align: center; margin-top: 50px; }
+        .badge { background: #2d3748; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; }
     </style>
 </head>
 <body>
-<div class="container">
-
-    <!-- HEADER -->
-    <div class="header">
-        <span class="header-title">⟡ ABOUT TO BREAK RANGE DETECTOR</span>
-        <div class="header-right">
-            <span class="status-badge {% if scan_status.state == 'SCANNING' %}scanning{% endif %}">
-                {% if scan_status.state == 'SCANNING' %}● SCANNING{% else %}● LIVE{% endif %}
-            </span>
-            <div class="status-detail">
-                <span>Scanned: <span class="highlight">{{ scan_status.symbols_scanned }}/{{ scan_status.total_symbols }}</span></span>
-                <!-- FIX: display selected_tf instead of scan_status.current_timeframe -->
-                <span>TF: <span class="highlight">{{ selected_tf }}</span></span>
-                <span>Updated: <span class="highlight">{{ scan_status.last_update or '—' }}</span></span>
-            </div>
-            <div class="tf-pills">
-                <a href="/?tf=ALL" class="tf-pill {{ 'active' if selected_tf == 'ALL' else '' }}">ALL</a>
-                <a href="/?tf=5M" class="tf-pill {{ 'active' if selected_tf == '5M' else '' }}">5M</a>
-                <a href="/?tf=15M" class="tf-pill {{ 'active' if selected_tf == '15M' else '' }}">15M</a>
-                <a href="/?tf=1H" class="tf-pill {{ 'active' if selected_tf == '1H' else '' }}">1H</a>
-                <a href="/?tf=4H" class="tf-pill {{ 'active' if selected_tf == '4H' else '' }}">4H</a>
-            </div>
+    <div class="container">
+        <h2>📊 About to Break Range Detector</h2>
+        <div id="watchlist-container">
+            <div class="loading" id="loading-msg">🔄 Fetching live data from OKX...</div>
         </div>
     </div>
 
-    <!-- WATCHLIST (COLLAPSIBLE) -->
-    <details class="watchlist-drawer">
-        <summary>
-            <span class="wl-icon">★</span> Watchlist
-            <span class="wl-count">({{ watchlist_rows|length }} symbols)</span>
-            <span style="margin-left:auto; font-size:0.6rem; color:#475569;">▼ click to expand</span>
-        </summary>
-        <div class="wl-grid">
-            {% for item in watchlist_rows %}
-            <div class="wl-item">
-                <button class="wl-pin {{ 'active' if item.pinned else '' }}" onclick="togglePin('{{ item.symbol }}', '{{ item.timeframe }}')">★</button>
-                <span class="wl-sym">{{ item.symbol }}</span>
-                <span class="wl-tf">{{ item.timeframe }}</span>
-                <span class="wl-price" style="color:{% if item.curr_close == 'Unsupported' %}#64748b{% else %}#94a3b8{% endif %};">
-                    {% if item.curr_close == 'Unsupported' %}
-                        Unsupported
-                    {% elif item.curr_close == 'Loading...' %}
-                        ...
-                    {% else %}
-                        ${{ item.curr_close }}
-                    {% endif %}
-                </span>
-                <button class="wl-remove" onclick="removeSymbol('{{ item.symbol }}', '{{ item.timeframe }}')">✕</button>
-            </div>
-            {% endfor %}
-            <div class="wl-add-area">
-                <input type="text" id="add-symbol-input" class="wl-add-input" placeholder="Add Symbol">
-                <button class="wl-add-btn" onclick="addWatchlistSymbol()">+</button>
-            </div>
-        </div>
-    </details>
+    <script>
+        const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT"];
+        const TF = "15m";
 
-    <!-- SCANNER RESULTS -->
-    <div class="card-grid">
-        {% if is_loading %}
-            {% for _ in range(6) %}
-            <div class="skeleton-card"></div>
-            {% endfor %}
-            <div class="status-center">
-                <div class="spinner"></div>
-                <div class="msg">⏳ Connecting to OKX...</div>
-                <div class="sub">Initial scan in progress</div>
-            </div>
-        {% elif rows|length == 0 %}
-            <div class="status-center">
-                <div class="icon">📡</div>
-                <div class="msg">No active battles detected</div>
-                <div class="sub">Scanner is live and monitoring {{ watchlist_rows|length }} symbols</div>
-            </div>
-        {% else %}
-            {% for row in rows %}
-            <div class="scan-card 
-                {% if row.winner == 'BUYERS' %}card-buyers
-                {% elif row.winner == 'SELLERS' %}card-sellers
-                {% else %}card-neutral{% endif %}">
-                
-                <!-- Row 1: Symbol + Timeframe + Level -->
-                <div class="card-row">
-                    <div>
-                        <span class="card-symbol">{{ row.symbol }}</span>
-                        <span class="card-tf">{{ row.timeframe }}</span>
-                        <span class="card-level">{{ row.level_type }}</span>
+        async function fetchOKX(symbol) {
+            const clean = symbol.replace("USDT", "-USDT");
+            const url = `https://www.okx.com/api/v5/market/candles?instId=${clean}&bar=${TF}&limit=30`;
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (data.code === "0" && data.data.length > 0) {
+                    return data.data.map(c => ({
+                        time: c[0], open: parseFloat(c[1]), high: parseFloat(c[2]),
+                        low: parseFloat(c[3]), close: parseFloat(c[4]), vol: parseFloat(c[5])
+                    }));
+                }
+            } catch (e) { return null; }
+            return null;
+        }
+
+        function analyze(candles, symbol) {
+            if (!candles || candles.length < 20) return null;
+            const highs = candles.map(c => c.high);
+            const lows = candles.map(c => c.low);
+            const resistance = Math.max(...highs);
+            const support = Math.min(...lows);
+            const current = candles[candles.length - 1].close;
+            const range = resistance - support;
+            if (range <= 0) return null;
+
+            const distRes = ((resistance - current) / current) * 100;
+            const distSup = ((current - support) / current) * 100;
+            
+            let buyVol = 0, sellVol = 0, totalVol = 0;
+            candles.slice(-10).forEach(c => {
+                const volRange = c.high - c.low;
+                const bRatio = volRange > 0 ? (c.close - c.low) / volRange : 0.5;
+                buyVol += c.vol * bRatio;
+                sellVol += c.vol * (1 - bRatio);
+                totalVol += c.vol;
+            });
+            const buyPct = totalVol > 0 ? (buyVol / totalVol * 100) : 50;
+            const sellPct = 100 - buyPct;
+
+            return {
+                symbol, current, resistance, support, distRes, distSup,
+                buyPct: buyPct.toFixed(1), sellPct: sellPct.toFixed(1)
+            };
+        }
+
+        async function loadAll() {
+            const container = document.getElementById("watchlist-container");
+            container.innerHTML = '<div class="loading">🔄 Fetching live data from OKX...</div>';
+
+            const allData = [];
+            for (const sym of SYMBOLS) {
+                const candles = await fetchOKX(sym);
+                const result = analyze(candles, sym);
+                if (result) allData.push(result);
+            }
+
+            if (allData.length === 0) {
+                container.innerHTML = '<div class="loading" style="color: #ff1744;">❌ Failed to fetch data. Please refresh.</div>';
+                return;
+            }
+
+            container.innerHTML = allData.map(d => `
+                <div class="card" style="border-left-color: ${d.buyPct > 50 ? '#00c853' : '#ff1744'};">
+                    <div class="header">
+                        <span>${d.symbol}</span>
+                        <span class="badge">${d.buyPct > 50 ? '🟢 BULLISH' : '🔴 BEARISH'}</span>
                     </div>
-                    <span class="card-updated">{{ row.last_updated }}</span>
+                    <div class="price">$${d.current.toFixed(4)}</div>
+                    <div class="stats">
+                        <span>🟩 Res: $${d.resistance.toFixed(4)} (${d.distRes.toFixed(1)}%)</span>
+                        <span>🟥 Sup: $${d.support.toFixed(4)} (${d.distSup.toFixed(1)}%)</span>
+                    </div>
+                    <div class="bar">
+                        <div class="buy" style="width: ${d.buyPct}%;"></div>
+                        <div class="sell" style="width: ${d.sellPct}%;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.8em; margin-top: 4px; color: #aaa;">
+                        <span>🟢 Buy ${d.buyPct}%</span>
+                        <span>🔴 Sell ${d.sellPct}%</span>
+                    </div>
                 </div>
+            `).join('');
+        }
 
-                <!-- Row 2: Price + Level Price -->
-                <div class="card-row">
-                    <span class="price-main">${{ row.curr_close }}</span>
-                    <span style="font-size:0.6rem; color:#64748b;">
-                        Level: ${{ row.level_price }}
-                        ({{ row.distance_to_level }}%)
-                    </span>
-                </div>
-
-                <!-- Row 3: Who is winning + Signal -->
-                <div class="card-row">
-                    <span class="winner-badge 
-                        {% if row.winner == 'BUYERS' %}winner-buyers
-                        {% elif row.winner == 'SELLERS' %}winner-sellers
-                        {% else %}winner-neutral{% endif %}">
-                        {{ row.winner }}
-                    </span>
-                    <span class="signal-badge
-                        {% if row.signal == 'BREAKOUT IMMINENT' %}signal-breakout
-                        {% elif row.signal == 'BREAKDOWN IMMINENT' %}signal-breakdown
-                        {% elif row.signal == 'RESISTANCE HOLDING' or row.signal == 'SUPPORT HOLDING' %}signal-holding
-                        {% else %}signal-none{% endif %}">
-                        {{ row.signal }}
-                    </span>
-                </div>
-
-                <!-- Row 4: Support + Resistance -->
-                <div class="card-row-center">
-                    <span><span class="price-label">Support</span> <span class="price-value sup">${{ row.support }}</span></span>
-                    <span><span class="price-label">Resistance</span> <span class="price-value res">${{ row.resistance }}</span></span>
-                </div>
-
-                <!-- Row 5: Explanation -->
-                <div class="explanation-text">{{ row.explanation }}</div>
-
-            </div>
-            {% endfor %}
-        {% endif %}
-    </div>
-
-    <!-- SCANNER SUMMARY -->
-    <div class="scanner-summary">
-        <span class="stat"><span class="label">Scanned:</span> <span class="num">{{ diagnostics.total_symbols * diagnostics.timeframes }}</span></span>
-        <span class="stat"><span class="label">Passed:</span> <span class="num">{{ diagnostics.passed }}</span></span>
-        <span class="stat"><span class="label">Unsupported:</span> <span class="num">{{ diagnostics.unsupported }}</span></span>
-        <span class="stat"><span class="label">Failed:</span> <span class="num">{{ diagnostics.failed_logic }}</span></span>
-        <span class="stat"><span class="label">Displayed:</span> <span class="num">{{ diagnostics.displayed }}</span></span>
-        <span class="stat"><span class="label">Cache:</span> <span class="num">{{ diagnostics.cache_size }}</span></span>
-    </div>
-
-</div>
-
-{% if is_loading %}
-<script>
-    setTimeout(function() { window.location.reload(); }, 5000);
-</script>
-{% endif %}
-
-<script>
-    const selectedTf = "{{ selected_tf }}";
-
-    async function addWatchlistSymbol() {
-        let symbol = document.getElementById('add-symbol-input').value.trim().toUpperCase();
-        if (!symbol) return;
-        await fetch('/api/watchlist/add', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol: symbol, timeframe: selectedTf !== "ALL" ? selectedTf : "15M" })
-        });
-        window.location.reload();
-    }
-
-    async function removeSymbol(symbol, tf) {
-        if (!confirm(`Remove ${symbol}?`)) return;
-        await fetch('/api/watchlist/remove', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol: symbol, timeframe: tf })
-        });
-        window.location.reload();
-    }
-
-    async function togglePin(symbol, tf) {
-        await fetch('/api/watchlist/pin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol: symbol, timeframe: tf })
-        });
-        window.location.reload();
-    }
-
-    document.getElementById('add-symbol-input').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') addWatchlistSymbol();
-    });
-</script>
-
+        // Run immediately
+        loadAll();
+        // Refresh every 30 seconds
+        setInterval(loadAll, 30000);
+    </script>
 </body>
 </html>
