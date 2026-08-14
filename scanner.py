@@ -1,6 +1,6 @@
-# ===== scanner.py – HTTP CALL DIAGNOSTIC =====
-# Adds explicit logs around the actual requests.get() call.
-# No other changes.
+# ===== scanner.py – HTTP CALL DIAGNOSTIC + 15M FIRST =====
+# Adds explicit HTTP call logs and changes scan order to 15M -> 5M -> 1H -> 4H.
+# All detection logic unchanged.
 
 import requests
 import pandas as pd
@@ -39,7 +39,7 @@ DEFAULT_WATCHLIST = [
     "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"
 ]
 
-# ---- HELPER FUNCTIONS ----
+# ---- HELPER FUNCTIONS (unchanged) ----
 def is_unsupported(symbol):
     with UNSUPPORTED_LOCK:
         return symbol in UNSUPPORTED_SYMBOLS
@@ -63,7 +63,7 @@ def get_timeframe_seconds(timeframe: str) -> int:
     return mapping.get(timeframe, 900)
 
 # =============================================================
-# FETCH WITH HTTP CALL LOGGING
+# FETCH WITH EXPLICIT HTTP CALL LOGGING
 # =============================================================
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     if is_unsupported(symbol):
@@ -84,10 +84,12 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     print(f"[OKX SPOT URL] {symbol} {timeframe}: {okx_spot_url}")
 
     try:
-        # --- LOG BEFORE HTTP CALL ---
+        # ---- LOG HTTP TIMEOUT CONFIG ----
+        print(f"[HTTP TIMEOUT CONFIG] {symbol} {timeframe} (5, 10)")
+        # ---- LOG ENTER ----
         print(f"[HTTP CALL ENTER] {symbol} {timeframe}")
         resp = requests.get(okx_spot_url, headers=HEADERS, timeout=(5, 10))
-        # --- LOG AFTER HTTP CALL ---
+        # ---- LOG RETURN ----
         print(f"[HTTP CALL RETURN] {symbol} {timeframe}")
         print(f"[HTTP RESPONSE] {symbol} {timeframe} status={resp.status_code}")
 
@@ -122,13 +124,13 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
         else:
             print(f"[FETCH ERROR] {symbol} {timeframe} HTTP {resp.status_code}")
     except requests.exceptions.Timeout as e:
-        print(f"[HTTP CALL TIMEOUT] {symbol} {timeframe}: {e}")
+        print(f"[HTTP CALL TIMEOUT] {symbol} {timeframe}: {repr(e)}")
         print(f"[OKX TIMEOUT] {symbol} {timeframe} -> trying swap...")
-    except requests.exceptions.ConnectionError as e:
-        print(f"[HTTP CALL CONNECTION ERROR] {symbol} {timeframe}: {e}")
-        print(f"[OKX CONNECTION ERROR] {symbol} {timeframe} -> trying swap...")
+    except requests.exceptions.RequestException as e:
+        print(f"[HTTP REQUEST ERROR] {symbol} {timeframe}: {repr(e)}")
+        print(f"[OKX REQUEST ERROR] {symbol} {timeframe} -> trying swap...")
     except Exception as e:
-        print(f"[HTTP CALL EXCEPTION] {symbol} {timeframe}: {e}")
+        print(f"[HTTP UNEXPECTED ERROR] {symbol} {timeframe}: {repr(e)}")
         print(f"[FETCH ERROR] {symbol} {timeframe}: {e}")
 
     # ---- 2. OKX Swap ----
@@ -137,6 +139,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     print(f"[OKX SWAP URL] {symbol} {timeframe}: {okx_swap_url}")
 
     try:
+        print(f"[HTTP TIMEOUT CONFIG] {symbol} {timeframe} (SWAP) (5, 10)")
         print(f"[HTTP CALL ENTER] {symbol} {timeframe} (SWAP)")
         resp = requests.get(okx_swap_url, headers=HEADERS, timeout=(5, 10))
         print(f"[HTTP CALL RETURN] {symbol} {timeframe} (SWAP)")
@@ -171,10 +174,13 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
         else:
             print(f"[FETCH ERROR] {symbol} {timeframe} HTTP {resp.status_code}")
     except requests.exceptions.Timeout as e:
-        print(f"[HTTP CALL TIMEOUT] {symbol} {timeframe} (SWAP): {e}")
+        print(f"[HTTP CALL TIMEOUT] {symbol} {timeframe} (SWAP): {repr(e)}")
         print(f"[OKX SWAP TIMEOUT] {symbol} {timeframe} -> trying MEXC...")
+    except requests.exceptions.RequestException as e:
+        print(f"[HTTP REQUEST ERROR] {symbol} {timeframe} (SWAP): {repr(e)}")
+        print(f"[OKX SWAP REQUEST ERROR] {symbol} {timeframe} -> trying MEXC...")
     except Exception as e:
-        print(f"[HTTP CALL EXCEPTION] {symbol} {timeframe} (SWAP): {e}")
+        print(f"[HTTP UNEXPECTED ERROR] {symbol} {timeframe} (SWAP): {repr(e)}")
         print(f"[FETCH ERROR] {symbol} {timeframe}: {e}")
 
     # ---- 3. MEXC Fallback ----
@@ -184,6 +190,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
     print(f"[MEXC URL] {symbol} {timeframe}: {mexc_url}")
 
     try:
+        print(f"[HTTP TIMEOUT CONFIG] {symbol} {timeframe} (MEXC) (5, 10)")
         print(f"[HTTP CALL ENTER] {symbol} {timeframe} (MEXC)")
         resp = requests.get(mexc_url, headers=HEADERS, timeout=(5, 10))
         print(f"[HTTP CALL RETURN] {symbol} {timeframe} (MEXC)")
@@ -215,8 +222,14 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
                 print(f"[FETCH ERROR] {symbol} {timeframe} empty data")
         else:
             print(f"[FETCH ERROR] {symbol} {timeframe} HTTP {resp.status_code}")
+    except requests.exceptions.Timeout as e:
+        print(f"[HTTP CALL TIMEOUT] {symbol} {timeframe} (MEXC): {repr(e)}")
+        print(f"[MEXC TIMEOUT] {symbol} {timeframe}")
+    except requests.exceptions.RequestException as e:
+        print(f"[HTTP REQUEST ERROR] {symbol} {timeframe} (MEXC): {repr(e)}")
+        print(f"[MEXC REQUEST ERROR] {symbol} {timeframe}")
     except Exception as e:
-        print(f"[HTTP CALL EXCEPTION] {symbol} {timeframe} (MEXC): {e}")
+        print(f"[HTTP UNEXPECTED ERROR] {symbol} {timeframe} (MEXC): {repr(e)}")
         print(f"[FETCH ERROR] {symbol} {timeframe}: {e}")
 
     print(f"[FETCH FAILED] {symbol} {timeframe} all sources failed")
@@ -229,7 +242,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 150):
 # classify_pattern, analyze_level_battle, _process_symbol_tf
 # They are identical to the original scanner.py. For brevity, they are not repeated here.
 
-# ---- WORKER WITH FULL WATCHLIST AND 5M FIRST ----
+# ---- WORKER WITH 15M FIRST ----
 def _process_symbol_tf(symbol: str, tf: str):
     print(f"[PROCESSING START] {symbol} {tf}")
     if is_unsupported(symbol):
@@ -247,11 +260,12 @@ def _process_symbol_tf(symbol: str, tf: str):
 def update_cache_job():
     global SCAN_READY
     print(">>> BACKGROUND SCANNER STARTED")
-    print(">>> SCAN ORDER: 5M -> 15M -> 1H -> 4H")
+    # ---- 15M FIRST ----
+    print(">>> SCAN ORDER: 15M -> 5M -> 1H -> 4H")
     first_data_received = False
     while True:
         try:
-            for tf in ["5M", "15M", "1H", "4H"]:
+            for tf in ["15M", "5M", "1H", "4H"]:
                 print(f">>> Scanning {tf}...")
                 tasks = [sym for sym in DEFAULT_WATCHLIST]
                 with ThreadPoolExecutor(max_workers=10) as executor:
