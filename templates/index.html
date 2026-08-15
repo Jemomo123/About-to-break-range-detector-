@@ -27,19 +27,24 @@
         .loading { color: #666; text-align: center; margin-top: 20px; font-size: 1.1em; }
         
         /* ========================================== */
-        /* FORCED TABLE RENDER - MOBILE BROWSER FIX   */
+        /* FORCED TABLE RENDER & EXPANSION FIX        */
         /* ========================================== */
-        #debug-root { overflow-x: auto; margin-top: 15px; }
+        #debug-root { 
+            overflow-x: auto; 
+            margin-top: 15px; 
+            min-height: 500px; /* 🔥 FORCES PAGE TO EXPAND SO YOU CAN SCROLL */
+            width: 100%;
+        }
         .raw-table { 
             width: 100%; 
             font-size: 0.75em; 
             border-collapse: collapse; 
-            background: #0f1219;  /* Forces background paint */
-            border: 1px solid #222; /* Forces border paint */
+            background: #0f1219; 
+            border: 1px solid #222; 
         }
         .raw-table td, .raw-table th { 
-            padding: 8px 6px; 
-            border: 1px solid #333; /* Forces cell paint */
+            padding: 10px 6px; 
+            border: 1px solid #333; 
             text-align: left; 
         }
         .raw-table th { color: #888; background: #161b22; }
@@ -169,7 +174,7 @@
             }
             updateState('VALIDATED', 'Done.');
 
-            // RENDER DEBUG TABLE - FORCED MOBILE PAINT
+            // RENDER DEBUG TABLE
             let debugRows = "";
             allData.forEach(d => {
                 const stateClass = d.state === 'QUALIFIED' ? 'qualified-yes' : d.state === 'FAILED' ? 'qualified-no' : 'fetch-error';
