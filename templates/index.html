@@ -6,7 +6,7 @@
     <title>Range Detector - Logic Validation</title>
     <style>
         body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
-        .container { max-width: 700px; margin: auto; }
+        .container { max-width: 750px; margin: auto; }
         .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
         .header { display: flex; justify-content: space-between; font-weight: bold; align-items: center; }
         .price { font-size: 1.4em; margin: 8px 0; font-weight: 600; }
@@ -21,24 +21,37 @@
         .badge.bull { background: rgba(0, 200, 83, 0.2); color: #00c853; }
         .badge.bear { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
         .badge.neutral { background: #2d3748; color: #aaa; }
+        .badge.failed { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
         .debug-btn { background: none; border: 1px solid #333; color: #888; padding: 2px 8px; border-radius: 4px; cursor: pointer; margin-top: 10px; font-size: 0.8em; }
         .debug-box { display: none; background: #0f1219; border: 1px solid #222; padding: 15px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 0.85em; line-height: 1.6; color: #b0b0b0; }
         .debug-box.show { display: block; }
-        .loading { color: #666; text-align: center; margin-top: 50px; }
+        .loading { color: #666; text-align: center; margin-top: 20px; font-size: 1.1em; }
         .section-title { margin-top: 30px; border-bottom: 1px solid #222; padding-bottom: 10px; color: #aaa; }
-        .raw-table { width: 100%; font-size: 0.8em; border-collapse: collapse; margin-top: 15px; }
+        .raw-table { width: 100%; font-size: 0.75em; border-collapse: collapse; margin-top: 15px; }
         .raw-table td, .raw-table th { padding: 6px 4px; border-bottom: 1px solid #222; text-align: left; }
         .raw-table th { color: #888; }
-        .ohlcv-btn { background: none; border: 1px solid #333; color: #888; padding: 2px 8px; border-radius: 4px; cursor: pointer; margin-top: 5px; font-size: 0.8em; }
+        .raw-table .qualified-yes { color: #00c853; font-weight: bold; }
+        .raw-table .qualified-no { color: #ff1744; font-weight: bold; }
+        .raw-table .failed-state { color: #ff1744; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; }
+        .status-fetching { background: #2d3748; color: #fbbf24; }
+        .status-validated { background: #2d3748; color: #60a5fa; }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>📊 About to Break Range Detector</h2>
         <p style="color: #888; font-size: 0.9em;">PURE LOGIC VALIDATION MODE - Raw formulas & values exposed</p>
-        <div id="watchlist-container"><div class="loading">🔄 Fetching live data from OKX...</div></div>
         
-        <h3 class="section-title">📋 DEBUG: Raw Logic & Formulas for All 25 Symbols</h3>
+        <!-- Status Header -->
+        <div id="status-header" style="margin-top: 15px; border: 1px solid #222; padding: 10px; border-radius: 6px;">
+            <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
+            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Loading 0 / 25 symbols...</div>
+        </div>
+
+        <div id="watchlist-container" style="margin-top: 20px;"></div>
+        
+        <h3 class="section-title" style="margin-top: 40px;">📋 DEBUG: Raw Logic & Formulas for All 25 Symbols</h3>
         <div id="debug-table-container" style="overflow-x: auto;"></div>
     </div>
 
@@ -47,6 +60,20 @@
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
         const MIN_RANGE_THRESHOLD_PCT = 0.5; // 0.5%
+
+        function updateState(state, loaded, total) {
+            const appState = document.getElementById('app-state');
+            const progress = document.getElementById('progress-text');
+            
+            appState.innerText = state;
+            if(state === 'FETCHING') {
+                appState.className = 'status-badge status-fetching';
+                progress.innerText = `Loading ${loaded} / ${total} symbols...`;
+            } else if (state === 'VALIDATED') {
+                appState.className = 'status-badge status-validated';
+                progress.innerText = `Finished. ${loaded} symbols analyzed.`;
+            }
+        }
 
         async function fetchOKX(symbol) {
             const clean = symbol.replace("USDT", "-USDT");
@@ -59,13 +86,31 @@
                         time: c[0], open: parseFloat(c[1]), high: parseFloat(c[2]),
                         low: parseFloat(c[3]), close: parseFloat(c[4]), vol: parseFloat(c[5])
                     }));
+                } else {
+                    return { error: `OKX API Error: ${data.code}` };
                 }
-            } catch (e) { return null; }
-            return null;
+            } catch (e) { 
+                return { error: `Fetch Exception: ${e.message}` }; 
+            }
         }
 
         function analyze(candles, symbol) {
-            // 1. RANGE CALCULATION: uses raw OHLCV high/low values
+            if (!candles || candles.error) {
+                return { 
+                    symbol, state: "FAILED", 
+                    rejection_reason: candles ? candles.error : "No data returned",
+                    current: 0, resistance: 0, support: 0
+                };
+            }
+            
+            if (candles.length < 20) {
+                return { 
+                    symbol, state: "FAILED", 
+                    rejection_reason: "Not enough candles (min 20)", 
+                    current: candles[candles.length-1].close, resistance: 0, support: 0
+                };
+            }
+
             const highs = candles.map(c => c.high);
             const lows = candles.map(c => c.low);
             const resistance = Math.max(...highs);
@@ -73,33 +118,23 @@
             const current = candles[candles.length - 1].close;
             const range = resistance - support;
             
-            // 2. EXACT FORMULA DISPLAY
-            const defaultBase = { 
-                symbol, qualified: false, rejection_reason: "Insufficient data", 
-                range_valid: false, price_pos: "N/A", dist_res: 0, dist_sup: 0, 
-                range_wid: 0, buy_pct: 50, sell_pct: 50, direction: "NEUTRAL", 
-                final_signal: "No Range Detected", current, res: resistance, sup: support,
-                formula_range: "Math.max(Highs) - Math.min(Lows)",
-                raw_last_candles: candles.slice(-2)
-            };
+            if (range <= 0) {
+                return { symbol, state: "FAILED", rejection_reason: "Range width is 0 or negative", current, resistance, support };
+            }
 
-            if (!candles || candles.length < 20) return { ...defaultBase, rejection_reason: "Not enough candles (min 20)" };
-            if (range <= 0) return { ...defaultBase, rejection_reason: "Range width is 0 or negative" };
-
-            // 3. QUALIFICATION: Compare computed range width vs 0.5% threshold
             const rangeWidthPct = (range / current) * 100;
-            const thresholdPct = MIN_RANGE_THRESHOLD_PCT;
             
-            if (rangeWidthPct < thresholdPct) {
+            if (rangeWidthPct < MIN_RANGE_THRESHOLD_PCT) {
                 return { 
-                    ...defaultBase, 
-                    qualified: false, 
-                    rejection_reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < ${thresholdPct}% threshold)`,
-                    rangeWidthPct: rangeWidthPct.toFixed(3)
+                    symbol, state: "FAILED", 
+                    rejection_reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < ${MIN_RANGE_THRESHOLD_PCT}% threshold)`,
+                    current, resistance, support, rangeWidthPct: rangeWidthPct.toFixed(3)
                 };
             }
 
-            // 4. BUY/SELL %: Candle Close vs Low ratio (NOT order-book volume)
+            const distRes = ((resistance - current) / current) * 100;
+            const distSup = ((current - support) / current) * 100;
+            
             let buyVol = 0, sellVol = 0, totalVol = 0;
             candles.slice(-10).forEach(c => {
                 const volRange = c.high - c.low;
@@ -111,10 +146,6 @@
             const buyPct = totalVol > 0 ? (buyVol / totalVol * 100) : 50;
             const sellPct = 100 - buyPct;
 
-            // 5. BULLISH/BEARISH RULE
-            const distRes = ((resistance - current) / current) * 100;
-            const distSup = ((current - support) / current) * 100;
-            
             let direction = "NEUTRAL";
             let final_signal = "Consolidating";
             let price_pos = "Middle of Range";
@@ -138,82 +169,58 @@
             }
 
             return {
-                symbol, qualified: true, rejection_reason: "N/A",
-                current, resistance: resistance, support: support,
+                symbol, state: "QUALIFIED", rejection_reason: "N/A",
+                current, resistance, support,
                 distRes: distRes.toFixed(2), distSup: distSup.toFixed(2),
                 rangeWidthPct: rangeWidthPct.toFixed(3),
-                thresholdPct: thresholdPct,
+                thresholdPct: MIN_RANGE_THRESHOLD_PCT,
                 buyPct: buyPct.toFixed(1), sellPct: sellPct.toFixed(1),
-                direction, final_signal, price_pos,
-                range_valid: true,
-                formula_range: "Math.max(Highs) - Math.min(Lows)",
-                raw_last_candles: candles.slice(-2)
+                direction, final_signal, price_pos
             };
         }
 
         function renderDebugTable(allData) {
             const container = document.getElementById("debug-table-container");
             let html = `<table class="raw-table">
-                <tr><th>Symbol</th><th>TF</th><th>Qualified</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Threshold</th><th>Dist Sup%</th><th>Dist Res%</th><th>Buy%</th><th>Sell%</th><th>Dir</th><th>Reason / Formula</th></tr>`;
+                <tr><th>Symbol</th><th>State</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Threshold</th><th>Dist Sup%</th><th>Dist Res%</th><th>Buy%</th><th>Sell%</th><th>Dir</th><th>Reason / Error</th></tr>`;
+            
             allData.forEach(d => {
-                const color = d.qualified ? "#00c853" : "#ff1744";
+                const stateClass = d.state === 'QUALIFIED' ? 'qualified-yes' : d.state === 'FAILED' ? 'qualified-no' : '';
                 const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
                 const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
                 const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
+                
                 html += `<tr>
                     <td><strong>${d.symbol}</strong></td>
-                    <td>${TF}</td>
-                    <td style="color:${color}">${d.qualified ? "✅ YES" : "❌ NO"}</td>
+                    <td class="${stateClass}">${d.state}</td>
                     <td>${displayPrice}</td>
                     <td>$${displaySup}</td>
                     <td>$${displayRes}</td>
-                    <td><strong>${d.rangeWidthPct}%</strong></td>
+                    <td>${d.rangeWidthPct || 'N/A'}%</td>
                     <td>${d.thresholdPct || 0.5}%</td>
-                    <td>${d.distSup}%</td>
-                    <td>${d.distRes}%</td>
-                    <td>${d.buyPct}%</td>
-                    <td>${d.sellPct}%</td>
-                    <td>${d.direction}</td>
-                    <td style="font-size:0.85em; color:#888;">${d.qualified ? d.final_signal : d.rejection_reason}</td>
+                    <td>${d.distSup || 'N/A'}%</td>
+                    <td>${d.distRes || 'N/A'}%</td>
+                    <td>${d.buyPct || 'N/A'}%</td>
+                    <td>${d.sellPct || 'N/A'}%</td>
+                    <td>${d.direction || 'N/A'}</td>
+                    <td style="font-size:0.85em; color:#888;">${d.rejection_reason}</td>
                 </tr>`;
             });
             html += `</table>`;
             container.innerHTML = html;
         }
 
-        function toggleDebug(symbol) {
-            const box = document.getElementById(`debug-${symbol}`);
-            box.classList.toggle('show');
-        }
-
-        function toggleOHLCV(symbol) {
-            const box = document.getElementById(`ohlcv-${symbol}`);
-            box.classList.toggle('show');
-        }
-
-        async function loadAll() {
+        function renderCards(qualifiedData) {
             const container = document.getElementById("watchlist-container");
-            container.innerHTML = '<div class="loading">🔄 Fetching live data from OKX...</div>';
-
-            const allData = [];
-            for (const sym of SYMBOLS) {
-                const candles = await fetchOKX(sym);
-                const result = analyze(candles, sym);
-                if (result) allData.push(result);
-            }
-
-            if (allData.length === 0) {
-                container.innerHTML = '<div class="loading" style="color: #ff1744;">❌ Failed to fetch data. Please refresh.</div>';
+            if (qualifiedData.length === 0) {
+                container.innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ 0 symbols qualified based on the 0.5% threshold.</div>`;
                 return;
             }
 
-            // RENDER CARDS (Only qualified ones)
-            const qualified = allData.filter(d => d.qualified);
-            container.innerHTML = qualified.map(d => {
+            container.innerHTML = qualifiedData.map(d => {
                 const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
                 const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
                 const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
-                const rawData = d.raw_last_candles.map(c => `[H:${c.high.toFixed(8)}, L:${c.low.toFixed(8)}, C:${c.close.toFixed(8)}]`).join(' -> ');
                 return `
                 <div class="card" style="border-left-color: ${d.direction === 'BULLISH' ? '#00c853' : d.direction === 'BEARISH' ? '#ff1744' : '#555'};">
                     <div class="header">
@@ -235,42 +242,37 @@
                         <span style="color:#00c853;">🟢 Buy ${d.buyPct}%</span>
                         <span style="color:#ff1744;">🔴 Sell ${d.sellPct}%</span>
                     </div>
-                    
-                    <button class="debug-btn" onclick="toggleDebug('${d.symbol}')">🔍 Show Formula & Calculations</button>
-                    <div id="debug-${d.symbol}" class="debug-box">
-                        <div style="color:${d.qualified ? '#00c853' : '#ff1744'}; font-weight:bold;">RANGE VALID = ${d.qualified ? "YES" : "NO"}</div>
-                        <div>SYMBOL: ${d.symbol} | TIMEFRAME: ${TF}</div>
-                        <div>RAW RANGE HIGH (MAX): ${d.resistance}</div>
-                        <div>RAW RANGE LOW (MIN): ${d.support}</div>
-                        <div>CURRENT PRICE: ${d.current}</div>
-                        <div>EXACT RANGE WIDTH %: ${d.rangeWidthPct}%</div>
-                        <div>CONFIGURED THRESHOLD: ${d.thresholdPct}%</div>
-                        <div>DISTANCE TO RESISTANCE: ${d.distRes}%</div>
-                        <div>DISTANCE TO SUPPORT: ${d.distSup}%</div>
-                        <div>PRICE POSITION: ${d.price_pos}</div>
-                        <div>--- FORMULAS ---</div>
-                        <div>RANGE FORMULA: <strong>${d.formula_range}</strong></div>
-                        <div>BUY/SELL % FORMULA: (Candle Close - Candle Low) / (Candle High - Candle Low) averaged over 10 candles.</div>
-                        <div>BUY/SELL PRESSURE: ${d.buyPct}% / ${d.sellPct}% (Calculated from OHLCV candle ratio, NOT real order book volume).</div>
-                        <div>DIRECTION RULE: ${d.direction === 'BULLISH' ? 'If (Dist to Res < 2.0% AND Buy% > 50%)' : d.direction === 'BEARISH' ? 'If (Dist to Sup < 2.0% AND Sell% > 50%)' : 'Default: Distances > 2.0% or pressure is balanced.'}</div>
-                        <div>FINAL SIGNAL = <strong>${d.final_signal}</strong></div>
-                        
-                        <button class="ohlcv-btn" onclick="toggleOHLCV('${d.symbol}')">View Raw Last 2 OKX Candles</button>
-                        <div id="ohlcv-${d.symbol}" class="debug-box" style="margin-top:5px; border:none; background:#0a0c10;">
-                            ${rawData}
-                        </div>
-                    </div>
                 </div>`;
             }).join('');
+        }
 
-            // RENDER DEBUG TABLE
+        async function loadAll() {
+            updateState('FETCHING', 0, SYMBOLS.length);
+            
+            const allData = [];
+            for (let i = 0; i < SYMBOLS.length; i++) {
+                const sym = SYMBOLS[i];
+                const candles = await fetchOKX(sym);
+                const result = analyze(candles, sym);
+                allData.push(result);
+                updateState('FETCHING', i + 1, SYMBOLS.length);
+            }
+
+            // DATA IS NOW FULLY FETCHED AND ANALYZED
+            updateState('VALIDATED', SYMBOLS.length, SYMBOLS.length);
+            
+            // Render the table first (including all 25)
             renderDebugTable(allData);
+
+            // Render the cards (only qualifies)
+            const qualified = allData.filter(d => d.state === 'QUALIFIED');
+            renderCards(qualified);
         }
 
         // Run immediately
         loadAll();
-        // Refresh every 30 seconds
-        setInterval(loadAll, 30000);
+        // Refresh every 45 seconds
+        setInterval(loadAll, 45000);
     </script>
 </body>
 </html>
