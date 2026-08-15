@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Range Detector - Logic Validation</title>
+    <title>Range Detector - Math Validation</title>
     <style>
         body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
-        .container { max-width: 750px; margin: auto; }
+        .container { max-width: 800px; margin: auto; }
         .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
         .header { display: flex; justify-content: space-between; font-weight: bold; align-items: center; }
         .price { font-size: 1.4em; margin: 8px 0; font-weight: 600; }
@@ -32,7 +32,6 @@
         .raw-table th { color: #888; }
         .raw-table .qualified-yes { color: #00c853; font-weight: bold; }
         .raw-table .qualified-no { color: #ff1744; font-weight: bold; }
-        .raw-table .failed-state { color: #ff1744; }
         .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; }
         .status-fetching { background: #2d3748; color: #fbbf24; }
         .status-validated { background: #2d3748; color: #60a5fa; }
@@ -41,17 +40,17 @@
 <body>
     <div class="container">
         <h2>📊 About to Break Range Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">PURE LOGIC VALIDATION MODE - Raw formulas & values exposed</p>
+        <p style="color: #888; font-size: 0.9em;">MATHEMATICAL VALIDATION MODE - Exact formulas & raw floats exposed</p>
         
         <!-- Status Header -->
-        <div id="status-header" style="margin-top: 15px; border: 1px solid #222; padding: 10px; border-radius: 6px;">
+        <div id="status-header" style="margin-top: 15px; border: 1px solid #222; padding: 10px; border-radius: 6px; background: #0f1219;">
             <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
             <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Loading 0 / 25 symbols...</div>
         </div>
 
         <div id="watchlist-container" style="margin-top: 20px;"></div>
         
-        <h3 class="section-title" style="margin-top: 40px;">📋 DEBUG: Raw Logic & Formulas for All 25 Symbols</h3>
+        <h3 class="section-title" style="margin-top: 40px;">📋 DEBUG: Exact Raw Values for All 25 Symbols</h3>
         <div id="debug-table-container" style="overflow-x: auto;"></div>
     </div>
 
@@ -64,7 +63,6 @@
         function updateState(state, loaded, total) {
             const appState = document.getElementById('app-state');
             const progress = document.getElementById('progress-text');
-            
             appState.innerText = state;
             if(state === 'FETCHING') {
                 appState.className = 'status-badge status-fetching';
@@ -96,45 +94,41 @@
 
         function analyze(candles, symbol) {
             if (!candles || candles.error) {
-                return { 
-                    symbol, state: "FAILED", 
-                    rejection_reason: candles ? candles.error : "No data returned",
-                    current: 0, resistance: 0, support: 0
-                };
+                return { symbol, state: "FAILED", rejection_reason: candles ? candles.error : "No data", current: 0, res: 0, sup: 0, raw_candles: [] };
             }
-            
             if (candles.length < 20) {
-                return { 
-                    symbol, state: "FAILED", 
-                    rejection_reason: "Not enough candles (min 20)", 
-                    current: candles[candles.length-1].close, resistance: 0, support: 0
-                };
+                return { symbol, state: "FAILED", rejection_reason: "Not enough candles (min 20)", current: candles[candles.length-1].close, res: 0, sup: 0, raw_candles: candles.slice(-2) };
             }
 
             const highs = candles.map(c => c.high);
             const lows = candles.map(c => c.low);
-            const resistance = Math.max(...highs);
-            const support = Math.min(...lows);
-            const current = candles[candles.length - 1].close;
-            const range = resistance - support;
+            // 1. RAW SUPPORT & RESISTANCE
+            const raw_resistance = Math.max(...highs);
+            const raw_support = Math.min(...lows);
+            const raw_current = candles[candles.length - 1].close;
+            const raw_range = raw_resistance - raw_support;
             
-            if (range <= 0) {
-                return { symbol, state: "FAILED", rejection_reason: "Range width is 0 or negative", current, resistance, support };
+            if (raw_range <= 0) {
+                return { symbol, state: "FAILED", rejection_reason: "Range width is 0 or negative", current: raw_current, res: raw_resistance, sup: raw_support, raw_candles: candles.slice(-2) };
             }
 
-            const rangeWidthPct = (range / current) * 100;
+            // 2. RAW RANGE WIDTH % (Using Current as reference)
+            const raw_range_width_pct = (raw_range / raw_current) * 100;
             
-            if (rangeWidthPct < MIN_RANGE_THRESHOLD_PCT) {
+            if (raw_range_width_pct < MIN_RANGE_THRESHOLD_PCT) {
                 return { 
                     symbol, state: "FAILED", 
-                    rejection_reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < ${MIN_RANGE_THRESHOLD_PCT}% threshold)`,
-                    current, resistance, support, rangeWidthPct: rangeWidthPct.toFixed(3)
+                    rejection_reason: `Range too narrow (${raw_range_width_pct.toFixed(3)}% < ${MIN_RANGE_THRESHOLD_PCT}% threshold)`,
+                    current: raw_current, res: raw_resistance, sup: raw_support,
+                    rangeWidthPct: raw_range_width_pct.toFixed(3), raw_candles: candles.slice(-2)
                 };
             }
 
-            const distRes = ((resistance - current) / current) * 100;
-            const distSup = ((current - support) / current) * 100;
+            // 3. DISTANCE TO RESISTANCE & SUPPORT
+            const distRes_raw = ((raw_resistance - raw_current) / raw_current) * 100;
+            const distSup_raw = ((raw_current - raw_support) / raw_current) * 100;
             
+            // 4. BUY/SELL % (Range Position Calculation, NOT Order Book)
             let buyVol = 0, sellVol = 0, totalVol = 0;
             candles.slice(-10).forEach(c => {
                 const volRange = c.high - c.low;
@@ -146,23 +140,24 @@
             const buyPct = totalVol > 0 ? (buyVol / totalVol * 100) : 50;
             const sellPct = 100 - buyPct;
 
+            // 5. BULLISH/BEARISH RULE
             let direction = "NEUTRAL";
             let final_signal = "Consolidating";
             let price_pos = "Middle of Range";
 
-            if (distRes < 2.0 && buyPct > 50) {
+            if (distRes_raw < 2.0 && buyPct > 50) {
                 direction = "BULLISH";
                 final_signal = "About to Break RANGE UP";
                 price_pos = "At Resistance";
-            } else if (distSup < 2.0 && sellPct > 50) {
+            } else if (distSup_raw < 2.0 && sellPct > 50) {
                 direction = "BEARISH";
                 final_signal = "About to Break RANGE DOWN";
                 price_pos = "At Support";
-            } else if (distRes < distSup) {
+            } else if (distRes_raw < distSup_raw) {
                 direction = "BULLISH";
                 final_signal = "Approaching Resistance";
                 price_pos = "Upper Range";
-            } else if (distSup < distRes) {
+            } else if (distSup_raw < distRes_raw) {
                 direction = "BEARISH";
                 final_signal = "Approaching Support";
                 price_pos = "Lower Range";
@@ -170,44 +165,50 @@
 
             return {
                 symbol, state: "QUALIFIED", rejection_reason: "N/A",
-                current, resistance, support,
-                distRes: distRes.toFixed(2), distSup: distSup.toFixed(2),
-                rangeWidthPct: rangeWidthPct.toFixed(3),
+                current: raw_current, resistance: raw_resistance, support: raw_support,
+                distRes: distRes_raw, distSup: distSup_raw,
+                rangeWidthPct: raw_range_width_pct,
                 thresholdPct: MIN_RANGE_THRESHOLD_PCT,
-                buyPct: buyPct.toFixed(1), sellPct: sellPct.toFixed(1),
-                direction, final_signal, price_pos
+                buyPct: buyPct, sellPct: sellPct,
+                direction, final_signal, price_pos,
+                raw_candles: candles.slice(-2)
             };
         }
 
         function renderDebugTable(allData) {
             const container = document.getElementById("debug-table-container");
             let html = `<table class="raw-table">
-                <tr><th>Symbol</th><th>State</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Threshold</th><th>Dist Sup%</th><th>Dist Res%</th><th>Buy%</th><th>Sell%</th><th>Dir</th><th>Reason / Error</th></tr>`;
+                <tr><th>Symbol</th><th>TF</th><th>State</th><th>Raw Price</th><th>Raw High</th><th>Raw Low</th><th>Raw Sup</th><th>Raw Res</th><th>Raw Range%</th><th>Threshold</th><th>Qualified</th><th>Rejection Reason</th></tr>`;
             
             allData.forEach(d => {
                 const stateClass = d.state === 'QUALIFIED' ? 'qualified-yes' : d.state === 'FAILED' ? 'qualified-no' : '';
-                const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
+                // Display raw values to high precision
+                const displayPrice = d.current < 0.01 ? d.current.toFixed(8) : d.current.toFixed(4);
                 const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
                 const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
                 
                 html += `<tr>
                     <td><strong>${d.symbol}</strong></td>
+                    <td>${TF}</td>
                     <td class="${stateClass}">${d.state}</td>
                     <td>${displayPrice}</td>
-                    <td>$${displaySup}</td>
-                    <td>$${displayRes}</td>
-                    <td>${d.rangeWidthPct || 'N/A'}%</td>
+                    <td>${d.raw_candles && d.raw_candles.length > 0 ? (d.raw_candles[1] ? d.raw_candles[1].high.toFixed(8) : d.raw_candles[0].high.toFixed(8)) : 'N/A'}</td>
+                    <td>${d.raw_candles && d.raw_candles.length > 0 ? (d.raw_candles[1] ? d.raw_candles[1].low.toFixed(8) : d.raw_candles[0].low.toFixed(8)) : 'N/A'}</td>
+                    <td>${d.support.toFixed(8)}</td>
+                    <td>${d.resistance.toFixed(8)}</td>
+                    <td><strong>${(d.rangeWidthPct || 0).toFixed(3)}%</strong></td>
                     <td>${d.thresholdPct || 0.5}%</td>
-                    <td>${d.distSup || 'N/A'}%</td>
-                    <td>${d.distRes || 'N/A'}%</td>
-                    <td>${d.buyPct || 'N/A'}%</td>
-                    <td>${d.sellPct || 'N/A'}%</td>
-                    <td>${d.direction || 'N/A'}</td>
+                    <td class="${stateClass}">${d.state === 'QUALIFIED' ? "✅ YES" : "❌ NO"}</td>
                     <td style="font-size:0.85em; color:#888;">${d.rejection_reason}</td>
                 </tr>`;
             });
             html += `</table>`;
             container.innerHTML = html;
+        }
+
+        function toggleDebug(symbol) {
+            const box = document.getElementById(`debug-${symbol}`);
+            box.classList.toggle('show');
         }
 
         function renderCards(qualifiedData) {
@@ -218,9 +219,14 @@
             }
 
             container.innerHTML = qualifiedData.map(d => {
+                // Display UI formatted (not used for math)
                 const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
-                const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
-                const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
+                const displaySup = d.support < 0.01 ? '$' + d.support.toFixed(8) : '$' + d.support.toFixed(4);
+                const displayRes = d.resistance < 0.01 ? '$' + d.resistance.toFixed(8) : '$' + d.resistance.toFixed(4);
+                
+                // Raw Data to verify formula manually
+                const rawLastCandles = d.raw_candles.map(c => `[H:${c.high.toFixed(8)}, L:${c.low.toFixed(8)}, C:${c.close.toFixed(8)}]`).join(' -> ');
+                
                 return `
                 <div class="card" style="border-left-color: ${d.direction === 'BULLISH' ? '#00c853' : d.direction === 'BEARISH' ? '#ff1744' : '#555'};">
                     <div class="header">
@@ -231,16 +237,55 @@
                     </div>
                     <div class="price">${displayPrice}</div>
                     <div class="grid">
-                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">$${displayRes}</span><br><small style="color:#666;">(${d.distRes}% away)</small></div>
-                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">$${displaySup}</span><br><small style="color:#666;">(${d.distSup}% away)</small></div>
+                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">${displayRes}</span><br><small style="color:#666;">(${d.distRes.toFixed(2)}% away)</small></div>
+                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">${displaySup}</span><br><small style="color:#666;">(${d.distSup.toFixed(2)}% away)</small></div>
                     </div>
                     <div class="bar">
-                        <div class="buy" style="width: ${d.buyPct}%;"></div>
-                        <div class="sell" style="width: ${d.sellPct}%;"></div>
+                        <div class="buy" style="width: ${d.buyPct.toFixed(1)}%;"></div>
+                        <div class="sell" style="width: ${d.sellPct.toFixed(1)}%;"></div>
                     </div>
                     <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-top: 5px; color: #aaa;">
-                        <span style="color:#00c853;">🟢 Buy ${d.buyPct}%</span>
-                        <span style="color:#ff1744;">🔴 Sell ${d.sellPct}%</span>
+                        <span style="color:#00c853;">🟢 Buy ${d.buyPct.toFixed(1)}%</span>
+                        <span style="color:#ff1744;">🔴 Sell ${d.sellPct.toFixed(1)}%</span>
+                    </div>
+                    
+                    <button class="debug-btn" onclick="toggleDebug('${d.symbol}')">🔍 Show Exact Formulas & Raw Floats</button>
+                    <div id="debug-${d.symbol}" class="debug-box">
+                        <div style="color:${d.state === 'QUALIFIED' ? '#00c853' : '#ff1744'}; font-weight:bold;">STATE = ${d.state}</div>
+                        
+                        <div style="margin-top: 10px;"><u>RAW INPUTS FROM OKX:</u></div>
+                        <div>Last 2 Candle Values: ${rawLastCandles}</div>
+                        
+                        <div style="margin-top: 10px;"><u>1. RANGE CALCULATION:</u></div>
+                        <div>Formula: (Max(Highs) - Min(Lows))</div>
+                        <div>Raw Res (Max High): ${d.resistance.toFixed(8)}</div>
+                        <div>Raw Sup (Min Low): ${d.support.toFixed(8)}</div>
+                        <div>Raw Range Width: ${(d.resistance - d.support).toFixed(8)}</div>
+                        
+                        <div style="margin-top: 10px;"><u>2. RANGE WIDTH %:</u></div>
+                        <div>Formula: (Range / Current) * 100</div>
+                        <div>Range Width % (Raw): ${d.rangeWidthPct.toFixed(6)}%</div>
+                        <div>Threshold (Config): ${d.thresholdPct}%</div>
+                        <div>Qualifies: ${d.rangeWidthPct >= d.thresholdPct ? "✅ YES" : "❌ NO"}</div>
+
+                        <div style="margin-top: 10px;"><u>3. DISTANCES TO RES/SUP:</u></div>
+                        <div>Formula D2Res: ((Resistance - Current) / Current) * 100</div>
+                        <div>Raw D2Res: ${d.distRes.toFixed(4)}%</div>
+                        <div>Formula D2Sup: ((Current - Support) / Current) * 100</div>
+                        <div>Raw D2Sup: ${d.distSup.toFixed(4)}%</div>
+
+                        <div style="margin-top: 10px;"><u>4. BUY/SELL % (Range-Position Ratio):</u></div>
+                        <div>Formula: (Candle.Close - Candle.Low) / (Candle.High - Candle.Low) averaged over last 10 candles.</div>
+                        <div style="color:#ff1744;">⛔ NOT real order-book volume.</div>
+                        <div>Raw Buy %: ${d.buyPct.toFixed(2)}%</div>
+                        <div>Raw Sell %: ${d.sellPct.toFixed(2)}%</div>
+
+                        <div style="margin-top: 10px;"><u>5. BULLISH/BEARISH RULE:</u></div>
+                        <div>IF (D2Res < 2.0% && Buy% > 50) => BULLISH</div>
+                        <div>ELSE IF (D2Sup < 2.0% && Sell% > 50) => BEARISH</div>
+                        <div>ELSE IF (D2Res < D2Sup) => BULLISH (Approaching Res)</div>
+                        <div>ELSE IF (D2Sup < D2Res) => BEARISH (Approaching Sup)</div>
+                        <div>Raw Result: <strong>${d.direction} (${d.final_signal})</strong></div>
                     </div>
                 </div>`;
             }).join('');
@@ -258,13 +303,12 @@
                 updateState('FETCHING', i + 1, SYMBOLS.length);
             }
 
-            // DATA IS NOW FULLY FETCHED AND ANALYZED
             updateState('VALIDATED', SYMBOLS.length, SYMBOLS.length);
             
-            // Render the table first (including all 25)
+            // Render Debug Table with ALL 25 symbols
             renderDebugTable(allData);
 
-            // Render the cards (only qualifies)
+            // Render cards only for Qualified
             const qualified = allData.filter(d => d.state === 'QUALIFIED');
             renderCards(qualified);
         }
