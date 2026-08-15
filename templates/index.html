@@ -25,9 +25,28 @@
         .setup-rejection { background: rgba(255, 23, 68, 0.15); border: 1px solid #ff1744; color: #ff1744; }
         .setup-nc { background: rgba(255, 255, 255, 0.05); border: 1px solid #555; color: #aaa; }
         .loading { color: #666; text-align: center; margin-top: 20px; font-size: 1.1em; }
-        .raw-table { width: 100%; font-size: 0.75em; border-collapse: collapse; margin-top: 15px; }
-        .raw-table td, .raw-table th { padding: 6px; border-bottom: 1px solid #222; text-align: left; }
-        .raw-table th { color: #888; }
+        
+        /* ========================================== */
+        /* FORCED TABLE RENDER - MOBILE BROWSER FIX   */
+        /* ========================================== */
+        #debug-root { overflow-x: auto; margin-top: 15px; }
+        .raw-table { 
+            width: 100%; 
+            font-size: 0.75em; 
+            border-collapse: collapse; 
+            background: #0f1219;  /* Forces background paint */
+            border: 1px solid #222; /* Forces border paint */
+        }
+        .raw-table td, .raw-table th { 
+            padding: 8px 6px; 
+            border: 1px solid #333; /* Forces cell paint */
+            text-align: left; 
+        }
+        .raw-table th { color: #888; background: #161b22; }
+        .qualified-yes { color: #00c853; font-weight: bold; }
+        .qualified-no { color: #ff1744; font-weight: bold; }
+        /* ========================================== */
+
         .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
         .status-fetching { background: #2d3748; color: #fbbf24; }
         .status-validated { background: #1e3a3a; color: #00c853; }
@@ -45,7 +64,7 @@
 
         <div id="watchlist-container"></div>
         
-        <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG TABLE (Strict Injection)</h3>
+        <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG TABLE (Forced Mobile Render)</h3>
         <div id="debug-root"></div>
     </div>
 
@@ -150,7 +169,7 @@
             }
             updateState('VALIDATED', 'Done.');
 
-            // RENDER DEBUG TABLE - STRICT STRING BUILDER (No forced .toFixed)
+            // RENDER DEBUG TABLE - FORCED MOBILE PAINT
             let debugRows = "";
             allData.forEach(d => {
                 const stateClass = d.state === 'QUALIFIED' ? 'qualified-yes' : d.state === 'FAILED' ? 'qualified-no' : 'fetch-error';
