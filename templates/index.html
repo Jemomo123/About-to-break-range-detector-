@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Range Detector</title>
+    <title>Range Detector - Logic Validation</title>
     <style>
         body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
-        .container { max-width: 650px; margin: auto; }
+        .container { max-width: 700px; margin: auto; }
         .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
         .header { display: flex; justify-content: space-between; font-weight: bold; align-items: center; }
         .price { font-size: 1.4em; margin: 8px 0; font-weight: 600; }
@@ -24,22 +24,21 @@
         .debug-btn { background: none; border: 1px solid #333; color: #888; padding: 2px 8px; border-radius: 4px; cursor: pointer; margin-top: 10px; font-size: 0.8em; }
         .debug-box { display: none; background: #0f1219; border: 1px solid #222; padding: 15px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 0.85em; line-height: 1.6; color: #b0b0b0; }
         .debug-box.show { display: block; }
-        .debug-success { color: #00c853; }
-        .debug-fail { color: #ff1744; }
         .loading { color: #666; text-align: center; margin-top: 50px; }
         .section-title { margin-top: 30px; border-bottom: 1px solid #222; padding-bottom: 10px; color: #aaa; }
         .raw-table { width: 100%; font-size: 0.8em; border-collapse: collapse; margin-top: 15px; }
         .raw-table td, .raw-table th { padding: 6px 4px; border-bottom: 1px solid #222; text-align: left; }
         .raw-table th { color: #888; }
+        .ohlcv-btn { background: none; border: 1px solid #333; color: #888; padding: 2px 8px; border-radius: 4px; cursor: pointer; margin-top: 5px; font-size: 0.8em; }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>📊 About to Break Range Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">Logic Validation Mode - Raw calculations exposed</p>
+        <p style="color: #888; font-size: 0.9em;">PURE LOGIC VALIDATION MODE - Raw formulas & values exposed</p>
         <div id="watchlist-container"><div class="loading">🔄 Fetching live data from OKX...</div></div>
         
-        <h3 class="section-title">📋 DEBUG: Raw Logic for All 25 Symbols</h3>
+        <h3 class="section-title">📋 DEBUG: Raw Logic & Formulas for All 25 Symbols</h3>
         <div id="debug-table-container" style="overflow-x: auto;"></div>
     </div>
 
@@ -47,6 +46,7 @@
         // FULL WATCHLIST
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
+        const MIN_RANGE_THRESHOLD_PCT = 0.5; // 0.5%
 
         async function fetchOKX(symbol) {
             const clean = symbol.replace("USDT", "-USDT");
@@ -65,14 +65,7 @@
         }
 
         function analyze(candles, symbol) {
-            // Default return for strict validation
-            const base = { symbol, qualified: false, rejection_reason: "Insufficient data", 
-                           range_valid: false, price_pos: "N/A", dist_res: 0, dist_sup: 0, 
-                           range_wid: 0, buy_pct: 50, sell_pct: 50, direction: "NEUTRAL", 
-                           final_signal: "No Range Detected", current: 0, res: 0, sup: 0 };
-
-            if (!candles || candles.length < 20) return { ...base, rejection_reason: "Not enough candles (min 20)" };
-
+            // 1. RANGE CALCULATION: uses raw OHLCV high/low values
             const highs = candles.map(c => c.high);
             const lows = candles.map(c => c.low);
             const resistance = Math.max(...highs);
@@ -80,19 +73,33 @@
             const current = candles[candles.length - 1].close;
             const range = resistance - support;
             
-            // REJECTION 1: No Range
-            if (range <= 0) return { ...base, rejection_reason: "Range width is 0 or negative" };
+            // 2. EXACT FORMULA DISPLAY
+            const defaultBase = { 
+                symbol, qualified: false, rejection_reason: "Insufficient data", 
+                range_valid: false, price_pos: "N/A", dist_res: 0, dist_sup: 0, 
+                range_wid: 0, buy_pct: 50, sell_pct: 50, direction: "NEUTRAL", 
+                final_signal: "No Range Detected", current, res: resistance, sup: support,
+                formula_range: "Math.max(Highs) - Math.min(Lows)",
+                raw_last_candles: candles.slice(-2)
+            };
 
-            // REJECTION 2: Range is too small (No valid structure). Using 0.5% of current price as minimum significant range.
-            const min_significant_range = current * 0.005;
-            if (range < min_significant_range) {
-                return { ...base, rejection_reason: `Range too narrow (${(range/current*100).toFixed(3)}% < 0.5% threshold)` };
+            if (!candles || candles.length < 20) return { ...defaultBase, rejection_reason: "Not enough candles (min 20)" };
+            if (range <= 0) return { ...defaultBase, rejection_reason: "Range width is 0 or negative" };
+
+            // 3. QUALIFICATION: Compare computed range width vs 0.5% threshold
+            const rangeWidthPct = (range / current) * 100;
+            const thresholdPct = MIN_RANGE_THRESHOLD_PCT;
+            
+            if (rangeWidthPct < thresholdPct) {
+                return { 
+                    ...defaultBase, 
+                    qualified: false, 
+                    rejection_reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < ${thresholdPct}% threshold)`,
+                    rangeWidthPct: rangeWidthPct.toFixed(3)
+                };
             }
 
-            const distRes = ((resistance - current) / current) * 100;
-            const distSup = ((current - support) / current) * 100;
-            const rangeWidthPct = (range / current) * 100;
-            
+            // 4. BUY/SELL %: Candle Close vs Low ratio (NOT order-book volume)
             let buyVol = 0, sellVol = 0, totalVol = 0;
             candles.slice(-10).forEach(c => {
                 const volRange = c.high - c.low;
@@ -104,7 +111,10 @@
             const buyPct = totalVol > 0 ? (buyVol / totalVol * 100) : 50;
             const sellPct = 100 - buyPct;
 
-            // CLASSIFICATION LOGIC
+            // 5. BULLISH/BEARISH RULE
+            const distRes = ((resistance - current) / current) * 100;
+            const distSup = ((current - support) / current) * 100;
+            
             let direction = "NEUTRAL";
             let final_signal = "Consolidating";
             let price_pos = "Middle of Range";
@@ -129,43 +139,56 @@
 
             return {
                 symbol, qualified: true, rejection_reason: "N/A",
-                current, resistance, support,
+                current, resistance: resistance, support: support,
                 distRes: distRes.toFixed(2), distSup: distSup.toFixed(2),
-                rangeWidthPct: rangeWidthPct.toFixed(2),
+                rangeWidthPct: rangeWidthPct.toFixed(3),
+                thresholdPct: thresholdPct,
                 buyPct: buyPct.toFixed(1), sellPct: sellPct.toFixed(1),
                 direction, final_signal, price_pos,
-                range_valid: true
+                range_valid: true,
+                formula_range: "Math.max(Highs) - Math.min(Lows)",
+                raw_last_candles: candles.slice(-2)
             };
         }
 
         function renderDebugTable(allData) {
             const container = document.getElementById("debug-table-container");
             let html = `<table class="raw-table">
-                <tr><th>Symbol</th><th>Qualified</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Dist Sup%</th><th>Dist Res%</th><th>Buy%</th><th>Sell%</th><th>Direction</th><th>Reason</th></tr>`;
+                <tr><th>Symbol</th><th>TF</th><th>Qualified</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Threshold</th><th>Dist Sup%</th><th>Dist Res%</th><th>Buy%</th><th>Sell%</th><th>Dir</th><th>Reason / Formula</th></tr>`;
             allData.forEach(d => {
                 const color = d.qualified ? "#00c853" : "#ff1744";
-                // --- DISPLAY FIX: Handle low-value coins (PEPE etc) properly ---
                 const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
-                const displaySup = d.sup < 0.01 ? d.sup.toFixed(8) : d.sup.toFixed(4);
-                const displayRes = d.res < 0.01 ? d.res.toFixed(8) : d.res.toFixed(4);
-                // --------------------------------------------------------------
+                const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
+                const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
                 html += `<tr>
                     <td><strong>${d.symbol}</strong></td>
+                    <td>${TF}</td>
                     <td style="color:${color}">${d.qualified ? "✅ YES" : "❌ NO"}</td>
                     <td>${displayPrice}</td>
                     <td>$${displaySup}</td>
                     <td>$${displayRes}</td>
-                    <td>${d.rangeWidthPct}%</td>
+                    <td><strong>${d.rangeWidthPct}%</strong></td>
+                    <td>${d.thresholdPct || 0.5}%</td>
                     <td>${d.distSup}%</td>
                     <td>${d.distRes}%</td>
                     <td>${d.buyPct}%</td>
                     <td>${d.sellPct}%</td>
                     <td>${d.direction}</td>
-                    <td style="font-size:0.9em; color:#888;">${d.qualified ? d.final_signal : d.rejection_reason}</td>
+                    <td style="font-size:0.85em; color:#888;">${d.qualified ? d.final_signal : d.rejection_reason}</td>
                 </tr>`;
             });
             html += `</table>`;
             container.innerHTML = html;
+        }
+
+        function toggleDebug(symbol) {
+            const box = document.getElementById(`debug-${symbol}`);
+            box.classList.toggle('show');
+        }
+
+        function toggleOHLCV(symbol) {
+            const box = document.getElementById(`ohlcv-${symbol}`);
+            box.classList.toggle('show');
         }
 
         async function loadAll() {
@@ -184,14 +207,13 @@
                 return;
             }
 
-            // RENDER CARDS (Only qualified ones for the UI)
+            // RENDER CARDS (Only qualified ones)
             const qualified = allData.filter(d => d.qualified);
             container.innerHTML = qualified.map(d => {
-                // --- DISPLAY FIX: Handle low-value coins (PEPE etc) properly ---
                 const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
                 const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
                 const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
-                // --------------------------------------------------------------
+                const rawData = d.raw_last_candles.map(c => `[H:${c.high.toFixed(8)}, L:${c.low.toFixed(8)}, C:${c.close.toFixed(8)}]`).join(' -> ');
                 return `
                 <div class="card" style="border-left-color: ${d.direction === 'BULLISH' ? '#00c853' : d.direction === 'BEARISH' ? '#ff1744' : '#555'};">
                     <div class="header">
@@ -214,27 +236,35 @@
                         <span style="color:#ff1744;">🔴 Sell ${d.sellPct}%</span>
                     </div>
                     
-                    <button class="debug-btn" onclick="toggleDebug('${d.symbol}')">🔍 Show Logic Reason</button>
+                    <button class="debug-btn" onclick="toggleDebug('${d.symbol}')">🔍 Show Formula & Calculations</button>
                     <div id="debug-${d.symbol}" class="debug-box">
                         <div style="color:${d.qualified ? '#00c853' : '#ff1744'}; font-weight:bold;">RANGE VALID = ${d.qualified ? "YES" : "NO"}</div>
-                        <div>PRICE POSITION = ${d.price_pos}</div>
-                        <div>DISTANCE TO RESISTANCE = ${d.distRes}%</div>
-                        <div>DISTANCE TO SUPPORT = ${d.distSup}%</div>
-                        <div>RANGE WIDTH = ${d.rangeWidthPct}%</div>
-                        <div>BUY/SELL PRESSURE = ${d.buyPct}% / ${d.sellPct}%</div>
-                        <div>DIRECTION = ${d.direction}</div>
-                        <div style="margin-top:5px; border-top:1px solid #222; padding-top:5px;">FINAL SIGNAL = <strong>${d.final_signal}</strong></div>
+                        <div>SYMBOL: ${d.symbol} | TIMEFRAME: ${TF}</div>
+                        <div>RAW RANGE HIGH (MAX): ${d.resistance}</div>
+                        <div>RAW RANGE LOW (MIN): ${d.support}</div>
+                        <div>CURRENT PRICE: ${d.current}</div>
+                        <div>EXACT RANGE WIDTH %: ${d.rangeWidthPct}%</div>
+                        <div>CONFIGURED THRESHOLD: ${d.thresholdPct}%</div>
+                        <div>DISTANCE TO RESISTANCE: ${d.distRes}%</div>
+                        <div>DISTANCE TO SUPPORT: ${d.distSup}%</div>
+                        <div>PRICE POSITION: ${d.price_pos}</div>
+                        <div>--- FORMULAS ---</div>
+                        <div>RANGE FORMULA: <strong>${d.formula_range}</strong></div>
+                        <div>BUY/SELL % FORMULA: (Candle Close - Candle Low) / (Candle High - Candle Low) averaged over 10 candles.</div>
+                        <div>BUY/SELL PRESSURE: ${d.buyPct}% / ${d.sellPct}% (Calculated from OHLCV candle ratio, NOT real order book volume).</div>
+                        <div>DIRECTION RULE: ${d.direction === 'BULLISH' ? 'If (Dist to Res < 2.0% AND Buy% > 50%)' : d.direction === 'BEARISH' ? 'If (Dist to Sup < 2.0% AND Sell% > 50%)' : 'Default: Distances > 2.0% or pressure is balanced.'}</div>
+                        <div>FINAL SIGNAL = <strong>${d.final_signal}</strong></div>
+                        
+                        <button class="ohlcv-btn" onclick="toggleOHLCV('${d.symbol}')">View Raw Last 2 OKX Candles</button>
+                        <div id="ohlcv-${d.symbol}" class="debug-box" style="margin-top:5px; border:none; background:#0a0c10;">
+                            ${rawData}
+                        </div>
                     </div>
                 </div>`;
             }).join('');
 
             // RENDER DEBUG TABLE
             renderDebugTable(allData);
-        }
-
-        function toggleDebug(symbol) {
-            const box = document.getElementById(`debug-${symbol}`);
-            box.classList.toggle('show');
         }
 
         // Run immediately
