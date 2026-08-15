@@ -24,7 +24,7 @@
         .qualified-yes { color: #00c853; }
         .qualified-no { color: #ff1744; }
         .fetch-error { color: #ff1744; }
-        .card { display: none; } /* Hiding cards for pure diagnostic view */
+        .card { display: none; }
     </style>
 </head>
 <body>
@@ -39,7 +39,6 @@
             </div>
             <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Initializing diagnostic...</div>
 
-            <!-- DIAGNOSTIC COUNTERS -->
             <div id="diagnostic-grid" class="diagnostic-grid" style="display: none;">
                 <div id="diag-fetch" class="diag-item neutral">OKX FETCH: 0/25</div>
                 <div id="diag-calc" class="diag-item neutral">CALCULATIONS: 0/25</div>
@@ -55,7 +54,6 @@
     </div>
 
     <script>
-        // FULL WATCHLIST
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
         const MIN_RANGE_THRESHOLD_PCT = 0.5; 
@@ -64,13 +62,9 @@
             const appState = document.getElementById('app-state');
             const progress = document.getElementById('progress-text');
             appState.innerText = state;
-            if(state === 'FETCHING') {
-                appState.className = 'status-badge status-fetching';
-            } else if (state === 'VALIDATED') {
-                appState.className = 'status-badge status-validated';
-            } else if (state === 'ERROR') {
-                appState.className = 'status-badge status-error';
-            }
+            if(state === 'FETCHING') appState.className = 'status-badge status-fetching';
+            else if (state === 'VALIDATED') appState.className = 'status-badge status-validated';
+            else if (state === 'ERROR') appState.className = 'status-badge status-error';
             progress.innerText = msg;
         }
 
@@ -91,20 +85,16 @@
                         time: c[0], open: parseFloat(c[1]), high: parseFloat(c[2]),
                         low: parseFloat(c[3]), close: parseFloat(c[4]), vol: parseFloat(c[5])
                     }));
-                } else {
-                    return { error: `OKX API Error: ${data.code}` };
-                }
-            } catch (e) { 
-                return { error: `FETCH EXCEPTION: ${e.message}` }; 
-            }
+                } else return { error: `OKX API Error: ${data.code}` };
+            } catch (e) { return { error: `FETCH EXCEPTION: ${e.message}` }; }
         }
 
         function analyze(candles, symbol) {
             if (!candles || candles.error) {
-                return { symbol, state: "FAILED", rejection_reason: candles ? candles.error : "DATA ERROR", current: 0, res: 0, sup: 0, raw_candles: [] };
+                return { symbol, state: "FAILED", rejection_reason: candles ? candles.error : "DATA ERROR", current: 0, res: 0, sup: 0 };
             }
             if (candles.length < 20) {
-                return { symbol, state: "FAILED", rejection_reason: "Not enough candles (min 20)", current: candles[candles.length-1].close, res: 0, sup: 0, raw_candles: candles.slice(-2) };
+                return { symbol, state: "FAILED", rejection_reason: "Not enough candles (min 20)", current: candles[candles.length-1].close, res: 0, sup: 0 };
             }
 
             const highs = candles.map(c => c.high);
@@ -115,18 +105,12 @@
             const raw_range = raw_resistance - raw_support;
             
             if (raw_range <= 0) {
-                return { symbol, state: "FAILED", rejection_reason: "Range width is 0 or negative", current: raw_current, res: raw_resistance, sup: raw_support, raw_candles: candles.slice(-2) };
+                return { symbol, state: "FAILED", rejection_reason: "Range width is 0 or negative", current: raw_current, res: raw_resistance, sup: raw_support };
             }
 
             const raw_range_width_pct = (raw_range / raw_current) * 100;
-            
             if (raw_range_width_pct < MIN_RANGE_THRESHOLD_PCT) {
-                return { 
-                    symbol, state: "FAILED", 
-                    rejection_reason: `Range too narrow (${raw_range_width_pct.toFixed(3)}% < ${MIN_RANGE_THRESHOLD_PCT}% threshold)`,
-                    current: raw_current, res: raw_resistance, sup: raw_support,
-                    rangeWidthPct: raw_range_width_pct.toFixed(3), raw_candles: candles.slice(-2)
-                };
+                return { symbol, state: "FAILED", rejection_reason: `Range too narrow (${raw_range_width_pct.toFixed(3)}% < ${MIN_RANGE_THRESHOLD_PCT}% threshold)`, current: raw_current, res: raw_resistance, sup: raw_support, rangeWidthPct: raw_range_width_pct.toFixed(3) };
             }
 
             const distRes_raw = ((raw_resistance - raw_current) / raw_current) * 100;
@@ -143,26 +127,15 @@
             const buyPct = totalVol > 0 ? (buyVol / totalVol * 100) : 50;
             const sellPct = 100 - buyPct;
 
-            let direction = "NEUTRAL";
-            let final_signal = "Consolidating";
-            let price_pos = "Middle of Range";
-
+            let direction = "NEUTRAL", final_signal = "Consolidating", price_pos = "Middle of Range";
             if (distRes_raw < 2.0 && buyPct > 50) {
-                direction = "BULLISH";
-                final_signal = "About to Break RANGE UP";
-                price_pos = "At Resistance";
+                direction = "BULLISH"; final_signal = "About to Break RANGE UP"; price_pos = "At Resistance";
             } else if (distSup_raw < 2.0 && sellPct > 50) {
-                direction = "BEARISH";
-                final_signal = "About to Break RANGE DOWN";
-                price_pos = "At Support";
+                direction = "BEARISH"; final_signal = "About to Break RANGE DOWN"; price_pos = "At Support";
             } else if (distRes_raw < distSup_raw) {
-                direction = "BULLISH";
-                final_signal = "Approaching Resistance";
-                price_pos = "Upper Range";
+                direction = "BULLISH"; final_signal = "Approaching Resistance"; price_pos = "Upper Range";
             } else if (distSup_raw < distRes_raw) {
-                direction = "BEARISH";
-                final_signal = "Approaching Support";
-                price_pos = "Lower Range";
+                direction = "BEARISH"; final_signal = "Approaching Support"; price_pos = "Lower Range";
             }
 
             return {
@@ -172,13 +145,11 @@
                 rangeWidthPct: raw_range_width_pct,
                 thresholdPct: MIN_RANGE_THRESHOLD_PCT,
                 buyPct: buyPct, sellPct: sellPct,
-                direction, final_signal, price_pos,
-                raw_candles: candles.slice(-2)
+                direction, final_signal, price_pos
             };
         }
 
         async function loadAll() {
-            // Reset view
             document.getElementById('diagnostic-grid').style.display = 'grid';
             updateCounter('diag-fetch', 0, 25, 'neutral');
             updateCounter('diag-calc', 0, 25, 'neutral');
@@ -186,90 +157,60 @@
             updateCounter('diag-rendered', 0, 25, 'neutral');
             updateState('FETCHING', 'Scanning OKX for 25 symbols...');
             
-            let fetchSuccess = 0;
-            let calcSuccess = 0;
+            let fetchSuccess = 0, calcSuccess = 0;
             const allData = [];
 
             for (let i = 0; i < SYMBOLS.length; i++) {
-                const sym = SYMBOLS[i];
-                const candles = await fetchOKX(sym);
-                
-                // Update Fetch Counter
-                if (!candles || candles.error) {
-                    updateCounter('diag-fetch', fetchSuccess, 25, 'fail');
-                } else {
-                    fetchSuccess++;
-                    updateCounter('diag-fetch', fetchSuccess, 25, 'pass');
-                }
+                const candles = await fetchOKX(SYMBOLS[i]);
+                if (!candles || candles.error) updateCounter('diag-fetch', fetchSuccess, 25, 'fail');
+                else { fetchSuccess++; updateCounter('diag-fetch', fetchSuccess, 25, 'pass'); }
 
-                const result = analyze(candles, sym);
+                const result = analyze(candles, SYMBOLS[i]);
                 allData.push(result);
                 
-                // Update Calc Counter
-                if (result && result.current !== undefined) {
-                    calcSuccess++;
-                    updateCounter('diag-calc', calcSuccess, 25, 'pass');
-                } else {
-                    updateCounter('diag-calc', calcSuccess, 25, 'fail');
-                }
-                
+                if (result && result.current !== undefined) { calcSuccess++; updateCounter('diag-calc', calcSuccess, 25, 'pass'); } 
+                else updateCounter('diag-calc', calcSuccess, 25, 'fail');
                 updateState('FETCHING', `Processing ${i+1}/25 symbols...`);
             }
 
-            // Pipeline Step 3: Debug Records created
             const totalRecords = allData.length;
-            if (totalRecords === 25) {
-                updateCounter('diag-records', totalRecords, 25, 'pass');
-            } else {
-                updateCounter('diag-records', totalRecords, 25, 'fail');
-            }
+            if (totalRecords === 25) updateCounter('diag-records', totalRecords, 25, 'pass');
+            else updateCounter('diag-records', totalRecords, 25, 'fail');
 
-            // Pipeline Step 4: DOM Rendering
             const container = document.getElementById("debug-table-container");
-            let html = `<table class="raw-table">
-                <tr><th>Symbol</th><th>TF</th><th>State</th><th>Raw Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Thresh</th><th>Qual</th><th>Reason</th></tr>`;
-            
-            let renderedRows = 0;
+            let html = `<table class="raw-table"><tr><th>Symbol</th><th>TF</th><th>State</th><th>Raw Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Thresh</th><th>Qual</th><th>Reason</th></tr>`;
             allData.forEach(d => {
                 const stateClass = d.state === 'QUALIFIED' ? 'qualified-yes' : d.state === 'FAILED' ? 'qualified-no' : 'fetch-error';
                 const displayPrice = d.current < 0.01 ? d.current.toFixed(8) : d.current.toFixed(4);
                 const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
                 const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
-                
                 html += `<tr>
-                    <td><strong>${d.symbol}</strong></td>
-                    <td>${TF}</td>
-                    <td class="${stateClass}">${d.state}</td>
-                    <td>${displayPrice}</td>
-                    <td>${displaySup}</td>
-                    <td>${displayRes}</td>
+                    <td><strong>${d.symbol}</strong></td><td>${TF}</td><td class="${stateClass}">${d.state}</td>
+                    <td>${displayPrice}</td><td>${displaySup}</td><td>${displayRes}</td>
                     <td><strong>${(d.rangeWidthPct || 0).toFixed(3)}%</strong></td>
                     <td>${d.thresholdPct || 0.5}%</td>
                     <td class="${stateClass}">${d.state === 'QUALIFIED' ? "YES" : "NO"}</td>
                     <td style="font-size:0.85em; color:#888;">${d.rejection_reason}</td>
                 </tr>`;
-                renderedRows++;
             });
             html += `</table>`;
-            
-            // Inject into DOM
             container.innerHTML = html;
 
-            // Verify DOM rendering
-            const tableRows = container.querySelectorAll('table tr');
-            // Subtract 1 for header row
-            const rowsFound = tableRows.length > 0 ? tableRows.length - 1 : 0;
+            // THE FIX: Delay the state check by 150ms to let the mobile DOM render the HTML table!
+            setTimeout(() => {
+                const tableRows = container.querySelectorAll('table tbody tr') || container.querySelectorAll('table tr');
+                const rowsFound = tableRows.length > 0 ? tableRows.length - 1 : 0;
 
-            if (rowsFound === 25) {
-                updateCounter('diag-rendered', rowsFound, 25, 'pass');
-                updateState('VALIDATED', 'Diagnostic pipeline completed successfully.');
-            } else {
-                updateCounter('diag-rendered', rowsFound, 25, 'fail');
-                updateState('ERROR', `Render Failure: DOM injected ${rowsFound} rows, but ${allData.length} were expected.`);
-            }
+                if (rowsFound === 25) {
+                    updateCounter('diag-rendered', rowsFound, 25, 'pass');
+                    updateState('VALIDATED', 'Diagnostic pipeline completed successfully.');
+                } else {
+                    updateCounter('diag-rendered', rowsFound, 25, 'fail');
+                    updateState('ERROR', `Render Failure: DOM injected ${rowsFound} rows.`);
+                }
+            }, 150); // 150 millisecond pause for painting
         }
 
-        // Run immediately
         loadAll();
     </script>
 </body>
