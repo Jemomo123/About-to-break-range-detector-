@@ -305,12 +305,12 @@
 
             updateState('VALIDATED', SYMBOLS.length, SYMBOLS.length);
             
-            // Render Debug Table with ALL 25 symbols
-            renderDebugTable(allData);
-
-            // Render cards only for Qualified
-            const qualified = allData.filter(d => d.state === 'QUALIFIED');
-            renderCards(qualified);
+            // Render Debug Table (Force browser paint)
+            setTimeout(() => {
+                renderDebugTable(allData);
+                const qualified = allData.filter(d => d.state === 'QUALIFIED');
+                renderCards(qualified);
+            }, 50);
         }
 
         // Run immediately
