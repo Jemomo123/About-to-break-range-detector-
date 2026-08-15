@@ -3,12 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Range Detector - Diagnostic Pipeline</title>
+    <title>Range Detector - Battle Logic</title>
     <style>
         body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
         .container { max-width: 800px; margin: auto; }
-        .status-box { border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0; }
-        .diagnostic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; font-family: monospace; font-size: 0.95em; }
+        .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
+        .header { display: flex; justify-content: space-between; font-weight: bold; align-items: center; }
+        .price { font-size: 1.4em; margin: 8px 0; font-weight: 600; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+        .stat-box { background: #11161c; padding: 8px; border-radius: 6px; }
+        .stat-box small { color: #888; display: block; font-size: 0.7em; }
+        .stat-box span { font-size: 1em; }
+        .bar { height: 8px; border-radius: 4px; margin-top: 8px; display: flex; }
+        .buy { background: #00c853; height: 100%; }
+        .sell { background: #ff1744; height: 100%; }
+        
+        .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.7em; font-weight: bold; text-transform: uppercase; }
+        .badge.buyers { background: rgba(0, 200, 83, 0.2); color: #00c853; }
+        .badge.sellers { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
+        .badge.neutral { background: #2d3748; color: #aaa; }
+        
+        .setup-tag { margin-top: 10px; padding: 6px 12px; border-radius: 4px; display: inline-block; font-weight: bold; font-size: 0.9em; }
+        .setup-breakout { background: rgba(0, 200, 83, 0.15); border: 1px solid #00c853; color: #00c853; }
+        .setup-bounce { background: rgba(0, 200, 83, 0.15); border: 1px solid #00c853; color: #00c853; }
+        .setup-breakdown { background: rgba(255, 23, 68, 0.15); border: 1px solid #ff1744; color: #ff1744; }
+        .setup-rejection { background: rgba(255, 23, 68, 0.15); border: 1px solid #ff1744; color: #ff1744; }
+        .setup-nc { background: rgba(255, 255, 255, 0.05); border: 1px solid #555; color: #aaa; }
+
+        .debug-btn { background: none; border: 1px solid #333; color: #888; padding: 2px 8px; border-radius: 4px; cursor: pointer; margin-top: 10px; font-size: 0.8em; }
+        .debug-box { display: none; background: #0f1219; border: 1px solid #222; padding: 15px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 0.85em; line-height: 1.6; color: #b0b0b0; }
+        .debug-box.show { display: block; }
+        .loading { color: #666; text-align: center; margin-top: 20px; font-size: 1.1em; }
+        
+        .raw-table { width: 100%; font-size: 0.75em; border-collapse: collapse; margin-top: 15px; }
+        .raw-table td, .raw-table th { padding: 6px; border-bottom: 1px solid #222; text-align: left; }
+        .raw-table th { color: #888; }
+        .qualified-yes { color: #00c853; font-weight: bold; }
+        .qualified-no { color: #ff1744; font-weight: bold; }
+        .fetch-error { color: #ff1744; }
+        
+        .diag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; font-family: monospace; font-size: 0.95em; }
         .diag-item { background: #161b22; padding: 8px; border-radius: 4px; border-left: 3px solid #555; }
         .diag-item.pass { border-left-color: #00c853; color: #00c853; }
         .diag-item.fail { border-left-color: #ff1744; color: #ff1744; }
@@ -17,46 +51,30 @@
         .status-fetching { background: #2d3748; color: #fbbf24; }
         .status-validated { background: #1e3a3a; color: #00c853; }
         .status-error { background: #3a1e1e; color: #ff1744; }
-        #debug-table-container { overflow-x: auto; margin-top: 20px; min-height: 50px; }
-        .raw-table { width: 100%; border-collapse: collapse; font-size: 0.75em; }
-        .raw-table td, .raw-table th { padding: 6px; border-bottom: 1px solid #222; text-align: left; }
-        .raw-table th { color: #888; }
-        .qualified-yes { color: #00c853; }
-        .qualified-no { color: #ff1744; }
-        .fetch-error { color: #ff1744; }
-        .card { display: none; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>📊 Range Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">PURE DATA FLOW DIAGNOSTIC - Pipeline Viewer</p>
+        <h2>⚔️ Range Battle Detector</h2>
+        <p style="color: #888; font-size: 0.9em;">Level + Winner Analysis (Live OHLCV)</p>
+
+        <div id="status-header" style="border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0;">
+            <div><strong>Pipeline Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
+            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Fetching data...</div>
+        </div>
+
+        <div id="watchlist-container" style="margin-top: 20px;"></div>
         
-        <div id="status-header" class="status-box">
-            <div>
-                <strong>Pipeline Status:</strong> 
-                <span id="app-state" class="status-badge status-fetching">FETCHING</span>
-            </div>
-            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Initializing diagnostic...</div>
-
-            <div id="diagnostic-grid" class="diagnostic-grid" style="display: none;">
-                <div id="diag-fetch" class="diag-item neutral">OKX FETCH: 0/25</div>
-                <div id="diag-calc" class="diag-item neutral">CALCULATIONS: 0/25</div>
-                <div id="diag-records" class="diag-item neutral">DEBUG RECORDS: 0/25</div>
-                <div id="diag-rendered" class="diag-item neutral">DEBUG ROWS RENDERED: 0/25</div>
-            </div>
-        </div>
-
-        <h3 style="color: #aaa; margin-top: 20px;">DEBUG: Exact Raw Values for All 25 Symbols</h3>
-        <div id="debug-table-container">
-            <div style="color: #666; font-size: 0.9em;">Waiting for data...</div>
-        </div>
+        <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG: Raw Battle Logic for All 25 Symbols</h3>
+        <div id="debug-table-container" style="overflow-x: auto;"></div>
     </div>
 
     <script>
+        // WATCHLIST & CONSTANTS
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
-        const MIN_RANGE_THRESHOLD_PCT = 0.5; 
+        const MIN_RANGE_THRESHOLD_PCT = 0.5;
+        const LEVEL_PROXIMITY_PCT = 2.0; // Within 2% of Res/Sup to be considered "At Level"
 
         function updateState(state, msg) {
             const appState = document.getElementById('app-state');
@@ -66,12 +84,6 @@
             else if (state === 'VALIDATED') appState.className = 'status-badge status-validated';
             else if (state === 'ERROR') appState.className = 'status-badge status-error';
             progress.innerText = msg;
-        }
-
-        function updateCounter(id, count, total, status) {
-            const el = document.getElementById(id);
-            el.innerText = el.innerText.replace(/[0-9]+\/[0-9]+/, `${count}/${total}`);
-            el.className = `diag-item ${status}`;
         }
 
         async function fetchOKX(symbol) {
@@ -89,129 +101,203 @@
             } catch (e) { return { error: `FETCH EXCEPTION: ${e.message}` }; }
         }
 
+        // NEW LOGIC ENGINE
         function analyze(candles, symbol) {
             if (!candles || candles.error) {
-                return { symbol, state: "FAILED", rejection_reason: candles ? candles.error : "DATA ERROR", current: 0, res: 0, sup: 0 };
+                return { symbol, state: "FAILED", rejection_reason: candles ? candles.error : "DATA ERROR", 
+                         active_level: "N/A", winner: "N/A", setup: "N/A" };
             }
             if (candles.length < 20) {
-                return { symbol, state: "FAILED", rejection_reason: "Not enough candles (min 20)", current: candles[candles.length-1].close, res: 0, sup: 0 };
+                return { symbol, state: "FAILED", rejection_reason: "Not enough candles (min 20)", 
+                         active_level: "N/A", winner: "N/A", setup: "N/A" };
             }
 
+            // 1. BASIC RANGE STRUCTURE (Unchanged)
             const highs = candles.map(c => c.high);
             const lows = candles.map(c => c.low);
-            const raw_resistance = Math.max(...highs);
-            const raw_support = Math.min(...lows);
-            const raw_current = candles[candles.length - 1].close;
-            const raw_range = raw_resistance - raw_support;
+            const resistance = Math.max(...highs);
+            const support = Math.min(...lows);
+            const current = candles[candles.length - 1].close;
+            const range = resistance - support;
+            if (range <= 0) return { symbol, state: "FAILED", rejection_reason: "Range width is 0 or negative", active_level: "N/A", winner: "N/A", setup: "N/A" };
             
-            if (raw_range <= 0) {
-                return { symbol, state: "FAILED", rejection_reason: "Range width is 0 or negative", current: raw_current, res: raw_resistance, sup: raw_support };
+            const rangeWidthPct = (range / current) * 100;
+            if (rangeWidthPct < MIN_RANGE_THRESHOLD_PCT) {
+                return { symbol, state: "FAILED", rejection_reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < 0.5%)`, active_level: "N/A", winner: "N/A", setup: "N/A" };
             }
 
-            const raw_range_width_pct = (raw_range / raw_current) * 100;
-            if (raw_range_width_pct < MIN_RANGE_THRESHOLD_PCT) {
-                return { symbol, state: "FAILED", rejection_reason: `Range too narrow (${raw_range_width_pct.toFixed(3)}% < ${MIN_RANGE_THRESHOLD_PCT}% threshold)`, current: raw_current, res: raw_resistance, sup: raw_support, rangeWidthPct: raw_range_width_pct.toFixed(3) };
-            }
+            // 2. DISTANCES
+            const distToRes = ((resistance - current) / current) * 100;
+            const distToSup = ((current - support) / current) * 100;
 
-            const distRes_raw = ((raw_resistance - raw_current) / raw_current) * 100;
-            const distSup_raw = ((raw_current - raw_support) / raw_current) * 100;
-            
-            let buyVol = 0, sellVol = 0, totalVol = 0;
-            candles.slice(-10).forEach(c => {
-                const volRange = c.high - c.low;
-                const bRatio = volRange > 0 ? (c.close - c.low) / volRange : 0.5;
-                buyVol += c.vol * bRatio;
-                sellVol += c.vol * (1 - bRatio);
-                totalVol += c.vol;
+            // 3. WHERE IS PRICE?
+            let active_level = "MIDDLE";
+            if (distToRes < LEVEL_PROXIMITY_PCT) active_level = "RESISTANCE";
+            else if (distToSup < LEVEL_PROXIMITY_PCT) active_level = "SUPPORT";
+
+            // 4. WHO IS WINNING? (Analyze last 5 candles)
+            // We look for touches/closes relative to the active level and the opposing side.
+            let buyerMomentum = 0;
+            let sellerMomentum = 0;
+            let evidence = [];
+
+            const lookback = candles.slice(-5);
+            lookback.forEach(c => {
+                // For RESISTANCE level
+                if (active_level === "RESISTANCE") {
+                    if (c.close > resistance) { buyerMomentum++; evidence.push("Close above res"); }
+                    else if (c.high > resistance && c.close < resistance) { sellerMomentum++; evidence.push("Wick reject res"); }
+                    else if (c.close < c.open && c.high > resistance) { sellerMomentum++; evidence.push("Bearish engulf near res"); }
+                }
+                // For SUPPORT level
+                else if (active_level === "SUPPORT") {
+                    if (c.close < support) { sellerMomentum++; evidence.push("Close below sup"); }
+                    else if (c.low < support && c.close > support) { buyerMomentum++; evidence.push("Wick bounce sup"); }
+                    else if (c.close > c.open && c.low < support) { buyerMomentum++; evidence.push("Bullish engulf near sup"); }
+                }
+                // For MIDDLE (Aggressive momentum check towards nearest level)
+                else {
+                    if (distToRes < distToSup) { // Bias toward Resistance
+                        if (c.close > c.open) buyerMomentum++;
+                        else sellerMomentum++;
+                    } else { // Bias toward Support
+                        if (c.close < c.open) sellerMomentum++;
+                        else buyerMomentum++;
+                    }
+                }
             });
-            const buyPct = totalVol > 0 ? (buyVol / totalVol * 100) : 50;
-            const sellPct = 100 - buyPct;
 
-            let direction = "NEUTRAL", final_signal = "Consolidating", price_pos = "Middle of Range";
-            if (distRes_raw < 2.0 && buyPct > 50) {
-                direction = "BULLISH"; final_signal = "About to Break RANGE UP"; price_pos = "At Resistance";
-            } else if (distSup_raw < 2.0 && sellPct > 50) {
-                direction = "BEARISH"; final_signal = "About to Break RANGE DOWN"; price_pos = "At Support";
-            } else if (distRes_raw < distSup_raw) {
-                direction = "BULLISH"; final_signal = "Approaching Resistance"; price_pos = "Upper Range";
-            } else if (distSup_raw < distRes_raw) {
-                direction = "BEARISH"; final_signal = "Approaching Support"; price_pos = "Lower Range";
-            }
+            // DECLARE WINNER
+            let winner = "NO CLEAR WINNER";
+            if (buyerMomentum > sellerMomentum && buyerMomentum >= 2) winner = "BUYERS";
+            else if (sellerMomentum > buyerMomentum && sellerMomentum >= 2) winner = "SELLERS";
+
+            // 5. THE SETUP
+            let setup = "NO CLEAR WINNER";
+            if (active_level === "RESISTANCE" && winner === "BUYERS") setup = "BREAKOUT POTENTIAL";
+            else if (active_level === "RESISTANCE" && winner === "SELLERS") setup = "REJECTION POTENTIAL";
+            else if (active_level === "SUPPORT" && winner === "BUYERS") setup = "BOUNCE POTENTIAL";
+            else if (active_level === "SUPPORT" && winner === "SELLERS") setup = "BREAKDOWN POTENTIAL";
 
             return {
                 symbol, state: "QUALIFIED", rejection_reason: "N/A",
-                current: raw_current, resistance: raw_resistance, support: raw_support,
-                distRes: distRes_raw, distSup: distSup_raw,
-                rangeWidthPct: raw_range_width_pct,
-                thresholdPct: MIN_RANGE_THRESHOLD_PCT,
-                buyPct: buyPct, sellPct: sellPct,
-                direction, final_signal, price_pos
+                current, resistance, support,
+                distRes: distToRes.toFixed(2), distSup: distToSup.toFixed(2),
+                rangeWidthPct: rangeWidthPct.toFixed(3),
+                active_level, winner, setup,
+                buyerMomentum, sellerMomentum, evidence
             };
         }
 
-        async function loadAll() {
-            document.getElementById('diagnostic-grid').style.display = 'grid';
-            updateCounter('diag-fetch', 0, 25, 'neutral');
-            updateCounter('diag-calc', 0, 25, 'neutral');
-            updateCounter('diag-records', 0, 25, 'neutral');
-            updateCounter('diag-rendered', 0, 25, 'neutral');
-            updateState('FETCHING', 'Scanning OKX for 25 symbols...');
-            
-            let fetchSuccess = 0, calcSuccess = 0;
-            const allData = [];
-
-            for (let i = 0; i < SYMBOLS.length; i++) {
-                const candles = await fetchOKX(SYMBOLS[i]);
-                if (!candles || candles.error) updateCounter('diag-fetch', fetchSuccess, 25, 'fail');
-                else { fetchSuccess++; updateCounter('diag-fetch', fetchSuccess, 25, 'pass'); }
-
-                const result = analyze(candles, SYMBOLS[i]);
-                allData.push(result);
-                
-                if (result && result.current !== undefined) { calcSuccess++; updateCounter('diag-calc', calcSuccess, 25, 'pass'); } 
-                else updateCounter('diag-calc', calcSuccess, 25, 'fail');
-                updateState('FETCHING', `Processing ${i+1}/25 symbols...`);
-            }
-
-            const totalRecords = allData.length;
-            if (totalRecords === 25) updateCounter('diag-records', totalRecords, 25, 'pass');
-            else updateCounter('diag-records', totalRecords, 25, 'fail');
-
+        function renderDebugTable(allData) {
             const container = document.getElementById("debug-table-container");
-            let html = `<table class="raw-table"><tr><th>Symbol</th><th>TF</th><th>State</th><th>Raw Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Thresh</th><th>Qual</th><th>Reason</th></tr>`;
+            let html = `<table class="raw-table">
+                <tr><th>Symbol</th><th>State</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Active Level</th><th>Winner</th><th>Setup</th></tr>`;
             allData.forEach(d => {
                 const stateClass = d.state === 'QUALIFIED' ? 'qualified-yes' : d.state === 'FAILED' ? 'qualified-no' : 'fetch-error';
-                const displayPrice = d.current < 0.01 ? d.current.toFixed(8) : d.current.toFixed(4);
-                const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
-                const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
+                const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
                 html += `<tr>
-                    <td><strong>${d.symbol}</strong></td><td>${TF}</td><td class="${stateClass}">${d.state}</td>
-                    <td>${displayPrice}</td><td>${displaySup}</td><td>${displayRes}</td>
-                    <td><strong>${(d.rangeWidthPct || 0).toFixed(3)}%</strong></td>
-                    <td>${d.thresholdPct || 0.5}%</td>
-                    <td class="${stateClass}">${d.state === 'QUALIFIED' ? "YES" : "NO"}</td>
-                    <td style="font-size:0.85em; color:#888;">${d.rejection_reason}</td>
+                    <td><strong>${d.symbol}</strong></td>
+                    <td class="${stateClass}">${d.state}</td>
+                    <td>${displayPrice}</td>
+                    <td>$${d.support.toFixed(4)}</td>
+                    <td>$${d.resistance.toFixed(4)}</td>
+                    <td>${(d.rangeWidthPct || 0)}%</td>
+                    <td><strong>${d.active_level}</strong></td>
+                    <td><strong>${d.winner}</strong></td>
+                    <td><strong>${d.setup}</strong></td>
                 </tr>`;
             });
             html += `</table>`;
             container.innerHTML = html;
+        }
 
-            // THE FIX: Delay the state check by 150ms to let the mobile DOM render the HTML table!
+        function toggleDebug(symbol) {
+            const box = document.getElementById(`debug-${symbol}`);
+            box.classList.toggle('show');
+        }
+
+        function renderCards(qualifiedData) {
+            const container = document.getElementById("watchlist-container");
+            if (qualifiedData.length === 0) {
+                container.innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ No valid ranges detected based on 0.5% threshold.</div>`;
+                return;
+            }
+
+            container.innerHTML = qualifiedData.map(d => {
+                const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
+                const displaySup = d.support < 0.01 ? '$' + d.support.toFixed(8) : '$' + d.support.toFixed(4);
+                const displayRes = d.resistance < 0.01 ? '$' + d.resistance.toFixed(8) : '$' + d.resistance.toFixed(4);
+                
+                // Determine CSS classes for the Setup
+                let setupClass = "setup-nc";
+                if (d.setup === "BREAKOUT POTENTIAL") setupClass = "setup-breakout";
+                else if (d.setup === "BOUNCE POTENTIAL") setupClass = "setup-bounce";
+                else if (d.setup === "BREAKDOWN POTENTIAL") setupClass = "setup-breakdown";
+                else if (d.setup === "REJECTION POTENTIAL") setupClass = "setup-rejection";
+
+                return `
+                <div class="card" style="border-left-color: ${d.setup.includes('BREAKOUT') || d.setup.includes('BOUNCE') ? '#00c853' : d.setup.includes('BREAKDOWN') || d.setup.includes('REJECTION') ? '#ff1744' : '#555'};">
+                    <div class="header">
+                        <span style="font-size: 1.1em;">${d.symbol}</span>
+                        <span class="badge ${d.winner === 'BUYERS' ? 'buyers' : d.winner === 'SELLERS' ? 'sellers' : 'neutral'}">
+                            ${d.winner === 'BUYERS' ? '🟢' : d.winner === 'SELLERS' ? '🔴' : '⚪'} ${d.winner}
+                        </span>
+                    </div>
+                    <div class="price">${displayPrice}</div>
+                    
+                    <div class="grid">
+                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">${displayRes}</span><br><small style="color:#666;">(${d.distRes}% away)</small></div>
+                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">${displaySup}</span><br><small style="color:#666;">(${d.distSup}% away)</small></div>
+                    </div>
+                    
+                    <div style="margin-top: 5px; color: #aaa; font-size: 0.9em;">
+                        <div>ACTIVE LEVEL: <strong>${d.active_level}</strong></div>
+                        <div>WINNER: <strong style="color: ${d.winner === 'BUYERS' ? '#00c853' : d.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${d.winner}</strong></div>
+                        <div class="setup-tag ${setupClass}">${d.setup}</div>
+                    </div>
+                    
+                    <button class="debug-btn" onclick="toggleDebug('${d.symbol}')">🔍 Show Battle Evidence</button>
+                    <div id="debug-${d.symbol}" class="debug-box">
+                        <div><u>EVIDENCE (Last 5 Candles):</u></div>
+                        <div style="color:#aaa; font-size:0.9em;">${d.evidence.join(', ') || 'No decisive touch/rejection yet'}</div>
+                        <div style="margin-top: 10px;">
+                            <span style="color:#00c853;">BUYER MOMENTUM: ${d.buyerMomentum}</span> | 
+                            <span style="color:#ff1744;">SELLER MOMENTUM: ${d.sellerMomentum}</span>
+                        </div>
+                        <div style="margin-top: 10px; border-top:1px solid #222; padding-top:5px;">
+                            RULE: <br>
+                            1. IDENTIFY ACTIVE LEVEL (Proximity < ${LEVEL_PROXIMITY_PCT}%).<br>
+                            2. COUNT CANDLES CLOSING BEYOND LEVEL vs. REJECTING IT.<br>
+                            3. HIGHEST COUNT WINS THE BATTLE.
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        async function loadAll() {
+            updateState('FETCHING', 'Loading 25 symbols...');
+            
+            const allData = [];
+            for (const sym of SYMBOLS) {
+                const candles = await fetchOKX(sym);
+                const result = analyze(candles, sym);
+                allData.push(result);
+            }
+
+            updateState('VALIDATED', 'Battle logic computed.');
+            
+            // Small delay for DOM painting
             setTimeout(() => {
-                const tableRows = container.querySelectorAll('table tbody tr') || container.querySelectorAll('table tr');
-                const rowsFound = tableRows.length > 0 ? tableRows.length - 1 : 0;
-
-                if (rowsFound === 25) {
-                    updateCounter('diag-rendered', rowsFound, 25, 'pass');
-                    updateState('VALIDATED', 'Diagnostic pipeline completed successfully.');
-                } else {
-                    updateCounter('diag-rendered', rowsFound, 25, 'fail');
-                    updateState('ERROR', `Render Failure: DOM injected ${rowsFound} rows.`);
-                }
-            }, 150); // 150 millisecond pause for painting
+                renderDebugTable(allData);
+                const qualified = allData.filter(d => d.state === 'QUALIFIED');
+                renderCards(qualified);
+            }, 100);
         }
 
         loadAll();
+        setInterval(loadAll, 60000); // Refresh every minute
     </script>
 </body>
 </html>
