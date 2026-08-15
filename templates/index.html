@@ -43,7 +43,7 @@
 <body>
     <div class="container">
         <h2>⚔️ Range Battle Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">Strict Data Pipeline & Candle Evidence</p>
+        <p style="color: #888; font-size: 0.9em;">Level = Location. Winner = Price-Action.</p>
 
         <div id="status-header" style="border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0;">
             <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
@@ -60,8 +60,8 @@
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
         const MIN_RANGE_THRESHOLD_PCT = 0.5;
-        const LEVEL_PROXIMITY_PCT = 2.0; // Within 2% of Res/Sup
-        const WINNER_MARGIN = 0.5; // Margin multiplier for determining winner
+        const LEVEL_PROXIMITY_PCT = 2.0; // Only used for LOCATION
+        const WINNER_MARGIN = 0.5;
 
         function updateState(state, msg) {
             document.getElementById('app-state').innerText = state;
@@ -93,28 +93,24 @@
         }
 
         function analyze(candles, symbol) {
-            // --- 1. STRICT DATA VALIDATION ---
+            // --- 1. DATA VALIDATION ---
             if (!candles) return { symbol, status: "DATA_FAILURE", reason: "Fetch returned null", price: 0 };
             if (candles.error) return { symbol, status: "DATA_FAILURE", reason: candles.error, price: 0 };
             if (candles.length < 20) return { symbol, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/20)`, price: 0 };
 
-            // Validate the last candle specifically
             const lastCandle = candles[candles.length - 1];
             if (!lastCandle) return { symbol, status: "DATA_FAILURE", reason: "Last candle missing", price: 0 };
-            if (isNaN(lastCandle.high) || isNaN(lastCandle.low) || isNaN(lastCandle.close)) {
-                return { symbol, status: "DATA_FAILURE", reason: "NaN values in OHLC", price: 0 };
-            }
-            if (!isFinite(lastCandle.high) || !isFinite(lastCandle.low) || !isFinite(lastCandle.close)) {
-                return { symbol, status: "DATA_FAILURE", reason: "Infinite values in OHLC", price: 0 };
+            if (isNaN(lastCandle.high) || isNaN(lastCandle.low) || isNaN(lastCandle.close) || !isFinite(lastCandle.high) || !isFinite(lastCandle.low) || !isFinite(lastCandle.close)) {
+                return { symbol, status: "DATA_FAILURE", reason: "Invalid OHLCV values (NaN/Infinite)", price: 0 };
             }
             if (lastCandle.close <= 0 || lastCandle.high <= 0 || lastCandle.low <= 0) {
-                return { symbol, status: "DATA_FAILURE", reason: `Invalid price (${lastCandle.close})`, price: 0 };
+                return { symbol, status: "DATA_FAILURE", reason: `Invalid price (<= 0)`, price: 0 };
             }
             if (lastCandle.high < lastCandle.low) {
                 return { symbol, status: "DATA_FAILURE", reason: "High < Low in candles", price: 0 };
             }
 
-            // --- 2. RANGE CALCULATION (Raw values, 0.5% threshold) ---
+            // --- 2. RANGE CALCULATION ---
             const highs = candles.map(c => c.high);
             const lows = candles.map(c => c.low);
             const resistance = Math.max(...highs);
@@ -129,7 +125,7 @@
                 return { symbol, status: "RANGE_FAILURE", reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < 0.5%)`, price: current };
             }
 
-            // --- 3. LOCATE THE BATTLE (Level, Distances) ---
+            // --- 3. LOCATION (WHERE is the battle?) ---
             const distToRes = ((resistance - current) / current) * 100;
             const distToSup = ((current - support) / current) * 100;
 
@@ -137,28 +133,17 @@
             if (distToRes < LEVEL_PROXIMITY_PCT) active_level = "RESISTANCE";
             else if (distToSup < LEVEL_PROXIMITY_PCT) active_level = "SUPPORT";
 
-            // --- 4. WHO IS WINNING? (Candle Evidence - DISTANCE IS NEVER USED) ---
+            // --- 4. WINNER (WHO is winning? - Strictly from the last 5 candles) ---
             let bullishCandles = 0, bearishCandles = 0;
-            let bullishBody = 0, bearishBody = 0;
             let upwardMove = 0, downwardMove = 0;
-            let rejection_ev = 0, break_ev = 0;
 
             const lookback = candles.slice(-5);
             lookback.forEach((c, idx) => {
-                const body = Math.abs(c.close - c.open);
-                const fullRange = c.high - c.low;
-                // Determine trend direction
-                if (c.close > c.open) {
-                    bullishCandles++;
-                    bullishBody += body;
-                    // Check if close is in the upper half (bullish pressure)
-                    if (c.close > (c.low + (fullRange * 0.6))) break_ev++;
-                } else if (c.close < c.open) {
-                    bearishCandles++;
-                    bearishBody += body;
-                    // Check if close is in the lower half (bearish pressure)
-                    if (c.close < (c.high - (fullRange * 0.6))) rejection_ev++;
-                }
+                // Count direction
+                if (c.close > c.open) bullishCandles++;
+                else if (c.close < c.open) bearishCandles++;
+
+                // Measure progression
                 if (idx > 0) {
                     const prevClose = lookback[idx-1].close;
                     if (c.close > prevClose) upwardMove += (c.close - prevClose);
@@ -166,16 +151,16 @@
                 }
             });
 
-            let buyer_score = (bullishCandles * 2) + (bullishBody > 0 ? 1 : 0) + (upwardMove > 0 ? 0.5 : 0) + (break_ev > 0 ? 2 : 0);
-            let seller_score = (bearishCandles * 2) + (bearishBody > 0 ? 1 : 0) + (downwardMove > 0 ? 0.5 : 0) + (rejection_ev > 0 ? 2 : 0);
+            // Calculate independent scores
+            let buyer_score = (bullishCandles * 2) + (upwardMove > 0 ? (upwardMove / current * 100) : 0);
+            let seller_score = (bearishCandles * 2) + (downwardMove > 0 ? (downwardMove / current * 100) : 0);
 
-            // Apply Margin to avoid forcing a loser
             let winner = "NO CLEAR WINNER";
             if (buyer_score > seller_score * (1 + WINNER_MARGIN)) winner = "BUYERS";
             else if (seller_score > buyer_score * (1 + WINNER_MARGIN)) winner = "SELLERS";
 
-            // --- 5. THE SETUP ---
-            let setup = "NO CLEAR WINNER";
+            // --- 5. THE SETUP (Combination of independent Location + Winner) ---
+            let setup = "NO CLEAR SETUP";
             if (active_level === "RESISTANCE" && winner === "BUYERS") setup = "BREAKOUT POTENTIAL";
             else if (active_level === "RESISTANCE" && winner === "SELLERS") setup = "REJECTION POTENTIAL";
             else if (active_level === "SUPPORT" && winner === "BUYERS") setup = "BOUNCE POTENTIAL";
@@ -187,7 +172,7 @@
                 distRes: distToRes.toFixed(2), distSup: distToSup.toFixed(2),
                 rangeWidthPct: rangeWidthPct.toFixed(3),
                 active_level, winner, setup,
-                bullishCandles, bearishCandles, bullishBody, bearishBody,
+                bullishCandles, bearishCandles,
                 buyer_score: buyer_score.toFixed(1), seller_score: seller_score.toFixed(1)
             };
         }
@@ -201,7 +186,7 @@
             }
             updateState('VALIDATED', 'Done.');
 
-            // --- RENDER DEBUG TABLE (Source of Truth) ---
+            // --- RENDER DEBUG TABLE ---
             let debugRows = "";
             allData.forEach(d => {
                 const statusClass = d.status === 'VALIDATED' ? 'status-valid' : 'status-fail';
@@ -220,7 +205,7 @@
                     <td>${isDataFail ? '0%' : d.rangeWidthPct + '%'}</td>
                     <td>${isDataFail ? 'N/A' : d.distSup + '%'}</td>
                     <td>${isDataFail ? 'N/A' : d.distRes + '%'}</td>
-                    <td>${isDataFail ? 'N/A' : d.active_level}</td>
+                    <td><strong>${isDataFail ? 'N/A' : d.active_level}</strong></td>
                     <td>${isDataFail ? 'N/A' : d.bullishCandles}</td>
                     <td>${isDataFail ? 'N/A' : d.bearishCandles}</td>
                     <td>${isDataFail ? 'N/A' : d.buyer_score}</td>
@@ -236,11 +221,8 @@
                     ${debugRows}
                 </table>`;
 
-            // --- RENDER CARDS (Only Validated) ---
-            const validated = allData.filter(d => d.status === 'VALIDATED' || d.status === 'RANGE_FAILURE');
-            // For cards, we currently only show VALIDATED (qualified)
+            // --- RENDER CARDS ---
             const qualified = allData.filter(d => d.status === 'VALIDATED');
-            
             if (qualified.length === 0) {
                 document.getElementById('watchlist-container').innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ 0 qualified ranges found.</div>`;
                 return;
@@ -275,7 +257,7 @@
                         <div class="setup-tag ${setupClass}">${d.setup}</div>
                     </div>
                     <div style="margin-top:10px; font-size:0.85em; color:#888;">
-                        <u>EVIDENCE:</u> Bullish: ${d.bullishCandles}, Bearish: ${d.bearishCandles}. Score: ${d.buyer_score} / ${d.seller_score}
+                        <u>EVIDENCE (Last 5 candles):</u> Bull: ${d.bullishCandles}, Bear: ${d.bearishCandles}. Score: ${d.buyer_score} / ${d.seller_score}
                     </div>
                 </div>`;
             });
