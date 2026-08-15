@@ -144,12 +144,17 @@
                 <tr><th>Symbol</th><th>Qualified</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Dist Sup%</th><th>Dist Res%</th><th>Buy%</th><th>Sell%</th><th>Direction</th><th>Reason</th></tr>`;
             allData.forEach(d => {
                 const color = d.qualified ? "#00c853" : "#ff1744";
+                // --- DISPLAY FIX: Handle low-value coins (PEPE etc) properly ---
+                const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
+                const displaySup = d.sup < 0.01 ? d.sup.toFixed(8) : d.sup.toFixed(4);
+                const displayRes = d.res < 0.01 ? d.res.toFixed(8) : d.res.toFixed(4);
+                // --------------------------------------------------------------
                 html += `<tr>
                     <td><strong>${d.symbol}</strong></td>
                     <td style="color:${color}">${d.qualified ? "✅ YES" : "❌ NO"}</td>
-                    <td>$${d.current.toFixed(2)}</td>
-                    <td>$${d.sup.toFixed(4)}</td>
-                    <td>$${d.res.toFixed(4)}</td>
+                    <td>${displayPrice}</td>
+                    <td>$${displaySup}</td>
+                    <td>$${displayRes}</td>
                     <td>${d.rangeWidthPct}%</td>
                     <td>${d.distSup}%</td>
                     <td>${d.distRes}%</td>
@@ -181,7 +186,13 @@
 
             // RENDER CARDS (Only qualified ones for the UI)
             const qualified = allData.filter(d => d.qualified);
-            container.innerHTML = qualified.map(d => `
+            container.innerHTML = qualified.map(d => {
+                // --- DISPLAY FIX: Handle low-value coins (PEPE etc) properly ---
+                const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
+                const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
+                const displayRes = d.resistance < 0.01 ? d.resistance.toFixed(8) : d.resistance.toFixed(4);
+                // --------------------------------------------------------------
+                return `
                 <div class="card" style="border-left-color: ${d.direction === 'BULLISH' ? '#00c853' : d.direction === 'BEARISH' ? '#ff1744' : '#555'};">
                     <div class="header">
                         <span style="font-size: 1.1em;">${d.symbol}</span>
@@ -189,10 +200,10 @@
                             ${d.direction === 'BULLISH' ? '🟢' : d.direction === 'BEARISH' ? '🔴' : '⚪'} ${d.direction}
                         </span>
                     </div>
-                    <div class="price">$${d.current.toFixed(2)}</div>
+                    <div class="price">${displayPrice}</div>
                     <div class="grid">
-                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">$${d.resistance.toFixed(4)}</span><br><small style="color:#666;">(${d.distRes}% away)</small></div>
-                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">$${d.support.toFixed(4)}</span><br><small style="color:#666;">(${d.distSup}% away)</small></div>
+                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">$${displayRes}</span><br><small style="color:#666;">(${d.distRes}% away)</small></div>
+                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">$${displaySup}</span><br><small style="color:#666;">(${d.distSup}% away)</small></div>
                     </div>
                     <div class="bar">
                         <div class="buy" style="width: ${d.buyPct}%;"></div>
@@ -214,8 +225,8 @@
                         <div>DIRECTION = ${d.direction}</div>
                         <div style="margin-top:5px; border-top:1px solid #222; padding-top:5px;">FINAL SIGNAL = <strong>${d.final_signal}</strong></div>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
 
             // RENDER DEBUG TABLE
             renderDebugTable(allData);
