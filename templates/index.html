@@ -43,7 +43,7 @@
 <body>
     <div class="container">
         <h2>⚔️ Range Battle Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">Level = Location. Winner = Price-Action.</p>
+        <p style="color: #888; font-size: 0.9em;">Level = Nearest Level. Winner = Last 5 Candles.</p>
 
         <div id="status-header" style="border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0;">
             <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
@@ -60,7 +60,7 @@
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
         const MIN_RANGE_THRESHOLD_PCT = 0.5;
-        const LEVEL_PROXIMITY_PCT = 2.0; // Only used for LOCATION
+        // Remove LEVEL_PROXIMITY_PCT - we use pure comparison.
         const WINNER_MARGIN = 0.5;
 
         function updateState(state, msg) {
@@ -126,12 +126,22 @@
             }
 
             // --- 3. LOCATION (WHERE is the battle?) ---
+            // STRICT CALCULATION: Compare distances and choose the closest valid level.
             const distToRes = ((resistance - current) / current) * 100;
             const distToSup = ((current - support) / current) * 100;
 
             let active_level = "MIDDLE";
-            if (distToRes < LEVEL_PROXIMITY_PCT) active_level = "RESISTANCE";
-            else if (distToSup < LEVEL_PROXIMITY_PCT) active_level = "SUPPORT";
+            let raw_nearest_dist = 0;
+
+            if (distToRes < distToSup) {
+                active_level = "RESISTANCE";
+                raw_nearest_dist = distToRes;
+            } else if (distToSup < distToRes) {
+                active_level = "SUPPORT";
+                raw_nearest_dist = distToSup;
+            } else {
+                active_level = "MIDDLE"; // Perfectly balanced in the middle
+            }
 
             // --- 4. WINNER (WHO is winning? - Strictly from the last 5 candles) ---
             let bullishCandles = 0, bearishCandles = 0;
