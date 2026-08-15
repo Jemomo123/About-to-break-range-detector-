@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Range Detector - Battle Logic</title>
+    <title>Range Battle Detector</title>
     <style>
         body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
         .container { max-width: 800px; margin: auto; }
@@ -14,77 +14,52 @@
         .stat-box { background: #11161c; padding: 8px; border-radius: 6px; }
         .stat-box small { color: #888; display: block; font-size: 0.7em; }
         .stat-box span { font-size: 1em; }
-        .bar { height: 8px; border-radius: 4px; margin-top: 8px; display: flex; }
-        .buy { background: #00c853; height: 100%; }
-        .sell { background: #ff1744; height: 100%; }
-        
         .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.7em; font-weight: bold; text-transform: uppercase; }
         .badge.buyers { background: rgba(0, 200, 83, 0.2); color: #00c853; }
         .badge.sellers { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
         .badge.neutral { background: #2d3748; color: #aaa; }
-        
         .setup-tag { margin-top: 10px; padding: 6px 12px; border-radius: 4px; display: inline-block; font-weight: bold; font-size: 0.9em; }
         .setup-breakout { background: rgba(0, 200, 83, 0.15); border: 1px solid #00c853; color: #00c853; }
         .setup-bounce { background: rgba(0, 200, 83, 0.15); border: 1px solid #00c853; color: #00c853; }
         .setup-breakdown { background: rgba(255, 23, 68, 0.15); border: 1px solid #ff1744; color: #ff1744; }
         .setup-rejection { background: rgba(255, 23, 68, 0.15); border: 1px solid #ff1744; color: #ff1744; }
         .setup-nc { background: rgba(255, 255, 255, 0.05); border: 1px solid #555; color: #aaa; }
-
-        .debug-btn { background: none; border: 1px solid #333; color: #888; padding: 2px 8px; border-radius: 4px; cursor: pointer; margin-top: 10px; font-size: 0.8em; }
-        .debug-box { display: none; background: #0f1219; border: 1px solid #222; padding: 15px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 0.85em; line-height: 1.6; color: #b0b0b0; }
-        .debug-box.show { display: block; }
         .loading { color: #666; text-align: center; margin-top: 20px; font-size: 1.1em; }
-        
         .raw-table { width: 100%; font-size: 0.75em; border-collapse: collapse; margin-top: 15px; }
         .raw-table td, .raw-table th { padding: 6px; border-bottom: 1px solid #222; text-align: left; }
         .raw-table th { color: #888; }
-        .qualified-yes { color: #00c853; font-weight: bold; }
-        .qualified-no { color: #ff1744; font-weight: bold; }
-        .fetch-error { color: #ff1744; }
-        
         .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
         .status-fetching { background: #2d3748; color: #fbbf24; }
         .status-validated { background: #1e3a3a; color: #00c853; }
-        .status-error { background: #3a1e1e; color: #ff1744; }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>⚔️ Range Battle Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">Level + Winner Analysis (Live OHLCV)</p>
+        <p style="color: #888; font-size: 0.9em;">Level + Winner Analysis (Final Build)</p>
 
         <div id="status-header" style="border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0;">
-            <div><strong>Pipeline Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
-            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Fetching data...</div>
+            <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
+            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Loading 25 symbols...</div>
         </div>
 
-        <div id="watchlist-container" style="margin-top: 20px;"></div>
+        <div id="watchlist-container"></div>
         
-        <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG: Raw Battle Logic for All 25 Symbols</h3>
-        
-        <!-- STRICT STATIC INJECTION POINT -->
-        <div id="debug-root" style="overflow-x: auto; min-height: 50px;"></div>
-        <script>
-            // THE FIX: Keep a reference to the debug root
-            const DEBUG_ROOT = document.getElementById('debug-root');
-        </script>
+        <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG TABLE (Strict Injection)</h3>
+        <div id="debug-root"></div>
     </div>
 
     <script>
-        // WATCHLIST & CONSTANTS
+        // WATCHLIST
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
         const MIN_RANGE_THRESHOLD_PCT = 0.5;
-        const LEVEL_PROXIMITY_PCT = 2.0; // Within 2% of Res/Sup to be considered "At Level"
+        const LEVEL_PROXIMITY_PCT = 2.0;
 
         function updateState(state, msg) {
-            const appState = document.getElementById('app-state');
-            const progress = document.getElementById('progress-text');
-            appState.innerText = state;
-            if(state === 'FETCHING') appState.className = 'status-badge status-fetching';
-            else if (state === 'VALIDATED') appState.className = 'status-badge status-validated';
-            else if (state === 'ERROR') appState.className = 'status-badge status-error';
-            progress.innerText = msg;
+            document.getElementById('app-state').innerText = state;
+            document.getElementById('app-state').className = `status-badge status-${state.toLowerCase()}`;
+            document.getElementById('progress-text').innerText = msg;
         }
 
         async function fetchOKX(symbol) {
@@ -102,18 +77,14 @@
             } catch (e) { return { error: `FETCH EXCEPTION: ${e.message}` }; }
         }
 
-        // NEW LOGIC ENGINE
         function analyze(candles, symbol) {
             if (!candles || candles.error) {
-                return { symbol, state: "FAILED", rejection_reason: candles ? candles.error : "DATA ERROR", 
-                         active_level: "N/A", winner: "N/A", setup: "N/A" };
+                return { symbol, state: "FAILED", rejection_reason: candles ? candles.error : "DATA ERROR", active_level: "N/A", winner: "N/A", setup: "N/A" };
             }
             if (candles.length < 20) {
-                return { symbol, state: "FAILED", rejection_reason: "Not enough candles (min 20)", 
-                         active_level: "N/A", winner: "N/A", setup: "N/A" };
+                return { symbol, state: "FAILED", rejection_reason: "Not enough candles (min 20)", active_level: "N/A", winner: "N/A", setup: "N/A" };
             }
 
-            // 1. BASIC RANGE STRUCTURE (Unchanged)
             const highs = candles.map(c => c.high);
             const lows = candles.map(c => c.low);
             const resistance = Math.max(...highs);
@@ -127,173 +98,99 @@
                 return { symbol, state: "FAILED", rejection_reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < 0.5%)`, active_level: "N/A", winner: "N/A", setup: "N/A" };
             }
 
-            // 2. DISTANCES
             const distToRes = ((resistance - current) / current) * 100;
             const distToSup = ((current - support) / current) * 100;
 
-            // 3. WHERE IS PRICE?
             let active_level = "MIDDLE";
             if (distToRes < LEVEL_PROXIMITY_PCT) active_level = "RESISTANCE";
             else if (distToSup < LEVEL_PROXIMITY_PCT) active_level = "SUPPORT";
 
-            // 4. WHO IS WINNING? (Analyze last 5 candles)
-            let buyerMomentum = 0;
-            let sellerMomentum = 0;
-            let evidence = [];
-
+            let buyerMomentum = 0, sellerMomentum = 0, evidence = [];
             const lookback = candles.slice(-5);
             lookback.forEach(c => {
-                // For RESISTANCE level
                 if (active_level === "RESISTANCE") {
                     if (c.close > resistance) { buyerMomentum++; evidence.push("Close above res"); }
                     else if (c.high > resistance && c.close < resistance) { sellerMomentum++; evidence.push("Wick reject res"); }
-                    else if (c.close < c.open && c.high > resistance) { sellerMomentum++; evidence.push("Bearish engulf near res"); }
-                }
-                // For SUPPORT level
-                else if (active_level === "SUPPORT") {
+                } else if (active_level === "SUPPORT") {
                     if (c.close < support) { sellerMomentum++; evidence.push("Close below sup"); }
                     else if (c.low < support && c.close > support) { buyerMomentum++; evidence.push("Wick bounce sup"); }
-                    else if (c.close > c.open && c.low < support) { buyerMomentum++; evidence.push("Bullish engulf near sup"); }
-                }
-                // For MIDDLE (Aggressive momentum check towards nearest level)
-                else {
-                    if (distToRes < distToSup) { // Bias toward Resistance
-                        if (c.close > c.open) buyerMomentum++;
-                        else sellerMomentum++;
-                    } else { // Bias toward Support
-                        if (c.close < c.open) sellerMomentum++;
-                        else buyerMomentum++;
-                    }
+                } else {
+                    if (distToRes < distToSup) { if (c.close > c.open) buyerMomentum++; else sellerMomentum++; } 
+                    else { if (c.close < c.open) sellerMomentum++; else buyerMomentum++; }
                 }
             });
 
-            // DECLARE WINNER
             let winner = "NO CLEAR WINNER";
             if (buyerMomentum > sellerMomentum && buyerMomentum >= 2) winner = "BUYERS";
             else if (sellerMomentum > buyerMomentum && sellerMomentum >= 2) winner = "SELLERS";
 
-            // 5. THE SETUP
             let setup = "NO CLEAR WINNER";
             if (active_level === "RESISTANCE" && winner === "BUYERS") setup = "BREAKOUT POTENTIAL";
             else if (active_level === "RESISTANCE" && winner === "SELLERS") setup = "REJECTION POTENTIAL";
             else if (active_level === "SUPPORT" && winner === "BUYERS") setup = "BOUNCE POTENTIAL";
             else if (active_level === "SUPPORT" && winner === "SELLERS") setup = "BREAKDOWN POTENTIAL";
 
-            return {
-                symbol, state: "QUALIFIED", rejection_reason: "N/A",
-                current, resistance, support,
-                distRes: distToRes.toFixed(2), distSup: distToSup.toFixed(2),
-                rangeWidthPct: rangeWidthPct.toFixed(3),
-                active_level, winner, setup,
-                buyerMomentum, sellerMomentum, evidence
-            };
+            return { symbol, state: "QUALIFIED", current, resistance, support, distRes: distToRes.toFixed(2), distSup: distToSup.toFixed(2), rangeWidthPct: rangeWidthPct.toFixed(3), active_level, winner, setup, buyerMomentum, sellerMomentum, evidence };
         }
 
-        function renderDebugTable(allData) {
-            let html = `<table class="raw-table">
-                <tr><th>Symbol</th><th>State</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Active Level</th><th>Winner</th><th>Setup</th></tr>`;
+        function formatPrice(price) {
+            if (price === 0 || isNaN(price)) return "$0.00";
+            if (price < 0.0001) return "$" + price.toFixed(8);
+            if (price < 0.01) return "$" + price.toFixed(6);
+            if (price < 1) return "$" + price.toFixed(4);
+            return "$" + price.toFixed(2);
+        }
+
+        async function loadAll() {
+            updateState('FETCHING', 'Loading 25 symbols...');
+            const allData = [];
+            for (const sym of SYMBOLS) {
+                const candles = await fetchOKX(sym);
+                allData.push(analyze(candles, sym));
+            }
+            updateState('VALIDATED', 'Done.');
+
+            // RENDER DEBUG TABLE - STRICT STRING BUILDER (No forced .toFixed)
+            let debugRows = "";
             allData.forEach(d => {
                 const stateClass = d.state === 'QUALIFIED' ? 'qualified-yes' : d.state === 'FAILED' ? 'qualified-no' : 'fetch-error';
-                const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
-                html += `<tr>
-                    <td><strong>${d.symbol}</strong></td>
-                    <td class="${stateClass}">${d.state}</td>
-                    <td>${displayPrice}</td>
-                    <td>$${d.support.toFixed(4)}</td>
-                    <td>$${d.resistance.toFixed(4)}</td>
-                    <td>${(d.rangeWidthPct || 0)}%</td>
-                    <td><strong>${d.active_level}</strong></td>
-                    <td><strong>${d.winner}</strong></td>
-                    <td><strong>${d.setup}</strong></td>
-                </tr>`;
+                const p = formatPrice(d.current);
+                const sup = formatPrice(d.support);
+                const res = formatPrice(d.resistance);
+                debugRows += `<tr><td><strong>${d.symbol}</strong></td><td class="${stateClass}">${d.state}</td><td>${p}</td><td>${sup}</td><td>${res}</td><td>${(d.rangeWidthPct || 0)}%</td><td><strong>${d.active_level}</strong></td><td><strong>${d.winner}</strong></td><td><strong>${d.setup}</strong></td></tr>`;
             });
-            html += `</table>`;
-            return html;
-        }
+            
+            document.getElementById('debug-root').innerHTML = `<table class="raw-table"><tr><th>Symbol</th><th>State</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Level</th><th>Winner</th><th>Setup</th></tr>${debugRows}</table>`;
 
-        function toggleDebug(symbol) {
-            const box = document.getElementById(`debug-${symbol}`);
-            box.classList.toggle('show');
-        }
-
-        function renderCards(qualifiedData) {
-            const container = document.getElementById("watchlist-container");
-            if (qualifiedData.length === 0) {
-                container.innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ No valid ranges detected based on 0.5% threshold.</div>`;
+            // RENDER CARDS
+            const qualified = allData.filter(d => d.state === 'QUALIFIED');
+            if (qualified.length === 0) {
+                document.getElementById('watchlist-container').innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ No valid ranges detected (0.5% threshold).</div>`;
                 return;
             }
-
-            container.innerHTML = qualifiedData.map(d => {
-                const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
-                const displaySup = d.support < 0.01 ? '$' + d.support.toFixed(8) : '$' + d.support.toFixed(4);
-                const displayRes = d.resistance < 0.01 ? '$' + d.resistance.toFixed(8) : '$' + d.resistance.toFixed(4);
-                
+            
+            let cardHTML = "";
+            qualified.forEach(d => {
+                const p = formatPrice(d.current);
+                const sup = formatPrice(d.support);
+                const res = formatPrice(d.resistance);
                 let setupClass = "setup-nc";
                 if (d.setup === "BREAKOUT POTENTIAL") setupClass = "setup-breakout";
                 else if (d.setup === "BOUNCE POTENTIAL") setupClass = "setup-bounce";
                 else if (d.setup === "BREAKDOWN POTENTIAL") setupClass = "setup-breakdown";
                 else if (d.setup === "REJECTION POTENTIAL") setupClass = "setup-rejection";
-
-                return `
-                <div class="card" style="border-left-color: ${d.setup.includes('BREAKOUT') || d.setup.includes('BOUNCE') ? '#00c853' : d.setup.includes('BREAKDOWN') || d.setup.includes('REJECTION') ? '#ff1744' : '#555'};">
-                    <div class="header">
-                        <span style="font-size: 1.1em;">${d.symbol}</span>
-                        <span class="badge ${d.winner === 'BUYERS' ? 'buyers' : d.winner === 'SELLERS' ? 'sellers' : 'neutral'}">
-                            ${d.winner === 'BUYERS' ? '🟢' : d.winner === 'SELLERS' ? '🔴' : '⚪'} ${d.winner}
-                        </span>
-                    </div>
-                    <div class="price">${displayPrice}</div>
-                    
-                    <div class="grid">
-                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">${displayRes}</span><br><small style="color:#666;">(${d.distRes}% away)</small></div>
-                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">${displaySup}</span><br><small style="color:#666;">(${d.distSup}% away)</small></div>
-                    </div>
-                    
-                    <div style="margin-top: 5px; color: #aaa; font-size: 0.9em;">
-                        <div>ACTIVE LEVEL: <strong>${d.active_level}</strong></div>
-                        <div>WINNER: <strong style="color: ${d.winner === 'BUYERS' ? '#00c853' : d.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${d.winner}</strong></div>
-                        <div class="setup-tag ${setupClass}">${d.setup}</div>
-                    </div>
-                    
-                    <button class="debug-btn" onclick="toggleDebug('${d.symbol}')">🔍 Show Battle Evidence</button>
-                    <div id="debug-${d.symbol}" class="debug-box">
-                        <div><u>EVIDENCE (Last 5 Candles):</u></div>
-                        <div style="color:#aaa; font-size:0.9em;">${d.evidence.join(', ') || 'No decisive touch/rejection yet'}</div>
-                        <div style="margin-top: 10px;">
-                            <span style="color:#00c853;">BUYER MOMENTUM: ${d.buyerMomentum}</span> | 
-                            <span style="color:#ff1744;">SELLER MOMENTUM: ${d.sellerMomentum}</span>
-                        </div>
-                        <div style="margin-top: 10px; border-top:1px solid #222; padding-top:5px;">
-                            RULE: <br>
-                            1. IDENTIFY ACTIVE LEVEL (Proximity < ${LEVEL_PROXIMITY_PCT}%).<br>
-                            2. COUNT CANDLES CLOSING BEYOND LEVEL vs. REJECTING IT.<br>
-                            3. HIGHEST COUNT WINS THE BATTLE.
-                        </div>
-                    </div>
+                
+                cardHTML += `<div class="card" style="border-left-color: ${d.setup.includes('BREAKOUT') || d.setup.includes('BOUNCE') ? '#00c853' : d.setup.includes('BREAKDOWN') || d.setup.includes('REJECTION') ? '#ff1744' : '#555'};">
+                    <div class="header"><span style="font-size: 1.1em;">${d.symbol}</span><span class="badge ${d.winner === 'BUYERS' ? 'buyers' : d.winner === 'SELLERS' ? 'sellers' : 'neutral'}">${d.winner === 'BUYERS' ? '🟢' : d.winner === 'SELLERS' ? '🔴' : '⚪'} ${d.winner}</span></div>
+                    <div class="price">${p}</div>
+                    <div class="grid"><div class="stat-box"><small>Resistance</small><span style="color:#00c853;">${res}</span><br><small>(${d.distRes}% away)</small></div><div class="stat-box"><small>Support</small><span style="color:#ff1744;">${sup}</span><br><small>(${d.distSup}% away)</small></div></div>
+                    <div style="margin-top: 5px; color: #aaa; font-size: 0.9em;"><div>ACTIVE LEVEL: <strong>${d.active_level}</strong></div><div>WINNER: <strong style="color: ${d.winner === 'BUYERS' ? '#00c853' : d.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${d.winner}</strong></div><div class="setup-tag ${setupClass}">${d.setup}</div></div>
+                    <div style="margin-top:10px; font-size:0.85em; color:#888;"><u>EVIDENCE:</u> ${d.evidence.join(', ') || 'No decisive touch yet'} (Buy:${d.buyerMomentum} / Sell:${d.sellerMomentum})</div>
                 </div>`;
-            }).join('');
+            });
+            document.getElementById('watchlist-container').innerHTML = cardHTML;
         }
 
-        async function loadAll() {
-            updateState('FETCHING', 'Loading 25 symbols...');
-            
-            const allData = [];
-            for (const sym of SYMBOLS) {
-                const candles = await fetchOKX(sym);
-                const result = analyze(candles, sym);
-                allData.push(result);
-            }
-
-            updateState('VALIDATED', 'Battle logic computed.');
-            
-            // FORCE STATIC INJECTION
-            DEBUG_ROOT.innerHTML = renderDebugTable(allData);
-            
-            const qualified = allData.filter(d => d.state === 'QUALIFIED');
-            renderCards(qualified);
-        }
-
-        // Run immediately
         loadAll();
         setInterval(loadAll, 60000);
     </script>
