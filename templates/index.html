@@ -3,84 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Range Detector - Math Validation</title>
+    <title>Range Detector - Diagnostic Pipeline</title>
     <style>
         body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
         .container { max-width: 800px; margin: auto; }
-        .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
-        .header { display: flex; justify-content: space-between; font-weight: bold; align-items: center; }
-        .price { font-size: 1.4em; margin: 8px 0; font-weight: 600; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
-        .stat-box { background: #11161c; padding: 8px; border-radius: 6px; }
-        .stat-box small { color: #888; display: block; font-size: 0.7em; }
-        .stat-box span { font-size: 1em; }
-        .bar { height: 8px; border-radius: 4px; margin-top: 8px; display: flex; }
-        .buy { background: #00c853; height: 100%; }
-        .sell { background: #ff1744; height: 100%; }
-        .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.7em; font-weight: bold; text-transform: uppercase; }
-        .badge.bull { background: rgba(0, 200, 83, 0.2); color: #00c853; }
-        .badge.bear { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
-        .badge.neutral { background: #2d3748; color: #aaa; }
-        .badge.failed { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
-        .debug-btn { background: none; border: 1px solid #333; color: #888; padding: 2px 8px; border-radius: 4px; cursor: pointer; margin-top: 10px; font-size: 0.8em; }
-        .debug-box { display: none; background: #0f1219; border: 1px solid #222; padding: 15px; border-radius: 6px; margin-top: 10px; font-family: monospace; font-size: 0.85em; line-height: 1.6; color: #b0b0b0; }
-        .debug-box.show { display: block; }
-        .loading { color: #666; text-align: center; margin-top: 20px; font-size: 1.1em; }
-        .section-title { margin-top: 30px; border-bottom: 1px solid #222; padding-bottom: 10px; color: #aaa; }
-        
-        /* Strict Data Table Styling */
-        .raw-table { width: 100%; font-size: 0.75em; border-collapse: collapse; margin-top: 15px; }
-        .raw-table td, .raw-table th { padding: 6px 4px; border-bottom: 1px solid #222; text-align: left; }
-        .raw-table th { color: #888; }
-        .raw-table .qualified-yes { color: #00c853; font-weight: bold; }
-        .raw-table .qualified-no { color: #ff1744; font-weight: bold; }
-        .raw-table .fetch-error { color: #ff1744; font-weight: bold; }
-        
-        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; }
+        .status-box { border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0; }
+        .diagnostic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; font-family: monospace; font-size: 0.95em; }
+        .diag-item { background: #161b22; padding: 8px; border-radius: 4px; border-left: 3px solid #555; }
+        .diag-item.pass { border-left-color: #00c853; color: #00c853; }
+        .diag-item.fail { border-left-color: #ff1744; color: #ff1744; }
+        .diag-item.neutral { border-left-color: #fbbf24; color: #fbbf24; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
         .status-fetching { background: #2d3748; color: #fbbf24; }
-        .status-validated { background: #2d3748; color: #60a5fa; }
+        .status-validated { background: #1e3a3a; color: #00c853; }
+        .status-error { background: #3a1e1e; color: #ff1744; }
+        #debug-table-container { overflow-x: auto; margin-top: 20px; min-height: 50px; }
+        .raw-table { width: 100%; border-collapse: collapse; font-size: 0.75em; }
+        .raw-table td, .raw-table th { padding: 6px; border-bottom: 1px solid #222; text-align: left; }
+        .raw-table th { color: #888; }
+        .qualified-yes { color: #00c853; }
+        .qualified-no { color: #ff1744; }
+        .fetch-error { color: #ff1744; }
+        .card { display: none; } /* Hiding cards for pure diagnostic view */
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>📊 About to Break Range Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">MATHEMATICAL VALIDATION MODE - Exact formulas & raw floats exposed</p>
+        <h2>📊 Range Detector</h2>
+        <p style="color: #888; font-size: 0.9em;">PURE DATA FLOW DIAGNOSTIC - Pipeline Viewer</p>
         
-        <!-- Status Header -->
-        <div id="status-header" style="margin-top: 15px; border: 1px solid #222; padding: 10px; border-radius: 6px; background: #0f1219;">
-            <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
-            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Loading 0 / 25 symbols...</div>
+        <div id="status-header" class="status-box">
+            <div>
+                <strong>Pipeline Status:</strong> 
+                <span id="app-state" class="status-badge status-fetching">FETCHING</span>
+            </div>
+            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Initializing diagnostic...</div>
+
+            <!-- DIAGNOSTIC COUNTERS -->
+            <div id="diagnostic-grid" class="diagnostic-grid" style="display: none;">
+                <div id="diag-fetch" class="diag-item neutral">OKX FETCH: 0/25</div>
+                <div id="diag-calc" class="diag-item neutral">CALCULATIONS: 0/25</div>
+                <div id="diag-records" class="diag-item neutral">DEBUG RECORDS: 0/25</div>
+                <div id="diag-rendered" class="diag-item neutral">DEBUG ROWS RENDERED: 0/25</div>
+            </div>
         </div>
 
-        <div id="watchlist-container" style="margin-top: 20px;"></div>
-        
-        <h3 class="section-title" style="margin-top: 40px;">📋 DEBUG: Exact Raw Values for All 25 Symbols</h3>
-        
-        <!-- Rendered Row Counter -->
-        <div id="debug-counter" style="color: #888; font-size: 0.85em; margin-top: 10px; display: none;">
-            <span id="rendered-count">0</span> / 25 symbols rendered
+        <h3 style="color: #aaa; margin-top: 20px;">DEBUG: Exact Raw Values for All 25 Symbols</h3>
+        <div id="debug-table-container">
+            <div style="color: #666; font-size: 0.9em;">Waiting for data...</div>
         </div>
-        
-        <div id="debug-table-container" style="overflow-x: auto; min-height: 100px;"></div>
     </div>
 
     <script>
         // FULL WATCHLIST
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
-        const MIN_RANGE_THRESHOLD_PCT = 0.5; // 0.5%
+        const MIN_RANGE_THRESHOLD_PCT = 0.5; 
 
-        function updateState(state, loaded, total) {
+        function updateState(state, msg) {
             const appState = document.getElementById('app-state');
             const progress = document.getElementById('progress-text');
             appState.innerText = state;
             if(state === 'FETCHING') {
                 appState.className = 'status-badge status-fetching';
-                progress.innerText = `Loading ${loaded} / ${total} symbols...`;
             } else if (state === 'VALIDATED') {
                 appState.className = 'status-badge status-validated';
-                progress.innerText = `Finished. ${loaded} symbols analyzed.`;
+            } else if (state === 'ERROR') {
+                appState.className = 'status-badge status-error';
             }
+            progress.innerText = msg;
+        }
+
+        function updateCounter(id, count, total, status) {
+            const el = document.getElementById(id);
+            el.innerText = el.innerText.replace(/[0-9]+\/[0-9]+/, `${count}/${total}`);
+            el.className = `diag-item ${status}`;
         }
 
         async function fetchOKX(symbol) {
@@ -98,7 +95,7 @@
                     return { error: `OKX API Error: ${data.code}` };
                 }
             } catch (e) { 
-                return { error: `FETCH ERROR: ${e.message}` }; 
+                return { error: `FETCH EXCEPTION: ${e.message}` }; 
             }
         }
 
@@ -180,21 +177,60 @@
             };
         }
 
-        function renderDebugTable(allData) {
+        async function loadAll() {
+            // Reset view
+            document.getElementById('diagnostic-grid').style.display = 'grid';
+            updateCounter('diag-fetch', 0, 25, 'neutral');
+            updateCounter('diag-calc', 0, 25, 'neutral');
+            updateCounter('diag-records', 0, 25, 'neutral');
+            updateCounter('diag-rendered', 0, 25, 'neutral');
+            updateState('FETCHING', 'Scanning OKX for 25 symbols...');
+            
+            let fetchSuccess = 0;
+            let calcSuccess = 0;
+            const allData = [];
+
+            for (let i = 0; i < SYMBOLS.length; i++) {
+                const sym = SYMBOLS[i];
+                const candles = await fetchOKX(sym);
+                
+                // Update Fetch Counter
+                if (!candles || candles.error) {
+                    updateCounter('diag-fetch', fetchSuccess, 25, 'fail');
+                } else {
+                    fetchSuccess++;
+                    updateCounter('diag-fetch', fetchSuccess, 25, 'pass');
+                }
+
+                const result = analyze(candles, sym);
+                allData.push(result);
+                
+                // Update Calc Counter
+                if (result && result.current !== undefined) {
+                    calcSuccess++;
+                    updateCounter('diag-calc', calcSuccess, 25, 'pass');
+                } else {
+                    updateCounter('diag-calc', calcSuccess, 25, 'fail');
+                }
+                
+                updateState('FETCHING', `Processing ${i+1}/25 symbols...`);
+            }
+
+            // Pipeline Step 3: Debug Records created
+            const totalRecords = allData.length;
+            if (totalRecords === 25) {
+                updateCounter('diag-records', totalRecords, 25, 'pass');
+            } else {
+                updateCounter('diag-records', totalRecords, 25, 'fail');
+            }
+
+            // Pipeline Step 4: DOM Rendering
             const container = document.getElementById("debug-table-container");
-            const counter = document.getElementById("debug-counter");
-            const countSpan = document.getElementById("rendered-count");
-            
             let html = `<table class="raw-table">
-                <tr>
-                    <th>Symbol</th><th>TF</th><th>State</th><th>Raw Price</th><th>Raw High</th><th>Raw Low</th>
-                    <th>Raw Sup</th><th>Raw Res</th><th>Raw Range%</th><th>Threshold</th><th>Qualified</th><th>Reason</th>
-                </tr>`;
+                <tr><th>Symbol</th><th>TF</th><th>State</th><th>Raw Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Thresh</th><th>Qual</th><th>Reason</th></tr>`;
             
-            // Build HTML in memory first, then inject
-            let rowCount = 0;
+            let renderedRows = 0;
             allData.forEach(d => {
-                rowCount++;
                 const stateClass = d.state === 'QUALIFIED' ? 'qualified-yes' : d.state === 'FAILED' ? 'qualified-no' : 'fetch-error';
                 const displayPrice = d.current < 0.01 ? d.current.toFixed(8) : d.current.toFixed(4);
                 const displaySup = d.support < 0.01 ? d.support.toFixed(8) : d.support.toFixed(4);
@@ -205,138 +241,36 @@
                     <td>${TF}</td>
                     <td class="${stateClass}">${d.state}</td>
                     <td>${displayPrice}</td>
-                    <td>${d.raw_candles && d.raw_candles.length > 0 ? (d.raw_candles[1] ? d.raw_candles[1].high.toFixed(8) : d.raw_candles[0].high.toFixed(8)) : 'N/A'}</td>
-                    <td>${d.raw_candles && d.raw_candles.length > 0 ? (d.raw_candles[1] ? d.raw_candles[1].low.toFixed(8) : d.raw_candles[0].low.toFixed(8)) : 'N/A'}</td>
-                    <td>${d.support.toFixed(8)}</td>
-                    <td>${d.resistance.toFixed(8)}</td>
+                    <td>${displaySup}</td>
+                    <td>${displayRes}</td>
                     <td><strong>${(d.rangeWidthPct || 0).toFixed(3)}%</strong></td>
                     <td>${d.thresholdPct || 0.5}%</td>
-                    <td class="${stateClass}">${d.state === 'QUALIFIED' ? "✅ YES" : "❌ NO"}</td>
+                    <td class="${stateClass}">${d.state === 'QUALIFIED' ? "YES" : "NO"}</td>
                     <td style="font-size:0.85em; color:#888;">${d.rejection_reason}</td>
                 </tr>`;
+                renderedRows++;
             });
             html += `</table>`;
             
-            // INJECT INTO DOM
+            // Inject into DOM
             container.innerHTML = html;
-            countSpan.innerText = rowCount;
-            counter.style.display = 'block';
-        }
 
-        function toggleDebug(symbol) {
-            const box = document.getElementById(`debug-${symbol}`);
-            box.classList.toggle('show');
-        }
+            // Verify DOM rendering
+            const tableRows = container.querySelectorAll('table tr');
+            // Subtract 1 for header row
+            const rowsFound = tableRows.length > 0 ? tableRows.length - 1 : 0;
 
-        function renderCards(qualifiedData) {
-            const container = document.getElementById("watchlist-container");
-            if (qualifiedData.length === 0) {
-                container.innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ 0 symbols qualified based on the 0.5% threshold.</div>`;
-                return;
+            if (rowsFound === 25) {
+                updateCounter('diag-rendered', rowsFound, 25, 'pass');
+                updateState('VALIDATED', 'Diagnostic pipeline completed successfully.');
+            } else {
+                updateCounter('diag-rendered', rowsFound, 25, 'fail');
+                updateState('ERROR', `Render Failure: DOM injected ${rowsFound} rows, but ${allData.length} were expected.`);
             }
-
-            container.innerHTML = qualifiedData.map(d => {
-                const displayPrice = d.current < 0.01 ? '$' + d.current.toFixed(8) : '$' + d.current.toFixed(2);
-                const displaySup = d.support < 0.01 ? '$' + d.support.toFixed(8) : '$' + d.support.toFixed(4);
-                const displayRes = d.resistance < 0.01 ? '$' + d.resistance.toFixed(8) : '$' + d.resistance.toFixed(4);
-                const rawLastCandles = d.raw_candles.map(c => `[H:${c.high.toFixed(8)}, L:${c.low.toFixed(8)}, C:${c.close.toFixed(8)}]`).join(' -> ');
-                
-                return `
-                <div class="card" style="border-left-color: ${d.direction === 'BULLISH' ? '#00c853' : d.direction === 'BEARISH' ? '#ff1744' : '#555'};">
-                    <div class="header">
-                        <span style="font-size: 1.1em;">${d.symbol}</span>
-                        <span class="badge ${d.direction === 'BULLISH' ? 'bull' : d.direction === 'BEARISH' ? 'bear' : 'neutral'}">
-                            ${d.direction === 'BULLISH' ? '🟢' : d.direction === 'BEARISH' ? '🔴' : '⚪'} ${d.direction}
-                        </span>
-                    </div>
-                    <div class="price">${displayPrice}</div>
-                    <div class="grid">
-                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">${displayRes}</span><br><small style="color:#666;">(${d.distRes.toFixed(2)}% away)</small></div>
-                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">${displaySup}</span><br><small style="color:#666;">(${d.distSup.toFixed(2)}% away)</small></div>
-                    </div>
-                    <div class="bar">
-                        <div class="buy" style="width: ${d.buyPct.toFixed(1)}%;"></div>
-                        <div class="sell" style="width: ${d.sellPct.toFixed(1)}%;"></div>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-top: 5px; color: #aaa;">
-                        <span style="color:#00c853;">🟢 Buy ${d.buyPct.toFixed(1)}%</span>
-                        <span style="color:#ff1744;">🔴 Sell ${d.sellPct.toFixed(1)}%</span>
-                    </div>
-                    
-                    <button class="debug-btn" onclick="toggleDebug('${d.symbol}')">🔍 Show Exact Formulas & Raw Floats</button>
-                    <div id="debug-${d.symbol}" class="debug-box">
-                        <div style="color:${d.state === 'QUALIFIED' ? '#00c853' : '#ff1744'}; font-weight:bold;">STATE = ${d.state}</div>
-                        
-                        <div style="margin-top: 10px;"><u>RAW INPUTS FROM OKX:</u></div>
-                        <div>Last 2 Candle Values: ${rawLastCandles}</div>
-                        
-                        <div style="margin-top: 10px;"><u>1. RANGE CALCULATION:</u></div>
-                        <div>Formula: (Max(Highs) - Min(Lows))</div>
-                        <div>Raw Res (Max High): ${d.resistance.toFixed(8)}</div>
-                        <div>Raw Sup (Min Low): ${d.support.toFixed(8)}</div>
-                        <div>Raw Range Width: ${(d.resistance - d.support).toFixed(8)}</div>
-                        
-                        <div style="margin-top: 10px;"><u>2. RANGE WIDTH %:</u></div>
-                        <div>Formula: (Range / Current) * 100</div>
-                        <div>Range Width % (Raw): ${d.rangeWidthPct.toFixed(6)}%</div>
-                        <div>Threshold (Config): ${d.thresholdPct}%</div>
-                        <div>Qualifies: ${d.rangeWidthPct >= d.thresholdPct ? "✅ YES" : "❌ NO"}</div>
-
-                        <div style="margin-top: 10px;"><u>3. DISTANCES TO RES/SUP:</u></div>
-                        <div>Formula D2Res: ((Resistance - Current) / Current) * 100</div>
-                        <div>Raw D2Res: ${d.distRes.toFixed(4)}%</div>
-                        <div>Formula D2Sup: ((Current - Support) / Current) * 100</div>
-                        <div>Raw D2Sup: ${d.distSup.toFixed(4)}%</div>
-
-                        <div style="margin-top: 10px;"><u>4. BUY/SELL % (Range-Position Ratio):</u></div>
-                        <div>Formula: (Candle.Close - Candle.Low) / (Candle.High - Candle.Low) averaged over last 10 candles.</div>
-                        <div style="color:#ff1744;">⛔ NOT real order-book volume.</div>
-                        <div>Raw Buy %: ${d.buyPct.toFixed(2)}%</div>
-                        <div>Raw Sell %: ${d.sellPct.toFixed(2)}%</div>
-
-                        <div style="margin-top: 10px;"><u>5. BULLISH/BEARISH RULE:</u></div>
-                        <div>IF (D2Res < 2.0% && Buy% > 50) => BULLISH</div>
-                        <div>ELSE IF (D2Sup < 2.0% && Sell% > 50) => BEARISH</div>
-                        <div>ELSE IF (D2Res < D2Sup) => BULLISH (Approaching Res)</div>
-                        <div>ELSE IF (D2Sup < D2Res) => BEARISH (Approaching Sup)</div>
-                        <div>Raw Result: <strong>${d.direction} (${d.final_signal})</strong></div>
-                    </div>
-                </div>`;
-            }).join('');
-        }
-
-        async function loadAll() {
-            updateState('FETCHING', 0, SYMBOLS.length);
-            
-            const allData = [];
-            for (let i = 0; i < SYMBOLS.length; i++) {
-                const sym = SYMBOLS[i];
-                const candles = await fetchOKX(sym);
-                const result = analyze(candles, sym);
-                allData.push(result);
-                updateState('FETCHING', i + 1, SYMBOLS.length);
-            }
-
-            // Deliberately delay DOM injection to let mobile browser breathe
-            updateState('VALIDATED', SYMBOLS.length, SYMBOLS.length);
-            
-            setTimeout(() => {
-                // Clear existing remnants
-                document.getElementById("debug-table-container").innerHTML = '';
-                
-                // Inject fresh table
-                renderDebugTable(allData);
-                
-                // Render qualified cards
-                const qualified = allData.filter(d => d.state === 'QUALIFIED');
-                renderCards(qualified);
-            }, 300); // 300ms buffer ensures DOM is fully ready
         }
 
         // Run immediately
         loadAll();
-        // Refresh every 45 seconds
-        setInterval(loadAll, 45000);
     </script>
 </body>
 </html>
