@@ -42,11 +42,6 @@
         .qualified-no { color: #ff1744; font-weight: bold; }
         .fetch-error { color: #ff1744; }
         
-        .diag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; font-family: monospace; font-size: 0.95em; }
-        .diag-item { background: #161b22; padding: 8px; border-radius: 4px; border-left: 3px solid #555; }
-        .diag-item.pass { border-left-color: #00c853; color: #00c853; }
-        .diag-item.fail { border-left-color: #ff1744; color: #ff1744; }
-        .diag-item.neutral { border-left-color: #fbbf24; color: #fbbf24; }
         .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
         .status-fetching { background: #2d3748; color: #fbbf24; }
         .status-validated { background: #1e3a3a; color: #00c853; }
@@ -66,7 +61,13 @@
         <div id="watchlist-container" style="margin-top: 20px;"></div>
         
         <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG: Raw Battle Logic for All 25 Symbols</h3>
-        <div id="debug-table-container" style="overflow-x: auto;"></div>
+        
+        <!-- STRICT STATIC INJECTION POINT -->
+        <div id="debug-root" style="overflow-x: auto; min-height: 50px;"></div>
+        <script>
+            // THE FIX: Keep a reference to the debug root
+            const DEBUG_ROOT = document.getElementById('debug-root');
+        </script>
     </div>
 
     <script>
@@ -136,7 +137,6 @@
             else if (distToSup < LEVEL_PROXIMITY_PCT) active_level = "SUPPORT";
 
             // 4. WHO IS WINNING? (Analyze last 5 candles)
-            // We look for touches/closes relative to the active level and the opposing side.
             let buyerMomentum = 0;
             let sellerMomentum = 0;
             let evidence = [];
@@ -190,7 +190,6 @@
         }
 
         function renderDebugTable(allData) {
-            const container = document.getElementById("debug-table-container");
             let html = `<table class="raw-table">
                 <tr><th>Symbol</th><th>State</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>Active Level</th><th>Winner</th><th>Setup</th></tr>`;
             allData.forEach(d => {
@@ -209,7 +208,7 @@
                 </tr>`;
             });
             html += `</table>`;
-            container.innerHTML = html;
+            return html;
         }
 
         function toggleDebug(symbol) {
@@ -229,7 +228,6 @@
                 const displaySup = d.support < 0.01 ? '$' + d.support.toFixed(8) : '$' + d.support.toFixed(4);
                 const displayRes = d.resistance < 0.01 ? '$' + d.resistance.toFixed(8) : '$' + d.resistance.toFixed(4);
                 
-                // Determine CSS classes for the Setup
                 let setupClass = "setup-nc";
                 if (d.setup === "BREAKOUT POTENTIAL") setupClass = "setup-breakout";
                 else if (d.setup === "BOUNCE POTENTIAL") setupClass = "setup-bounce";
@@ -288,16 +286,16 @@
 
             updateState('VALIDATED', 'Battle logic computed.');
             
-            // Small delay for DOM painting
-            setTimeout(() => {
-                renderDebugTable(allData);
-                const qualified = allData.filter(d => d.state === 'QUALIFIED');
-                renderCards(qualified);
-            }, 100);
+            // FORCE STATIC INJECTION
+            DEBUG_ROOT.innerHTML = renderDebugTable(allData);
+            
+            const qualified = allData.filter(d => d.state === 'QUALIFIED');
+            renderCards(qualified);
         }
 
+        // Run immediately
         loadAll();
-        setInterval(loadAll, 60000); // Refresh every minute
+        setInterval(loadAll, 60000);
     </script>
 </body>
 </html>
