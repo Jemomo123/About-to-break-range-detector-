@@ -43,7 +43,7 @@
 <body>
     <div class="container">
         <h2>⚔️ Range Battle Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">Level = Nearest Level. Winner = Last 5 Candles.</p>
+        <p style="color: #888; font-size: 0.9em;">LEVEL = Location. WINNER = Weighted Candle Evidence.</p>
 
         <div id="status-header" style="border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0;">
             <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
@@ -60,8 +60,7 @@
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TF = "15m";
         const MIN_RANGE_THRESHOLD_PCT = 0.5;
-        // Remove LEVEL_PROXIMITY_PCT - we use pure comparison.
-        const WINNER_MARGIN = 0.5;
+        const WINNER_MARGIN_PCT = 20; // Winner must beat loser by 20%
 
         function updateState(state, msg) {
             document.getElementById('app-state').innerText = state;
@@ -126,50 +125,66 @@
             }
 
             // --- 3. LOCATION (WHERE is the battle?) ---
-            // STRICT CALCULATION: Compare distances and choose the closest valid level.
             const distToRes = ((resistance - current) / current) * 100;
             const distToSup = ((current - support) / current) * 100;
 
             let active_level = "MIDDLE";
-            let raw_nearest_dist = 0;
+            if (distToRes < distToSup) active_level = "RESISTANCE";
+            else if (distToSup < distToRes) active_level = "SUPPORT";
 
-            if (distToRes < distToSup) {
-                active_level = "RESISTANCE";
-                raw_nearest_dist = distToRes;
-            } else if (distToSup < distToRes) {
-                active_level = "SUPPORT";
-                raw_nearest_dist = distToSup;
-            } else {
-                active_level = "MIDDLE"; // Perfectly balanced in the middle
-            }
-
-            // --- 4. WINNER (WHO is winning? - Strictly from the last 5 candles) ---
-            let bullishCandles = 0, bearishCandles = 0;
-            let upwardMove = 0, downwardMove = 0;
-
+            // --- 4. WINNER (WHO is winning? - Strengthened Weighted Score) ---
+            let buyer_score = 0;
+            let seller_score = 0;
+            let bullishCandles = 0;
+            let bearishCandles = 0;
+            
             const lookback = candles.slice(-5);
-            lookback.forEach((c, idx) => {
-                // Count direction
-                if (c.close > c.open) bullishCandles++;
-                else if (c.close < c.open) bearishCandles++;
+            const maxBody = Math.max(...lookback.map(c => Math.abs(c.close - c.open)));
 
-                // Measure progression
-                if (idx > 0) {
-                    const prevClose = lookback[idx-1].close;
-                    if (c.close > prevClose) upwardMove += (c.close - prevClose);
-                    else if (c.close < prevClose) downwardMove += (prevClose - c.close);
+            lookback.forEach(c => {
+                const body = Math.abs(c.close - c.open);
+                const upperWick = c.high - Math.max(c.close, c.open);
+                const lowerWick = Math.min(c.close, c.open) - c.low;
+
+                // 1. Direction and Body Mass Score
+                if (c.close > c.open) {
+                    bullishCandles++;
+                    buyer_score += (body / maxBody) * 10; // Weighted by size
+                } else if (c.close < c.open) {
+                    bearishCandles++;
+                    seller_score += (body / maxBody) * 10;
+                }
+
+                // 2. Rejection / Pressure Logic based on Active Level
+                if (active_level === "RESISTANCE") {
+                    // If price presses near Resistance, Sellers win if rejected. Buyers win if held.
+                    if (c.high >= resistance - (range * 0.05)) { // Touched Resistance zone
+                        if (upperWick > body) seller_score += 3; // Strong Sellers (Long wick)
+                        else if (c.close > resistance) buyer_score += 5; // Strong Buyers (Close above)
+                        else seller_score += 1; // Weak Sellers
+                    }
+                } else if (active_level === "SUPPORT") {
+                    // If price presses near Support, Buyers win if bounced. Sellers win if broken.
+                    if (c.low <= support + (range * 0.05)) { // Touched Support zone
+                        if (lowerWick > body) buyer_score += 3; // Strong Buyers (Long lower wick)
+                        else if (c.close < support) seller_score += 5; // Strong Sellers (Close below)
+                        else buyer_score += 1; // Weak Buyers
+                    }
                 }
             });
 
-            // Calculate independent scores
-            let buyer_score = (bullishCandles * 2) + (upwardMove > 0 ? (upwardMove / current * 100) : 0);
-            let seller_score = (bearishCandles * 2) + (downwardMove > 0 ? (downwardMove / current * 100) : 0);
-
+            // 3. Determine winner with strict margin
             let winner = "NO CLEAR WINNER";
-            if (buyer_score > seller_score * (1 + WINNER_MARGIN)) winner = "BUYERS";
-            else if (seller_score > buyer_score * (1 + WINNER_MARGIN)) winner = "SELLERS";
+            let margin = 0;
+            if (buyer_score > seller_score) {
+                margin = ((buyer_score - seller_score) / ((buyer_score + seller_score) / 2)) * 100;
+                if (margin >= WINNER_MARGIN_PCT) winner = "BUYERS";
+            } else if (seller_score > buyer_score) {
+                margin = ((seller_score - buyer_score) / ((buyer_score + seller_score) / 2)) * 100;
+                if (margin >= WINNER_MARGIN_PCT) winner = "SELLERS";
+            }
 
-            // --- 5. THE SETUP (Combination of independent Location + Winner) ---
+            // --- 5. THE SETUP ---
             let setup = "NO CLEAR SETUP";
             if (active_level === "RESISTANCE" && winner === "BUYERS") setup = "BREAKOUT POTENTIAL";
             else if (active_level === "RESISTANCE" && winner === "SELLERS") setup = "REJECTION POTENTIAL";
@@ -183,7 +198,8 @@
                 rangeWidthPct: rangeWidthPct.toFixed(3),
                 active_level, winner, setup,
                 bullishCandles, bearishCandles,
-                buyer_score: buyer_score.toFixed(1), seller_score: seller_score.toFixed(1)
+                buyer_score: buyer_score.toFixed(1), seller_score: seller_score.toFixed(1),
+                margin: margin.toFixed(0) // Winner Margin %
             };
         }
 
@@ -220,6 +236,7 @@
                     <td>${isDataFail ? 'N/A' : d.bearishCandles}</td>
                     <td>${isDataFail ? 'N/A' : d.buyer_score}</td>
                     <td>${isDataFail ? 'N/A' : d.seller_score}</td>
+                    <td>${isDataFail ? 'N/A' : d.margin + '%'}</td>
                     <td><strong>${isDataFail ? 'N/A' : d.winner}</strong></td>
                     <td><strong>${isDataFail ? 'N/A' : d.setup}</strong></td>
                 </tr>`;
@@ -227,7 +244,7 @@
             
             document.getElementById('debug-root').innerHTML = `
                 <table class="raw-table">
-                    <tr><th>Symbol</th><th>Status</th><th>Reason</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>D2Sup%</th><th>D2Res%</th><th>Level</th><th>Bull</th><th>Bear</th><th>BuyScore</th><th>SellScore</th><th>Winner</th><th>Setup</th></tr>
+                    <tr><th>Symbol</th><th>Status</th><th>Reason</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>D2Sup%</th><th>D2Res%</th><th>Level</th><th>Bull</th><th>Bear</th><th>BuyScore</th><th>SellScore</th><th>Margin</th><th>Winner</th><th>Setup</th></tr>
                     ${debugRows}
                 </table>`;
 
@@ -267,7 +284,7 @@
                         <div class="setup-tag ${setupClass}">${d.setup}</div>
                     </div>
                     <div style="margin-top:10px; font-size:0.85em; color:#888;">
-                        <u>EVIDENCE (Last 5 candles):</u> Bull: ${d.bullishCandles}, Bear: ${d.bearishCandles}. Score: ${d.buyer_score} / ${d.seller_score}
+                        <u>EVIDENCE (Weighted Last 5):</u> Bull: ${d.bullishCandles} | Bear: ${d.bearishCandles}. <br>Score: ${d.buyer_score} / ${d.seller_score} (Margin: ${d.margin}%)
                     </div>
                 </div>`;
             });
