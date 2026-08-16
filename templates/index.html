@@ -35,6 +35,7 @@
         .status-valid { color: #00c853; }
         .status-fail { color: #ff1744; }
         .status-data-fail { color: #fbbf24; }
+        .status-no-range { color: #60a5fa; font-weight: bold; } /* New Blue/Neutral indicator for Trending */
         
         .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
         .status-fetching { background: #2d3748; color: #fbbf24; }
@@ -45,7 +46,7 @@
 <body>
     <div class="container">
         <h2>⚔️ Multi-TF Battle Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">15m, 1H, 4H Confluence - Invalidation Logic Active</p>
+        <p style="color: #888; font-size: 0.9em;">15m, 1H, 4H Confluence - 2-Sided Range Rule Active</p>
 
         <div id="status-header" style="border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0;">
             <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
@@ -99,7 +100,7 @@
             // We need at least 17 candles to skip the forming one and get 16 completed
             if (candles.length < 17) return { tf, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/17 min)`, price: 0 };
 
-            // --- STRICTLY DEFINE 16 COMPLETED 15M CANDLES (4 HOURS) ---
+            // --- 1. STRICTLY DEFINE 16 COMPLETED 15M CANDLES ---
             // candlestick[0] is currently forming. candlestick[1] to [16] are completed.
             const rangeCandles = candles.slice(1, 17);
             const highs = rangeCandles.map(c => c.high);
@@ -118,6 +119,28 @@
                 return { tf, status: "RANGE_FAILURE", reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < 0.5%)`, price: current };
             }
 
+            // --- 2. RANGE QUALIFICATION (2-Sided Interaction Rule) ---
+            const upperZone = resistance - (range * 0.20); // Top 20% of range
+            const lowerZone = support + (range * 0.20);   // Bottom 20% of range
+            let upperTouches = 0;
+            let lowerTouches = 0;
+
+            rangeCandles.forEach(c => {
+                if (c.high >= upperZone) upperTouches++;
+                if (c.low <= lowerZone) lowerTouches++;
+            });
+
+            // Determine if it's a valid 2-sided range or a trend
+            if (upperTouches < 2 || lowerTouches < 2) {
+                return {
+                    tf, status: "NO_VALID_RANGE",
+                    reason: `NO VALID RANGE - TRENDING (Upper: ${upperTouches}, Lower: ${lowerTouches})`,
+                    price: current, 
+                    winner: "N/A", setup: "N/A", active_level: "N/A"
+                };
+            }
+
+            // --- 3. LEVEL (WHERE is the battle?) ---
             const distToRes = ((resistance - current) / current) * 100;
             const distToSup = ((current - support) / current) * 100;
 
@@ -125,7 +148,7 @@
             if (distToRes < distToSup) active_level = "RESISTANCE";
             else if (distToSup < distToRes) active_level = "SUPPORT";
 
-            // --- FROZEN INVALIDATION CHECK (Strict Close-Only Rule) ---
+            // --- 4. FROZEN INVALIDATION CHECK (Strict Close-Only Rule) ---
             if (current <= support) {
                 return { 
                     tf, status: "VALIDATED", reason: "N/A",
@@ -151,8 +174,8 @@
                 };
             }
 
-            // --- EVALUATE WINNER (Last 5 COMPLETED 15m Candles) ---
-            // Fixed bug: candles[0] is forming. We explicitly use candles[1] to candles[6] for the last 5 completed.
+            // --- 5. WINNER (WHO is winning? - Independent, Last 5 COMPLETED 15m Candles) ---
+            // Strictly use candles[1] to candles[6] for the last 5 completed candles.
             const lookback = candles.slice(1, 6);
             let buyer_score = 0, seller_score = 0;
             let bullishCandles = 0, bearishCandles = 0;
@@ -233,7 +256,6 @@
                 if (result.status === 'fulfilled') {
                     groupedData[symbol][tf] = analyze(result.value, symbol, tf);
                 } else {
-                    // FIX: Added the missing winner and setup properties to stop "undefined"
                     groupedData[symbol][tf] = { 
                         tf, status: "DATA_FAILURE", 
                         reason: `OKX Fetch Failed: ${result.reason?.message || 'Network Error'}`, 
@@ -252,27 +274,35 @@
                 const s15 = d["15m"];
                 const s1h = d["1H"];
                 const s4h = d["4H"];
-                const isDataFail = s15.status === 'DATA_FAILURE' || s15.status === 'RANGE_FAILURE';
                 const p = formatPrice(s15.price);
                 
+                // -- Handle NO_VALID_RANGE color -- //
+                let statusClass = "status-fail";
+                if (s15.status === 'VALIDATED') statusClass = "status-valid";
+                else if (s15.status === 'NO_VALID_RANGE') statusClass = "status-no-range";
+                else if (s15.status === 'DATA_FAILURE') statusClass = "status-data-fail";
+
                 const getColor = (s) => {
                     if (s.winner === 'BUYERS') return '#00c853';
                     if (s.winner === 'SELLERS') return '#ff1744';
                     return '#aaa';
                 };
 
+                // Only show Winner/Setup if the range is VALIDATED
+                const showAnalysis = s15.status === 'VALIDATED';
+
                 debugRows += `<tr>
                     <td><strong>${d.symbol}</strong></td>
-                    <td class="${s15.status === 'VALIDATED' ? 'status-valid' : 'status-fail'}">${s15.status}</td>
+                    <td class="${statusClass}">${s15.status}</td>
                     <td style="font-size:0.85em; color:#888;">${s15.reason}</td>
                     <td>${p}</td>
                     <td>${formatPrice(s15.support)}</td>
                     <td>${formatPrice(s15.resistance)}</td>
                     <td>${s15.rangeWidthPct || 0}%</td>
-                    <td style="color:${getColor(s15)}">${s15.winner}</td>
-                    <td style="color:${getColor(s1h)}">${s1h.winner}</td>
-                    <td style="color:${getColor(s4h)}">${s4h.winner}</td>
-                    <td>${s15.setup}</td>
+                    <td style="color:${showAnalysis ? getColor(s15) : '#aaa'}">${showAnalysis ? s15.winner : 'N/A'}</td>
+                    <td style="color:${s1h.winner === 'BUYERS' ? '#00c853' : s1h.winner === 'SELLERS' ? '#ff1744' : '#aaa'}">${s1h.winner}</td>
+                    <td style="color:${s4h.winner === 'BUYERS' ? '#00c853' : s4h.winner === 'SELLERS' ? '#ff1744' : '#aaa'}">${s4h.winner}</td>
+                    <td>${showAnalysis ? s15.setup : 'N/A'}</td>
                     <td>${s1h.setup}</td>
                     <td>${s4h.setup}</td>
                 </tr>`;
@@ -284,6 +314,8 @@
                     ${debugRows}
                 </table>`;
 
+            // --- RENDER CARDS (Only VALIDATED 15m ranges) ---
+            // NO_VALID_RANGE and RANGE_FAILURE skip the cards entirely.
             const qualified = allData.filter(d => d["15m"].status === 'VALIDATED');
             if (qualified.length === 0) {
                 document.getElementById('watchlist-container').innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ 0 qualified 15m ranges found.</div>`;
