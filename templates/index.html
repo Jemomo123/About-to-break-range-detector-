@@ -35,7 +35,7 @@
         .status-valid { color: #00c853; }
         .status-fail { color: #ff1744; }
         .status-data-fail { color: #fbbf24; }
-        .status-no-range { color: #60a5fa; font-weight: bold; } /* New Blue/Neutral indicator for Trending */
+        .status-no-range { color: #60a5fa; font-weight: bold; }
         
         .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
         .status-fetching { background: #2d3748; color: #fbbf24; }
@@ -97,18 +97,17 @@
         function analyze(candles, symbol, tf) {
             if (!candles) return { tf, status: "DATA_FAILURE", reason: "Fetch returned null", price: 0 };
             if (candles.error) return { tf, status: "DATA_FAILURE", reason: candles.error, price: 0 };
-            // We need at least 17 candles to skip the forming one and get 16 completed
             if (candles.length < 17) return { tf, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/17 min)`, price: 0 };
 
             // --- 1. STRICTLY DEFINE 16 COMPLETED 15M CANDLES ---
-            // candlestick[0] is currently forming. candlestick[1] to [16] are completed.
+            // candlestick[0] is forming. candlestick[1] to [16] are completed.
             const rangeCandles = candles.slice(1, 17);
             const highs = rangeCandles.map(c => c.high);
             const lows = rangeCandles.map(c => c.low);
             const resistance = Math.max(...highs);
             const support = Math.min(...lows);
             
-            // Use the LAST COMPLETED CLOSE for determining the current Level
+            // Use the LAST COMPLETED CLOSE for the current Level
             const current = candles[1].close;
             const range = resistance - support;
             
@@ -120,8 +119,8 @@
             }
 
             // --- 2. RANGE QUALIFICATION (2-Sided Interaction Rule) ---
-            const upperZone = resistance - (range * 0.20); // Top 20% of range
-            const lowerZone = support + (range * 0.20);   // Bottom 20% of range
+            const upperZone = resistance - (range * 0.20); // Top 20%
+            const lowerZone = support + (range * 0.20);   // Bottom 20%
             let upperTouches = 0;
             let lowerTouches = 0;
 
@@ -130,7 +129,7 @@
                 if (c.low <= lowerZone) lowerTouches++;
             });
 
-            // Determine if it's a valid 2-sided range or a trend
+            // If not 2 touches on both sides, it's a Trend
             if (upperTouches < 2 || lowerTouches < 2) {
                 return {
                     tf, status: "NO_VALID_RANGE",
@@ -175,7 +174,6 @@
             }
 
             // --- 5. WINNER (WHO is winning? - Independent, Last 5 COMPLETED 15m Candles) ---
-            // Strictly use candles[1] to candles[6] for the last 5 completed candles.
             const lookback = candles.slice(1, 6);
             let buyer_score = 0, seller_score = 0;
             let bullishCandles = 0, bearishCandles = 0;
@@ -276,7 +274,6 @@
                 const s4h = d["4H"];
                 const p = formatPrice(s15.price);
                 
-                // -- Handle NO_VALID_RANGE color -- //
                 let statusClass = "status-fail";
                 if (s15.status === 'VALIDATED') statusClass = "status-valid";
                 else if (s15.status === 'NO_VALID_RANGE') statusClass = "status-no-range";
@@ -288,7 +285,6 @@
                     return '#aaa';
                 };
 
-                // Only show Winner/Setup if the range is VALIDATED
                 const showAnalysis = s15.status === 'VALIDATED';
 
                 debugRows += `<tr>
@@ -314,8 +310,6 @@
                     ${debugRows}
                 </table>`;
 
-            // --- RENDER CARDS (Only VALIDATED 15m ranges) ---
-            // NO_VALID_RANGE and RANGE_FAILURE skip the cards entirely.
             const qualified = allData.filter(d => d["15m"].status === 'VALIDATED');
             if (qualified.length === 0) {
                 document.getElementById('watchlist-container').innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ 0 qualified 15m ranges found.</div>`;
