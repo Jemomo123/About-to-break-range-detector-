@@ -204,17 +204,41 @@
         }
 
         async function loadAll() {
-            updateState('FETCHING', 'Loading 25 symbols x 3 TFs...');
-            const allData = [];
+            updateState('FETCHING', 'Loading 25 symbols x 3 TFs concurrently... (3-5 secs)');
+            
+            const allFetchPromises = [];
+            const symbolRefs = [];
+            
+            SYMBOLS.forEach(sym => {
+                TFS.forEach(tf => {
+                    allFetchPromises.push(fetchOKX(sym, tf));
+                    symbolRefs.push({ symbol: sym, tf: tf });
+                });
+            });
 
-            for (const sym of SYMBOLS) {
-                let symbolData = { symbol: sym };
-                for (const tf of TFS) {
-                    const candles = await fetchOKX(sym, tf);
-                    symbolData[tf] = analyze(candles, sym, tf);
+            const allResults = await Promise.allSettled(allFetchPromises);
+            
+            updateState('VALIDATING', 'Processing data...');
+            
+            const groupedData = {};
+            for(let i = 0; i < allResults.length; i++) {
+                const { symbol, tf } = symbolRefs[i];
+                const result = allResults[i];
+                
+                if(!groupedData[symbol]) groupedData[symbol] = { symbol: symbol };
+                
+                if (result.status === 'fulfilled') {
+                    groupedData[symbol][tf] = analyze(result.value, symbol, tf);
+                } else {
+                    groupedData[symbol][tf] = { 
+                        tf, status: "DATA_FAILURE", 
+                        reason: `OKX Fetch Failed: ${result.reason?.message || 'Network Error'}`, 
+                        price: 0 
+                    };
                 }
-                allData.push(symbolData);
             }
+
+            const allData = Object.values(groupedData);
             updateState('VALIDATED', 'Done.');
 
             let debugRows = "";
@@ -222,7 +246,7 @@
                 const s15 = d["15m"];
                 const s1h = d["1H"];
                 const s4h = d["4H"];
-                const isDataFail = s15.status === 'DATA_FAILURE';
+                const isDataFail = s15.status === 'DATA_FAILURE' || s15.status === 'RANGE_FAILURE';
                 const p = formatPrice(s15.price);
                 
                 const getColor = (s) => {
