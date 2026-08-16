@@ -100,14 +100,12 @@
             if (candles.length < 17) return { tf, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/17 min)`, price: 0 };
 
             // --- 1. STRICTLY DEFINE 16 COMPLETED 15M CANDLES ---
-            // candlestick[0] is forming. candlestick[1] to [16] are completed.
             const rangeCandles = candles.slice(1, 17);
             const highs = rangeCandles.map(c => c.high);
             const lows = rangeCandles.map(c => c.low);
             const resistance = Math.max(...highs);
             const support = Math.min(...lows);
             
-            // Use the LAST COMPLETED CLOSE for the current Level
             const current = candles[1].close;
             const range = resistance - support;
             
@@ -119,8 +117,9 @@
             }
 
             // --- 2. RANGE QUALIFICATION (2-Sided Interaction Rule) ---
-            const upperZone = resistance - (range * 0.20); // Top 20%
-            const lowerZone = support + (range * 0.20);   // Bottom 20%
+            // FIX: Added tiny epsilon (0.00000001) to ensure floating point rounding doesn't miss the 20% boundary
+            const upperZone = resistance - (range * 0.20) + 0.00000001;
+            const lowerZone = support + (range * 0.20) - 0.00000001;
             let upperTouches = 0;
             let lowerTouches = 0;
 
@@ -129,7 +128,7 @@
                 if (c.low <= lowerZone) lowerTouches++;
             });
 
-            // If not 2 touches on both sides, it's a Trend
+            // Strict fail: If we don't have at least 2 touches on BOTH sides, it is a Trending market.
             if (upperTouches < 2 || lowerTouches < 2) {
                 return {
                     tf, status: "NO_VALID_RANGE",
@@ -173,7 +172,7 @@
                 };
             }
 
-            // --- 5. WINNER (WHO is winning? - Independent, Last 5 COMPLETED 15m Candles) ---
+            // --- 5. WINNER (WHO is winning? - Last 5 COMPLETED 15m Candles) ---
             const lookback = candles.slice(1, 6);
             let buyer_score = 0, seller_score = 0;
             let bullishCandles = 0, bearishCandles = 0;
@@ -192,7 +191,6 @@
                     seller_score += (body / maxBody) * 10;
                 }
 
-                // Measure pressure against the FROZEN Support/Resistance
                 if (active_level === "RESISTANCE") {
                     if (c.high >= resistance - (range * 0.05)) {
                         if (upperWick > body) seller_score += 3;
