@@ -1,98 +1,3 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Range Battle Detector - Multi-TF</title>
-    <style>
-        body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
-        .container { max-width: 1000px; margin: auto; }
-        .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
-        .header { display: flex; justify-content: space-between; font-weight: bold; align-items: center; }
-        .tf-info { font-size: 0.8em; color: #888; margin-top: 5px; display: flex; gap: 15px; }
-        .price { font-size: 1.4em; margin: 8px 0; font-weight: 600; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
-        .stat-box { background: #11161c; padding: 8px; border-radius: 6px; }
-        .stat-box small { color: #888; display: block; font-size: 0.7em; }
-        .stat-box span { font-size: 1em; }
-        .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.7em; font-weight: bold; text-transform: uppercase; }
-        .badge.buyers { background: rgba(0, 200, 83, 0.2); color: #00c853; }
-        .badge.sellers { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
-        .badge.neutral { background: #2d3748; color: #aaa; }
-        .setup-tag { margin-top: 10px; padding: 4px 10px; border-radius: 4px; display: inline-block; font-weight: bold; font-size: 0.8em; }
-        .setup-breakout { background: rgba(0, 200, 83, 0.15); border: 1px solid #00c853; color: #00c853; }
-        .setup-bounce { background: rgba(0, 200, 83, 0.15); border: 1px solid #00c853; color: #00c853; }
-        .setup-breakdown { background: rgba(255, 23, 68, 0.15); border: 1px solid #ff1744; color: #ff1744; }
-        .setup-rejection { background: rgba(255, 23, 68, 0.15); border: 1px solid #ff1744; color: #ff1744; }
-        .setup-nc { background: rgba(255, 255, 255, 0.05); border: 1px solid #555; color: #aaa; }
-        .loading { color: #666; text-align: center; margin-top: 20px; font-size: 1.1em; }
-        
-        #debug-root { overflow-x: auto; margin-top: 15px; min-height: 400px; width: 100%; }
-        .raw-table { width: 100%; font-size: 0.65em; border-collapse: collapse; background: #0f1219; border: 1px solid #222; }
-        .raw-table td, .raw-table th { padding: 6px 4px; border: 1px solid #333; text-align: left; }
-        .raw-table th { color: #888; background: #161b22; }
-        .status-valid { color: #00c853; }
-        .status-fail { color: #ff1744; }
-        .status-data-fail { color: #fbbf24; }
-        
-        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
-        .status-fetching { background: #2d3748; color: #fbbf24; }
-        .status-validated { background: #1e3a3a; color: #00c853; }
-        .status-error { background: #3a1e1e; color: #ff1744; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>⚔️ Multi-TF Battle Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">15m, 1H, 4H Confluence</p>
-
-        <div id="status-header" style="border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0;">
-            <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
-            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Loading 25 symbols x 3 TFs...</div>
-        </div>
-
-        <div id="watchlist-container"></div>
-        
-        <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG TABLE (15m / 1H / 4H)</h3>
-        <div id="debug-root"></div>
-    </div>
-
-    <script>
-        const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
-        const TFS = ["15m", "1H", "4H"];
-        const MIN_RANGE_THRESHOLD_PCT = 0.5;
-        const WINNER_MARGIN_PCT = 20;
-
-        function updateState(state, msg) {
-            document.getElementById('app-state').innerText = state;
-            document.getElementById('app-state').className = `status-badge status-${state.toLowerCase()}`;
-            document.getElementById('progress-text').innerText = msg;
-        }
-
-        async function fetchOKX(symbol, tf) {
-            // Convert internal TFs to OKX API TFs (15m, 1H, 4H are standard)
-            const clean = symbol.replace("USDT", "-USDT");
-            const url = `https://www.okx.com/api/v5/market/candles?instId=${clean}&bar=${tf}&limit=30`;
-            try {
-                const resp = await fetch(url);
-                const data = await resp.json();
-                if (data.code === "0" && data.data.length > 0) {
-                    return data.data.map(c => ({
-                        time: c[0], open: parseFloat(c[1]), high: parseFloat(c[2]),
-                        low: parseFloat(c[3]), close: parseFloat(c[4]), vol: parseFloat(c[5])
-                    }));
-                } else return { error: `OKX API Error: ${data.code}` };
-            } catch (e) { return { error: `FETCH EXCEPTION: ${e.message}` }; }
-        }
-
-        function formatPrice(price) {
-            if (price === 0 || isNaN(price) || !isFinite(price)) return "$0.00";
-            if (price < 0.0001) return "$" + price.toFixed(8);
-            if (price < 0.01) return "$" + price.toFixed(6);
-            if (price < 1) return "$" + price.toFixed(4);
-            return "$" + price.toFixed(2);
-        }
-
         function analyze(candles, symbol, tf) {
             if (!candles) return { tf, status: "DATA_FAILURE", reason: "Fetch returned null", price: 0 };
             if (candles.error) return { tf, status: "DATA_FAILURE", reason: candles.error, price: 0 };
@@ -124,6 +29,39 @@
             let active_level = "MIDDLE";
             if (distToRes < distToSup) active_level = "RESISTANCE";
             else if (distToSup < distToRes) active_level = "SUPPORT";
+
+            // ------------------ SAFETY INVALIDATION CHECK ------------------
+            // If the live price has ALREADY broken support or resistance, the setup is DEAD.
+            // We mark it as VALIDATED so it stays in the table, but we force a neutral, safe state.
+            if (current <= support) {
+                return { 
+                    tf, status: "VALIDATED", reason: "N/A",
+                    price: current, resistance, support,
+                    distRes: distToRes.toFixed(2), distSup: "0.00", // Already at/below
+                    rangeWidthPct: rangeWidthPct.toFixed(3),
+                    active_level: "SUPPORT", 
+                    winner: "SELLERS", 
+                    setup: "INVALIDATED - BREAKDOWN CONFIRMED",
+                    bullishCandles: 0, bearishCandles: 5, // Force bearish
+                    buyer_score: "0.0", seller_score: "100.0",
+                    margin: "100"
+                };
+            }
+            if (current >= resistance) {
+                return { 
+                    tf, status: "VALIDATED", reason: "N/A",
+                    price: current, resistance, support,
+                    distRes: "0.00", distSup: distToSup.toFixed(2), // Already at/above
+                    rangeWidthPct: rangeWidthPct.toFixed(3),
+                    active_level: "RESISTANCE", 
+                    winner: "BUYERS", 
+                    setup: "INVALIDATED - BREAKOUT CONFIRMED",
+                    bullishCandles: 5, bearishCandles: 0, // Force bullish
+                    buyer_score: "100.0", seller_score: "0.0",
+                    margin: "100"
+                };
+            }
+            // -------------------------------------------------------------
 
             let buyer_score = 0, seller_score = 0;
             let bullishCandles = 0, bearishCandles = 0;
@@ -176,112 +114,3 @@
 
             return { tf, status: "VALIDATED", reason: "N/A", price: current, resistance, support, distRes: distToRes.toFixed(2), distSup: distToSup.toFixed(2), rangeWidthPct: rangeWidthPct.toFixed(3), active_level, winner, setup, bullishCandles, bearishCandles, buyer_score: buyer_score.toFixed(1), seller_score: seller_score.toFixed(1), margin: margin.toFixed(0) };
         }
-
-        async function loadAll() {
-            updateState('FETCHING', 'Loading 25 symbols x 3 TFs...');
-            const allData = [];
-
-            for (const sym of SYMBOLS) {
-                let symbolData = { symbol: sym };
-                for (const tf of TFS) {
-                    const candles = await fetchOKX(sym, tf);
-                    symbolData[tf] = analyze(candles, sym, tf);
-                }
-                allData.push(symbolData);
-            }
-            updateState('VALIDATED', 'Done.');
-
-            // --- RENDER DEBUG TABLE ---
-            let debugRows = "";
-            allData.forEach(d => {
-                const s15 = d["15m"];
-                const s1h = d["1H"];
-                const s4h = d["4H"];
-                const isDataFail = s15.status === 'DATA_FAILURE';
-                const p = formatPrice(s15.price);
-                
-                const getColor = (s) => {
-                    if (s.winner === 'BUYERS') return '#00c853';
-                    if (s.winner === 'SELLERS') return '#ff1744';
-                    return '#aaa';
-                };
-
-                debugRows += `<tr>
-                    <td><strong>${d.symbol}</strong></td>
-                    <td class="${s15.status === 'VALIDATED' ? 'status-valid' : 'status-fail'}">${s15.status}</td>
-                    <td style="font-size:0.85em; color:#888;">${s15.reason}</td>
-                    <td>${p}</td>
-                    <td>${formatPrice(s15.support)}</td>
-                    <td>${formatPrice(s15.resistance)}</td>
-                    <td>${s15.rangeWidthPct || 0}%</td>
-                    <td style="color:${getColor(s15)}">${s15.winner}</td>
-                    <td style="color:${getColor(s1h)}">${s1h.winner}</td>
-                    <td style="color:${getColor(s4h)}">${s4h.winner}</td>
-                    <td>${s15.setup}</td>
-                    <td>${s1h.setup}</td>
-                    <td>${s4h.setup}</td>
-                </tr>`;
-            });
-            
-            document.getElementById('debug-root').innerHTML = `
-                <table class="raw-table">
-                    <tr><th>Symbol</th><th>Status</th><th>Reason</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>15m Win</th><th>1H Win</th><th>4H Win</th><th>15m Setup</th><th>1H Setup</th><th>4H Setup</th></tr>
-                    ${debugRows}
-                </table>`;
-
-            // --- RENDER CARDS (Only Validated 15m) ---
-            const qualified = allData.filter(d => d["15m"].status === 'VALIDATED');
-            if (qualified.length === 0) {
-                document.getElementById('watchlist-container').innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ 0 qualified 15m ranges found.</div>`;
-                return;
-            }
-            
-            let cardHTML = "";
-            qualified.forEach(d => {
-                const s15 = d["15m"];
-                const s1h = d["1H"];
-                const s4h = d["4H"];
-                const p = formatPrice(s15.price);
-                const sup = formatPrice(s15.support);
-                const res = formatPrice(s15.resistance);
-                let setupClass = "setup-nc";
-                if (s15.setup === "BREAKOUT POTENTIAL") setupClass = "setup-breakout";
-                else if (s15.setup === "BOUNCE POTENTIAL") setupClass = "setup-bounce";
-                else if (s15.setup === "BREAKDOWN POTENTIAL") setupClass = "setup-breakdown";
-                else if (s15.setup === "REJECTION POTENTIAL") setupClass = "setup-rejection";
-                
-                cardHTML += `<div class="card" style="border-left-color: ${s15.setup.includes('BREAKOUT') || s15.setup.includes('BOUNCE') ? '#00c853' : s15.setup.includes('BREAKDOWN') || s15.setup.includes('REJECTION') ? '#ff1744' : '#555'};">
-                    <div class="header">
-                        <span style="font-size: 1.1em;">${d.symbol}</span>
-                        <span class="badge ${s15.winner === 'BUYERS' ? 'buyers' : s15.winner === 'SELLERS' ? 'sellers' : 'neutral'}">
-                            ${s15.winner === 'BUYERS' ? '🟢' : s15.winner === 'SELLERS' ? '🔴' : '⚪'} ${s15.winner}
-                        </span>
-                    </div>
-                    <div class="price">${p}</div>
-                    <div class="grid">
-                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">${res}</span><br><small>(${s15.distRes}% away)</small></div>
-                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">${sup}</span><br><small>(${s15.distSup}% away)</small></div>
-                    </div>
-                    <div class="tf-info">
-                        <span>15m: <strong style="color:${s15.winner === 'BUYERS' ? '#00c853' : s15.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${s15.winner}</strong></span>
-                        <span>1H: <strong style="color:${s1h.winner === 'BUYERS' ? '#00c853' : s1h.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${s1h.winner}</strong></span>
-                        <span>4H: <strong style="color:${s4h.winner === 'BUYERS' ? '#00c853' : s4h.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${s4h.winner}</strong></span>
-                    </div>
-                    <div style="margin-top: 5px; color: #aaa; font-size: 0.9em;">
-                        <div>ACTIVE LEVEL: <strong>${s15.active_level}</strong></div>
-                        <div>15m WINNER: <strong style="color: ${s15.winner === 'BUYERS' ? '#00c853' : s15.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${s15.winner}</strong></div>
-                        <div class="setup-tag ${setupClass}">${s15.setup}</div>
-                    </div>
-                    <div style="margin-top:10px; font-size:0.85em; color:#888;">
-                        <u>15m EVIDENCE:</u> Bull: ${s15.bullishCandles} | Bear: ${s15.bearishCandles}. Score: ${s15.buyer_score} / ${s15.seller_score} (Margin: ${s15.margin}%)
-                    </div>
-                </div>`;
-            });
-            document.getElementById('watchlist-container').innerHTML = cardHTML;
-        }
-
-        loadAll();
-        setInterval(loadAll, 60000);
-    </script>
-</body>
-</html>
