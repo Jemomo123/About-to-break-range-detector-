@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Range Battle Detector</title>
+    <title>Range Battle Detector - Multi-TF</title>
     <style>
         body { background: #0b0e14; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
-        .container { max-width: 800px; margin: auto; }
+        .container { max-width: 1000px; margin: auto; }
         .card { background: #161b22; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #555; }
         .header { display: flex; justify-content: space-between; font-weight: bold; align-items: center; }
+        .tf-info { font-size: 0.8em; color: #888; margin-top: 5px; display: flex; gap: 15px; }
         .price { font-size: 1.4em; margin: 8px 0; font-weight: 600; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
         .stat-box { background: #11161c; padding: 8px; border-radius: 6px; }
@@ -18,7 +19,7 @@
         .badge.buyers { background: rgba(0, 200, 83, 0.2); color: #00c853; }
         .badge.sellers { background: rgba(255, 23, 68, 0.2); color: #ff1744; }
         .badge.neutral { background: #2d3748; color: #aaa; }
-        .setup-tag { margin-top: 10px; padding: 6px 12px; border-radius: 4px; display: inline-block; font-weight: bold; font-size: 0.9em; }
+        .setup-tag { margin-top: 10px; padding: 4px 10px; border-radius: 4px; display: inline-block; font-weight: bold; font-size: 0.8em; }
         .setup-breakout { background: rgba(0, 200, 83, 0.15); border: 1px solid #00c853; color: #00c853; }
         .setup-bounce { background: rgba(0, 200, 83, 0.15); border: 1px solid #00c853; color: #00c853; }
         .setup-breakdown { background: rgba(255, 23, 68, 0.15); border: 1px solid #ff1744; color: #ff1744; }
@@ -27,8 +28,8 @@
         .loading { color: #666; text-align: center; margin-top: 20px; font-size: 1.1em; }
         
         #debug-root { overflow-x: auto; margin-top: 15px; min-height: 400px; width: 100%; }
-        .raw-table { width: 100%; font-size: 0.7em; border-collapse: collapse; background: #0f1219; border: 1px solid #222; }
-        .raw-table td, .raw-table th { padding: 8px 4px; border: 1px solid #333; text-align: left; }
+        .raw-table { width: 100%; font-size: 0.65em; border-collapse: collapse; background: #0f1219; border: 1px solid #222; }
+        .raw-table td, .raw-table th { padding: 6px 4px; border: 1px solid #333; text-align: left; }
         .raw-table th { color: #888; background: #161b22; }
         .status-valid { color: #00c853; }
         .status-fail { color: #ff1744; }
@@ -42,25 +43,25 @@
 </head>
 <body>
     <div class="container">
-        <h2>⚔️ Range Battle Detector</h2>
-        <p style="color: #888; font-size: 0.9em;">LEVEL = Location. WINNER = Weighted Candle Evidence.</p>
+        <h2>⚔️ Multi-TF Battle Detector</h2>
+        <p style="color: #888; font-size: 0.9em;">15m, 1H, 4H Confluence</p>
 
         <div id="status-header" style="border: 1px solid #222; padding: 15px; border-radius: 6px; background: #0f1219; margin: 15px 0;">
             <div><strong>Status:</strong> <span id="app-state" class="status-badge status-fetching">FETCHING</span></div>
-            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Loading 25 symbols...</div>
+            <div style="font-size: 0.85em; color: #888; margin-top: 5px;" id="progress-text">Loading 25 symbols x 3 TFs...</div>
         </div>
 
         <div id="watchlist-container"></div>
         
-        <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG TABLE (Source of Truth)</h3>
+        <h3 style="color: #aaa; margin-top: 40px;">📋 DEBUG TABLE (15m / 1H / 4H)</h3>
         <div id="debug-root"></div>
     </div>
 
     <script>
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
-        const TF = "15m";
+        const TFS = ["15m", "1H", "4H"];
         const MIN_RANGE_THRESHOLD_PCT = 0.5;
-        const WINNER_MARGIN_PCT = 20; // Winner must beat loser by 20%
+        const WINNER_MARGIN_PCT = 20;
 
         function updateState(state, msg) {
             document.getElementById('app-state').innerText = state;
@@ -68,9 +69,10 @@
             document.getElementById('progress-text').innerText = msg;
         }
 
-        async function fetchOKX(symbol) {
+        async function fetchOKX(symbol, tf) {
+            // Convert internal TFs to OKX API TFs (15m, 1H, 4H are standard)
             const clean = symbol.replace("USDT", "-USDT");
-            const url = `https://www.okx.com/api/v5/market/candles?instId=${clean}&bar=${TF}&limit=30`;
+            const url = `https://www.okx.com/api/v5/market/candles?instId=${clean}&bar=${tf}&limit=30`;
             try {
                 const resp = await fetch(url);
                 const data = await resp.json();
@@ -91,25 +93,17 @@
             return "$" + price.toFixed(2);
         }
 
-        function analyze(candles, symbol) {
-            // --- 1. DATA VALIDATION ---
-            if (!candles) return { symbol, status: "DATA_FAILURE", reason: "Fetch returned null", price: 0 };
-            if (candles.error) return { symbol, status: "DATA_FAILURE", reason: candles.error, price: 0 };
-            if (candles.length < 20) return { symbol, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/20)`, price: 0 };
+        function analyze(candles, symbol, tf) {
+            if (!candles) return { tf, status: "DATA_FAILURE", reason: "Fetch returned null", price: 0 };
+            if (candles.error) return { tf, status: "DATA_FAILURE", reason: candles.error, price: 0 };
+            if (candles.length < 20) return { tf, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/20)`, price: 0 };
 
             const lastCandle = candles[candles.length - 1];
-            if (!lastCandle) return { symbol, status: "DATA_FAILURE", reason: "Last candle missing", price: 0 };
-            if (isNaN(lastCandle.high) || isNaN(lastCandle.low) || isNaN(lastCandle.close) || !isFinite(lastCandle.high) || !isFinite(lastCandle.low) || !isFinite(lastCandle.close)) {
-                return { symbol, status: "DATA_FAILURE", reason: "Invalid OHLCV values (NaN/Infinite)", price: 0 };
-            }
+            if (!lastCandle) return { tf, status: "DATA_FAILURE", reason: "Last candle missing", price: 0 };
             if (lastCandle.close <= 0 || lastCandle.high <= 0 || lastCandle.low <= 0) {
-                return { symbol, status: "DATA_FAILURE", reason: `Invalid price (<= 0)`, price: 0 };
-            }
-            if (lastCandle.high < lastCandle.low) {
-                return { symbol, status: "DATA_FAILURE", reason: "High < Low in candles", price: 0 };
+                return { tf, status: "DATA_FAILURE", reason: `Invalid price`, price: 0 };
             }
 
-            // --- 2. RANGE CALCULATION ---
             const highs = candles.map(c => c.high);
             const lows = candles.map(c => c.low);
             const resistance = Math.max(...highs);
@@ -117,14 +111,13 @@
             const current = lastCandle.close;
             const range = resistance - support;
             
-            if (range <= 0) return { symbol, status: "RANGE_FAILURE", reason: "Range width is 0 or negative", price: current };
+            if (range <= 0) return { tf, status: "RANGE_FAILURE", reason: "Range width is 0", price: current };
 
             const rangeWidthPct = (range / support) * 100;
             if (rangeWidthPct < MIN_RANGE_THRESHOLD_PCT) {
-                return { symbol, status: "RANGE_FAILURE", reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < 0.5%)`, price: current };
+                return { tf, status: "RANGE_FAILURE", reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < 0.5%)`, price: current };
             }
 
-            // --- 3. LOCATION (WHERE is the battle?) ---
             const distToRes = ((resistance - current) / current) * 100;
             const distToSup = ((current - support) / current) * 100;
 
@@ -132,12 +125,8 @@
             if (distToRes < distToSup) active_level = "RESISTANCE";
             else if (distToSup < distToRes) active_level = "SUPPORT";
 
-            // --- 4. WINNER (WHO is winning? - Strengthened Weighted Score) ---
-            let buyer_score = 0;
-            let seller_score = 0;
-            let bullishCandles = 0;
-            let bearishCandles = 0;
-            
+            let buyer_score = 0, seller_score = 0;
+            let bullishCandles = 0, bearishCandles = 0;
             const lookback = candles.slice(-5);
             const maxBody = Math.max(...lookback.map(c => Math.abs(c.close - c.open)));
 
@@ -146,34 +135,29 @@
                 const upperWick = c.high - Math.max(c.close, c.open);
                 const lowerWick = Math.min(c.close, c.open) - c.low;
 
-                // 1. Direction and Body Mass Score
                 if (c.close > c.open) {
                     bullishCandles++;
-                    buyer_score += (body / maxBody) * 10; // Weighted by size
+                    buyer_score += (body / maxBody) * 10;
                 } else if (c.close < c.open) {
                     bearishCandles++;
                     seller_score += (body / maxBody) * 10;
                 }
 
-                // 2. Rejection / Pressure Logic based on Active Level
                 if (active_level === "RESISTANCE") {
-                    // If price presses near Resistance, Sellers win if rejected. Buyers win if held.
-                    if (c.high >= resistance - (range * 0.05)) { // Touched Resistance zone
-                        if (upperWick > body) seller_score += 3; // Strong Sellers (Long wick)
-                        else if (c.close > resistance) buyer_score += 5; // Strong Buyers (Close above)
-                        else seller_score += 1; // Weak Sellers
+                    if (c.high >= resistance - (range * 0.05)) {
+                        if (upperWick > body) seller_score += 3;
+                        else if (c.close > resistance) buyer_score += 5;
+                        else seller_score += 1;
                     }
                 } else if (active_level === "SUPPORT") {
-                    // If price presses near Support, Buyers win if bounced. Sellers win if broken.
-                    if (c.low <= support + (range * 0.05)) { // Touched Support zone
-                        if (lowerWick > body) buyer_score += 3; // Strong Buyers (Long lower wick)
-                        else if (c.close < support) seller_score += 5; // Strong Sellers (Close below)
-                        else buyer_score += 1; // Weak Buyers
+                    if (c.low <= support + (range * 0.05)) {
+                        if (lowerWick > body) buyer_score += 3;
+                        else if (c.close < support) seller_score += 5;
+                        else buyer_score += 1;
                     }
                 }
             });
 
-            // 3. Determine winner with strict margin
             let winner = "NO CLEAR WINNER";
             let margin = 0;
             if (buyer_score > seller_score) {
@@ -184,107 +168,112 @@
                 if (margin >= WINNER_MARGIN_PCT) winner = "SELLERS";
             }
 
-            // --- 5. THE SETUP ---
             let setup = "NO CLEAR SETUP";
             if (active_level === "RESISTANCE" && winner === "BUYERS") setup = "BREAKOUT POTENTIAL";
             else if (active_level === "RESISTANCE" && winner === "SELLERS") setup = "REJECTION POTENTIAL";
             else if (active_level === "SUPPORT" && winner === "BUYERS") setup = "BOUNCE POTENTIAL";
             else if (active_level === "SUPPORT" && winner === "SELLERS") setup = "BREAKDOWN POTENTIAL";
 
-            return {
-                symbol, status: "VALIDATED", reason: "N/A",
-                price: current, resistance, support,
-                distRes: distToRes.toFixed(2), distSup: distToSup.toFixed(2),
-                rangeWidthPct: rangeWidthPct.toFixed(3),
-                active_level, winner, setup,
-                bullishCandles, bearishCandles,
-                buyer_score: buyer_score.toFixed(1), seller_score: seller_score.toFixed(1),
-                margin: margin.toFixed(0) // Winner Margin %
-            };
+            return { tf, status: "VALIDATED", reason: "N/A", price: current, resistance, support, distRes: distToRes.toFixed(2), distSup: distToSup.toFixed(2), rangeWidthPct: rangeWidthPct.toFixed(3), active_level, winner, setup, bullishCandles, bearishCandles, buyer_score: buyer_score.toFixed(1), seller_score: seller_score.toFixed(1), margin: margin.toFixed(0) };
         }
 
         async function loadAll() {
-            updateState('FETCHING', 'Loading 25 symbols...');
+            updateState('FETCHING', 'Loading 25 symbols x 3 TFs...');
             const allData = [];
+
             for (const sym of SYMBOLS) {
-                const candles = await fetchOKX(sym);
-                allData.push(analyze(candles, sym));
+                let symbolData = { symbol: sym };
+                for (const tf of TFS) {
+                    const candles = await fetchOKX(sym, tf);
+                    symbolData[tf] = analyze(candles, sym, tf);
+                }
+                allData.push(symbolData);
             }
             updateState('VALIDATED', 'Done.');
 
             // --- RENDER DEBUG TABLE ---
             let debugRows = "";
             allData.forEach(d => {
-                const statusClass = d.status === 'VALIDATED' ? 'status-valid' : 'status-fail';
-                const isDataFail = d.status === 'DATA_FAILURE';
-                const p = formatPrice(d.price);
-                const sup = isDataFail ? "$0.00" : formatPrice(d.support);
-                const res = isDataFail ? "$0.00" : formatPrice(d.resistance);
+                const s15 = d["15m"];
+                const s1h = d["1H"];
+                const s4h = d["4H"];
+                const isDataFail = s15.status === 'DATA_FAILURE';
+                const p = formatPrice(s15.price);
                 
+                const getColor = (s) => {
+                    if (s.winner === 'BUYERS') return '#00c853';
+                    if (s.winner === 'SELLERS') return '#ff1744';
+                    return '#aaa';
+                };
+
                 debugRows += `<tr>
                     <td><strong>${d.symbol}</strong></td>
-                    <td class="${statusClass}">${d.status}</td>
-                    <td style="font-size:0.85em; color:#888;">${d.reason}</td>
+                    <td class="${s15.status === 'VALIDATED' ? 'status-valid' : 'status-fail'}">${s15.status}</td>
+                    <td style="font-size:0.85em; color:#888;">${s15.reason}</td>
                     <td>${p}</td>
-                    <td>${sup}</td>
-                    <td>${res}</td>
-                    <td>${isDataFail ? '0%' : d.rangeWidthPct + '%'}</td>
-                    <td>${isDataFail ? 'N/A' : d.distSup + '%'}</td>
-                    <td>${isDataFail ? 'N/A' : d.distRes + '%'}</td>
-                    <td><strong>${isDataFail ? 'N/A' : d.active_level}</strong></td>
-                    <td>${isDataFail ? 'N/A' : d.bullishCandles}</td>
-                    <td>${isDataFail ? 'N/A' : d.bearishCandles}</td>
-                    <td>${isDataFail ? 'N/A' : d.buyer_score}</td>
-                    <td>${isDataFail ? 'N/A' : d.seller_score}</td>
-                    <td>${isDataFail ? 'N/A' : d.margin + '%'}</td>
-                    <td><strong>${isDataFail ? 'N/A' : d.winner}</strong></td>
-                    <td><strong>${isDataFail ? 'N/A' : d.setup}</strong></td>
+                    <td>${formatPrice(s15.support)}</td>
+                    <td>${formatPrice(s15.resistance)}</td>
+                    <td>${s15.rangeWidthPct || 0}%</td>
+                    <td style="color:${getColor(s15)}">${s15.winner}</td>
+                    <td style="color:${getColor(s1h)}">${s1h.winner}</td>
+                    <td style="color:${getColor(s4h)}">${s4h.winner}</td>
+                    <td>${s15.setup}</td>
+                    <td>${s1h.setup}</td>
+                    <td>${s4h.setup}</td>
                 </tr>`;
             });
             
             document.getElementById('debug-root').innerHTML = `
                 <table class="raw-table">
-                    <tr><th>Symbol</th><th>Status</th><th>Reason</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>D2Sup%</th><th>D2Res%</th><th>Level</th><th>Bull</th><th>Bear</th><th>BuyScore</th><th>SellScore</th><th>Margin</th><th>Winner</th><th>Setup</th></tr>
+                    <tr><th>Symbol</th><th>Status</th><th>Reason</th><th>Price</th><th>Sup</th><th>Res</th><th>Range%</th><th>15m Win</th><th>1H Win</th><th>4H Win</th><th>15m Setup</th><th>1H Setup</th><th>4H Setup</th></tr>
                     ${debugRows}
                 </table>`;
 
-            // --- RENDER CARDS ---
-            const qualified = allData.filter(d => d.status === 'VALIDATED');
+            // --- RENDER CARDS (Only Validated 15m) ---
+            const qualified = allData.filter(d => d["15m"].status === 'VALIDATED');
             if (qualified.length === 0) {
-                document.getElementById('watchlist-container').innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ 0 qualified ranges found.</div>`;
+                document.getElementById('watchlist-container').innerHTML = `<div class="loading" style="color: #ff1744;">⚠️ 0 qualified 15m ranges found.</div>`;
                 return;
             }
             
             let cardHTML = "";
             qualified.forEach(d => {
-                const p = formatPrice(d.price);
-                const sup = formatPrice(d.support);
-                const res = formatPrice(d.resistance);
+                const s15 = d["15m"];
+                const s1h = d["1H"];
+                const s4h = d["4H"];
+                const p = formatPrice(s15.price);
+                const sup = formatPrice(s15.support);
+                const res = formatPrice(s15.resistance);
                 let setupClass = "setup-nc";
-                if (d.setup === "BREAKOUT POTENTIAL") setupClass = "setup-breakout";
-                else if (d.setup === "BOUNCE POTENTIAL") setupClass = "setup-bounce";
-                else if (d.setup === "BREAKDOWN POTENTIAL") setupClass = "setup-breakdown";
-                else if (d.setup === "REJECTION POTENTIAL") setupClass = "setup-rejection";
+                if (s15.setup === "BREAKOUT POTENTIAL") setupClass = "setup-breakout";
+                else if (s15.setup === "BOUNCE POTENTIAL") setupClass = "setup-bounce";
+                else if (s15.setup === "BREAKDOWN POTENTIAL") setupClass = "setup-breakdown";
+                else if (s15.setup === "REJECTION POTENTIAL") setupClass = "setup-rejection";
                 
-                cardHTML += `<div class="card" style="border-left-color: ${d.setup.includes('BREAKOUT') || d.setup.includes('BOUNCE') ? '#00c853' : d.setup.includes('BREAKDOWN') || d.setup.includes('REJECTION') ? '#ff1744' : '#555'};">
+                cardHTML += `<div class="card" style="border-left-color: ${s15.setup.includes('BREAKOUT') || s15.setup.includes('BOUNCE') ? '#00c853' : s15.setup.includes('BREAKDOWN') || s15.setup.includes('REJECTION') ? '#ff1744' : '#555'};">
                     <div class="header">
                         <span style="font-size: 1.1em;">${d.symbol}</span>
-                        <span class="badge ${d.winner === 'BUYERS' ? 'buyers' : d.winner === 'SELLERS' ? 'sellers' : 'neutral'}">
-                            ${d.winner === 'BUYERS' ? '🟢' : d.winner === 'SELLERS' ? '🔴' : '⚪'} ${d.winner}
+                        <span class="badge ${s15.winner === 'BUYERS' ? 'buyers' : s15.winner === 'SELLERS' ? 'sellers' : 'neutral'}">
+                            ${s15.winner === 'BUYERS' ? '🟢' : s15.winner === 'SELLERS' ? '🔴' : '⚪'} ${s15.winner}
                         </span>
                     </div>
                     <div class="price">${p}</div>
                     <div class="grid">
-                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">${res}</span><br><small>(${d.distRes}% away)</small></div>
-                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">${sup}</span><br><small>(${d.distSup}% away)</small></div>
+                        <div class="stat-box"><small>Resistance</small><span style="color:#00c853;">${res}</span><br><small>(${s15.distRes}% away)</small></div>
+                        <div class="stat-box"><small>Support</small><span style="color:#ff1744;">${sup}</span><br><small>(${s15.distSup}% away)</small></div>
+                    </div>
+                    <div class="tf-info">
+                        <span>15m: <strong style="color:${s15.winner === 'BUYERS' ? '#00c853' : s15.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${s15.winner}</strong></span>
+                        <span>1H: <strong style="color:${s1h.winner === 'BUYERS' ? '#00c853' : s1h.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${s1h.winner}</strong></span>
+                        <span>4H: <strong style="color:${s4h.winner === 'BUYERS' ? '#00c853' : s4h.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${s4h.winner}</strong></span>
                     </div>
                     <div style="margin-top: 5px; color: #aaa; font-size: 0.9em;">
-                        <div>ACTIVE LEVEL: <strong>${d.active_level}</strong></div>
-                        <div>WINNER: <strong style="color: ${d.winner === 'BUYERS' ? '#00c853' : d.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${d.winner}</strong></div>
-                        <div class="setup-tag ${setupClass}">${d.setup}</div>
+                        <div>ACTIVE LEVEL: <strong>${s15.active_level}</strong></div>
+                        <div>15m WINNER: <strong style="color: ${s15.winner === 'BUYERS' ? '#00c853' : s15.winner === 'SELLERS' ? '#ff1744' : '#aaa'};">${s15.winner}</strong></div>
+                        <div class="setup-tag ${setupClass}">${s15.setup}</div>
                     </div>
                     <div style="margin-top:10px; font-size:0.85em; color:#888;">
-                        <u>EVIDENCE (Weighted Last 5):</u> Bull: ${d.bullishCandles} | Bear: ${d.bearishCandles}. <br>Score: ${d.buyer_score} / ${d.seller_score} (Margin: ${d.margin}%)
+                        <u>15m EVIDENCE:</u> Bull: ${s15.bullishCandles} | Bear: ${s15.bearishCandles}. Score: ${s15.buyer_score} / ${s15.seller_score} (Margin: ${s15.margin}%)
                     </div>
                 </div>`;
             });
