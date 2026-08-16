@@ -96,19 +96,19 @@
         function analyze(candles, symbol, tf) {
             if (!candles) return { tf, status: "DATA_FAILURE", reason: "Fetch returned null", price: 0 };
             if (candles.error) return { tf, status: "DATA_FAILURE", reason: candles.error, price: 0 };
-            if (candles.length < 20) return { tf, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/20)`, price: 0 };
+            // We need at least 17 candles to skip the forming one and get 16 completed
+            if (candles.length < 17) return { tf, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/17 min)`, price: 0 };
 
-            const lastCandle = candles[candles.length - 1];
-            if (!lastCandle) return { tf, status: "DATA_FAILURE", reason: "Last candle missing", price: 0 };
-            if (lastCandle.close <= 0 || lastCandle.high <= 0 || lastCandle.low <= 0) {
-                return { tf, status: "DATA_FAILURE", reason: `Invalid price`, price: 0 };
-            }
-
-            const highs = candles.map(c => c.high);
-            const lows = candles.map(c => c.low);
+            // --- STRICTLY DEFINE 16 COMPLETED 15M CANDLES (4 HOURS) ---
+            // candlestick[0] is currently forming. candlestick[1] to [16] are completed.
+            const rangeCandles = candles.slice(1, 17);
+            const highs = rangeCandles.map(c => c.high);
+            const lows = rangeCandles.map(c => c.low);
             const resistance = Math.max(...highs);
             const support = Math.min(...lows);
-            const current = lastCandle.close;
+            
+            // Use the LAST COMPLETED CLOSE for determining the current Level
+            const current = candles[1].close;
             const range = resistance - support;
             
             if (range <= 0) return { tf, status: "RANGE_FAILURE", reason: "Range width is 0", price: current };
@@ -125,7 +125,7 @@
             if (distToRes < distToSup) active_level = "RESISTANCE";
             else if (distToSup < distToRes) active_level = "SUPPORT";
 
-            // SAFETY INVALIDATION CHECK
+            // --- FROZEN INVALIDATION CHECK (Strict Close-Only Rule) ---
             if (current <= support) {
                 return { 
                     tf, status: "VALIDATED", reason: "N/A",
@@ -151,9 +151,11 @@
                 };
             }
 
+            // --- EVALUATE WINNER (Last 5 COMPLETED 15m Candles) ---
+            // Fixed bug: candles[0] is forming. We explicitly use candles[1] to candles[6] for the last 5 completed.
+            const lookback = candles.slice(1, 6);
             let buyer_score = 0, seller_score = 0;
             let bullishCandles = 0, bearishCandles = 0;
-            const lookback = candles.slice(-5);
             const maxBody = Math.max(...lookback.map(c => Math.abs(c.close - c.open)));
 
             lookback.forEach(c => {
@@ -169,6 +171,7 @@
                     seller_score += (body / maxBody) * 10;
                 }
 
+                // Measure pressure against the FROZEN Support/Resistance
                 if (active_level === "RESISTANCE") {
                     if (c.high >= resistance - (range * 0.05)) {
                         if (upperWick > body) seller_score += 3;
@@ -230,10 +233,13 @@
                 if (result.status === 'fulfilled') {
                     groupedData[symbol][tf] = analyze(result.value, symbol, tf);
                 } else {
+                    // FIX: Added the missing winner and setup properties to stop "undefined"
                     groupedData[symbol][tf] = { 
                         tf, status: "DATA_FAILURE", 
                         reason: `OKX Fetch Failed: ${result.reason?.message || 'Network Error'}`, 
-                        price: 0 
+                        price: 0,
+                        winner: "NO CLEAR WINNER",
+                        setup: "N/A"
                     };
                 }
             }
