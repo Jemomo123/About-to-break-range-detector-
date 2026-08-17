@@ -62,7 +62,7 @@
     <script>
         const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "PEPEUSDT", "BONKUSDT", "SHIBUSDT", "USELESSUSDT", "SPACEUSDT", "MOVEUSDT", "ZECUSDT", "SPXUSDT", "PEOPLEUSDT", "PENGUUSDT", "FARTCOINUSDT", "LINEAUSDT", "MEMEUSDT", "PUMPUSDT", "AIXBTUSDT", "BRETTUSDT", "FOGOUSDT", "GOOGLUSDT", "FLOKIUSDT", "IWMUSDT", "MOODENGUSDT", "NEARUSDT"];
         const TFS = ["15m", "1H", "4H"];
-        const MIN_RANGE_THRESHOLD_PCT = 0.5;
+        const RANGE_THRESHOLD_PCT = 1.5;          // changed from 0.5 to 1.5
         const WINNER_MARGIN_PCT = 20;
 
         function updateState(state, msg) {
@@ -94,51 +94,42 @@
             return "$" + price.toFixed(2);
         }
 
+        // ===== NEW analyze() – 20 candles, 1.5% price-width threshold =====
         function analyze(candles, symbol, tf) {
             if (!candles) return { tf, status: "DATA_FAILURE", reason: "Fetch returned null", price: 0 };
             if (candles.error) return { tf, status: "DATA_FAILURE", reason: candles.error, price: 0 };
-            if (candles.length < 17) return { tf, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/17 min)`, price: 0 };
+            if (candles.length < 21) return { tf, status: "DATA_FAILURE", reason: `Insufficient candles (${candles.length}/21 min)`, price: 0 };
 
-            // --- 1. STRICTLY DEFINE 16 COMPLETED 15M CANDLES ---
-            const rangeCandles = candles.slice(1, 17);
+            // --- 1. 20 COMPLETED CANDLES (skip the most recent forming candle) ---
+            const rangeCandles = candles.slice(1, 21);   // indices 1..20 → 20 candles
             const highs = rangeCandles.map(c => c.high);
             const lows = rangeCandles.map(c => c.low);
             const resistance = Math.max(...highs);
             const support = Math.min(...lows);
-            
-            const current = candles[1].close;
+            const current = candles[1].close;            // price of the first completed candle
+
             const range = resistance - support;
-            
-            if (range <= 0) return { tf, status: "RANGE_FAILURE", reason: "Range width is 0", price: current };
+            if (range <= 0) return { tf, status: "NO_VALID_RANGE", reason: "Range width is zero", price: current };
 
             const rangeWidthPct = (range / support) * 100;
-            if (rangeWidthPct < MIN_RANGE_THRESHOLD_PCT) {
-                return { tf, status: "RANGE_FAILURE", reason: `Range too narrow (${rangeWidthPct.toFixed(3)}% < 0.5%)`, price: current };
-            }
 
-            // --- 2. RANGE QUALIFICATION (2-Sided Interaction Rule) ---
-            // FIX: Added tiny epsilon (0.00000001) to ensure floating point rounding doesn't miss the 20% boundary
-            const upperZone = resistance - (range * 0.20) + 0.00000001;
-            const lowerZone = support + (range * 0.20) - 0.00000001;
-            let upperTouches = 0;
-            let lowerTouches = 0;
-
-            rangeCandles.forEach(c => {
-                if (c.high >= upperZone) upperTouches++;
-                if (c.low <= lowerZone) lowerTouches++;
-            });
-
-            // Strict fail: If we don't have at least 2 touches on BOTH sides, it is a Trending market.
-            if (upperTouches < 2 || lowerTouches < 2) {
+            // --- 2. RANGE CLASSIFICATION: ≤1.5% → RANGE, else NOT A RANGE ---
+            if (rangeWidthPct > RANGE_THRESHOLD_PCT) {
                 return {
-                    tf, status: "NO_VALID_RANGE",
-                    reason: `NO VALID RANGE - TRENDING (Upper: ${upperTouches}, Lower: ${lowerTouches})`,
-                    price: current, 
-                    winner: "N/A", setup: "N/A", active_level: "N/A"
+                    tf,
+                    status: "NO_VALID_RANGE",
+                    reason: `Range too wide (${rangeWidthPct.toFixed(3)}% > ${RANGE_THRESHOLD_PCT}%)`,
+                    price: current,
+                    resistance,
+                    support,
+                    rangeWidthPct: rangeWidthPct.toFixed(3),
+                    winner: "N/A",
+                    setup: "N/A",
+                    active_level: "N/A"
                 };
             }
 
-            // --- 3. LEVEL (WHERE is the battle?) ---
+            // --- 3. VALID RANGE – freeze levels and run battle logic (unchanged) ---
             const distToRes = ((resistance - current) / current) * 100;
             const distToSup = ((current - support) / current) * 100;
 
@@ -146,7 +137,7 @@
             if (distToRes < distToSup) active_level = "RESISTANCE";
             else if (distToSup < distToRes) active_level = "SUPPORT";
 
-            // --- 4. FROZEN INVALIDATION CHECK (Strict Close-Only Rule) ---
+            // Invalidation checks (breakout/breakdown) – unchanged
             if (current <= support) {
                 return { 
                     tf, status: "VALIDATED", reason: "N/A",
@@ -172,7 +163,7 @@
                 };
             }
 
-            // --- 5. WINNER (WHO is winning? - Last 5 COMPLETED 15m Candles) ---
+            // --- Winner detection (last 5 candles) – unchanged ---
             const lookback = candles.slice(1, 6);
             let buyer_score = 0, seller_score = 0;
             let bullishCandles = 0, bearishCandles = 0;
